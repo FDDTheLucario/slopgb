@@ -179,16 +179,20 @@ impl Ppu {
                 // CGB double-speed: the uniform render-frame read-debt is 4
                 // half-dots (the DS M-cycle is 2 dots, so cc+0→cc+4 is 4hd) for the
                 // pure-render registers. SCX (FF43) POST-match is the exception:
-                // like the SS post-match arm above, a write landing AFTER the
-                // fine-scroll comparator lock (`hunt_done && dot > hunt_match_dot`)
+                // like the SS post-match arm above, a write landing ON OR AFTER the
+                // fine-scroll comparator lock (`hunt_done && dot >= hunt_match_dot`)
                 // is a pure COARSE/tile shift with no mode-3-length effect, but on
                 // the DS grid the uniform 4hd over-shoots the commit by exactly one
                 // whole dot past the post-lock commit. Debt 2 → 6hd re-lands it,
                 // recovering the 4 `scx_during_m3_ds` post-match fine-scroll pixel
-                // legs (scx_0060c0/0063c0 `_5`/`_8`). Pre-match / line-start DS SCX
-                // writes keep 4.
+                // legs (scx_0060c0/0063c0 `_5`/`_8`). The match dot itself counts as
+                // post-lock: the comparator resolves against the OLD SCX in that
+                // dot's render tick and the write commits behind it (the same
+                // ordering the same-dot hunt re-open in regs.rs FF43 keys on), which
+                // is what separates `scx_0360c0/_ds_6` from its `_ds_7` sibling.
+                // Writes strictly before the lock keep 4.
                 match addr {
-                    0xFF43 if self.render.hunt_done && self.dot > self.render.hunt_match_dot => 2,
+                    0xFF43 if self.render.hunt_done && self.dot >= self.render.hunt_match_dot => 2,
                     _ => 4,
                 }
             } else {

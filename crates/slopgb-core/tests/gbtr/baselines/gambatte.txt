@@ -390,13 +390,24 @@ gambatte/oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D.gbc [Cgb]
 # scx_during_m3: the single-speed half of this cluster is CLOSED (the DMG
 # pre-output map lead + the never-matched prefill hunt not advancing the map
 # column; docs/hardware-state/ppu-render.md). The `_ds_*` rows below are NOT
-# proven class A — the "sub-cycle phase" reason was measured false 2026-07-30
-# (the rotation legs commit on eight distinct whole dots, all the same half).
-# The holdback now runs at double speed too. The one exception is line 0 with
-# SCX&7 == 0, which exists solely for old/offset_3/_ds_1: that ROM takes no
-# VBlank interrupt, so its CPU free-runs into line 0 and dispatches STAT at
-# dot 10 instead of 6, landing the line's $c0 write 4 dots late. A CPU-phase
-# fingerprint, not a render law — see ppu-render.md.
+# class A — the "sub-cycle phase" reason was measured false 2026-07-30 (the
+# rotation legs commit on eight distinct whole dots, all the same half), and
+# 27 of them were recovered 2026-07-31 on whole-dot terms: the double-speed
+# map lead is 2 like single speed (lines 1-143), and a write landing ON the
+# fine-scroll comparator lock takes the post-lock commit debt.
+# The holdback runs at double speed too.
+#
+# The 11 that remain are all first/last-tile rows in the fine-scroll != 0
+# directories, plus line-0 rows. Their references want the LINE-0 STAT
+# dispatch 2 dots earlier than ours: our line-0 OAM interrupt source pulses at
+# the visible mode-2 edge (dot 4) with no prior-line carryover, so these
+# STAT-driven kernels write SCX 4 dots later on line 0 than on lines 1-143
+# where hardware wants 2. Moving that pulse recovers 49 rows but costs 11 GREEN
+# double-speed rows (m2enable/lyc153int_m2irq/lycEnable/window ly0 + scy_ds_2 +
+# late_wx_ds_1), and the split within that family tracks `lcdoffset` — a
+# CPU/PPU dot-phase term, not the pulse dot itself. Until that discriminator
+# exists the map lead carries an `ly == 0` exemption instead. See
+# docs/hardware-state/ppu-render.md.
 #
 # The one survivor that is NOT double speed is `scx_during_m3_spx2 [Cgb]`, a
 # CGB OBJ-palette VALUE divergence: its reference pixel is raw $4261, ours
@@ -406,30 +417,12 @@ gambatte/oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D.gbc [Cgb]
 # row. `scx_m3_extend_1 [Dmg]` was recovered 2026-07-30.
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_2.gbc [Cgb]
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_3.gbc [Cgb]
-gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_6.gbc [Cgb]
-gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_7.gbc [Cgb]
 gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_1.gbc [Cgb]
-gambatte/scx_during_m3/old/scx_during_m3_ds_2.gbc [Cgb]
-gambatte/scx_during_m3/old/scx_during_m3_ds_3.gbc [Cgb]
-gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_2.gbc [Cgb]
-gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_3.gbc [Cgb]
 gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_1.gbc [Cgb]
-gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_2.gbc [Cgb]
-gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_3.gbc [Cgb]
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_1.gbc [Cgb]
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_2.gbc [Cgb]
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_6.gbc [Cgb]
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_7.gbc [Cgb]
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_2.gbc [Cgb]
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_3.gbc [Cgb]
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_6.gbc [Cgb]
-gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_7.gbc [Cgb]
 gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_2.gbc [Cgb]
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_3.gbc [Cgb]
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_6.gbc [Cgb]
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_7.gbc [Cgb]
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_1.gbc [Cgb]
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_2.gbc [Cgb]
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_4.gbc [Cgb]
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_5.gbc [Cgb]
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_6.gbc [Cgb]
@@ -610,7 +603,6 @@ gambatte/window/on_screen/wxA6_wy01_weoff_ly02_weon_ly60.gbc [Dmg]
 # scx_during_m3 spx0-2, scy spx08/0A [Dmg], sprites/space wx7_ds,
 # window/late_disable_spx10). What remains is sub-dot residue of those
 # models; documented as swaps rather than reverted.
-gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_3.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp39_2_dmg08_out0_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/sprite_late_enable_spx1A_2_dmg08_out0.gb [Dmg]
 gambatte/sprites/sprite_late_enable_spx1B_2_dmg08_out0.gb [Dmg]
@@ -712,14 +704,6 @@ gambatte/m1/ly143_late_m2enable_ds_lcdoffset1_1_cgb04c_out3.gbc [Cgb]
 gambatte/m1/lyc143_late_m2enable_lycdisable_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/m2enable/lyc1_m2irq_late_lycdisable_ds_1_cgb04c_out2.gbc [Cgb]
 gambatte/m2enable/m2_late_m0disable_ds_1_cgb04c_out2.gbc [Cgb]
-gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_5.gbc [Cgb]
-gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_7.gbc [Cgb]
-gambatte/scx_during_m3/old/scx_during_m3_ds_6.gbc [Cgb]
-gambatte/scx_during_m3/old/scx_during_m3_ds_7.gbc [Cgb]
-gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_6.gbc [Cgb]
-gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_7.gbc [Cgb]
-gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_6.gbc [Cgb]
-gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_7.gbc [Cgb]
 gambatte/scy/scy_during_m3_ds_6.gbc [Cgb]
 gambatte/window/late_disable_ds_1_cgb04c_out0.gbc [Cgb]
 gambatte/window/late_disable_late_scx00_wx0f_ds_1_cgb04c_out0.gbc [Cgb]

@@ -95,7 +95,9 @@ Remaining (not yet pixel-perfect) legs are mostly:
 
 Single-speed status: every row in this cluster passes except
 `scx_during_m3_spx2 [Cgb]`, which is a CGB OBJ-palette value divergence, not a
-fetch or timing row (see the last section). The `_ds_` ladder is class A.
+fetch or timing row (see the last section). The `_ds_` ladder is **not** class A
+— 27 of its rows fell to whole-dot terms on 2026-07-31, see
+"The double-speed ladder, mostly closed" below.
 
 The BG tile-map column is derived from the pixel output position, not from a
 tile counter. SameBoy `display.c` `GB_FETCHER_GET_TILE_T1` forms it as
@@ -438,7 +440,109 @@ visible). The gate is `ly >= 1 || SCX&7 != 0`, pinned from both sides in
 What would settle it properly: our line-0 dispatch phase depends on the
 VBlank-region (ly 144 → 0) timing this ROM free-runs through. If that phase is
 off by an M-cycle, the exception disappears on its own — that is the
-`lyc153`/`ly0` family, not this cluster.
+`lyc153`/`ly0` family, not this cluster. The next section measures that phase
+directly and finds it is a **general** property of the cluster, not one ROM's.
+
+### The double-speed ladder, mostly closed (LANDED 2026-07-31, +27 rows)
+
+Three whole-dot terms, all double-speed only, found by tracing the tile-number
+read against the SCX write-commit dot and then classifying every leg against
+what the reference actually accepts (`colreq`). Round matrix 103 → 130 of 141,
+whole battery **27 baselined rows recovered, zero regressions**, golden drift
+confined to 35 `scx_during_m3/*_ds_*` `[Cgb]` keys.
+
+**1. The double-speed map lead is 2, exactly like CGB single speed**
+(`map_scx_formed`). The `ds` special case that forced it to 0 is gone. The
+earlier sweep that scored DS lead 0 best was taken before the DS post-match
+staging debt landed, so its commit dots were stale.
+
+**2. A write landing ON the fine-scroll comparator lock takes the post-lock
+commit debt** (`stage_write_dots`, DS FF43: `dot >= hunt_match_dot`, was `>`).
+The comparator resolves against the OLD SCX in that dot's render tick and the
+write commits behind it — the same ordering the same-dot hunt re-open in
+`regs.rs` FF43 already keys on. This is what separates `scx_0360c0/_ds_6` from
+`_ds_7`: raw writes 92 and 94, hunt lock at 92, and the reference wants 92
+visible to the dot-98 fetch and 94 not.
+
+**3. Line 0 keeps lead 0** — a stated exemption, not a law; see below.
+
+#### The measurement that drove it (keep this, it is the whole derivation)
+
+The raw CPU write dots are identical in every `scx_*c0` directory: the `$60`
+write steps 82, 84, …, 96 across rungs 1-8 and the `$c0` write steps 240, 238,
+…, 226. Only the staging debt differs. The tile-number reads are at dots 92
+(`fetch_x` 0), 98 (1), 234 (18) and 242 (19).
+
+`colreq` on the `[Cgb]` references gives, per rung, whether the write must be
+visible to a given read — all DISCRIMINATING, none degenerate:
+
+| read | must see | must not see | implied lead |
+|---|---|---|---|
+| 92 (fine-0 dirs) | commit 88 | commit 90 | 2-3 |
+| 234 | commit 231 | commit 233 | 1-2 |
+| 242 | commit 239 | commit 241 | 1-2 |
+| 98 (fine-3 dirs) | commit 95 | commit 97 | 1-2 (needs term 2) |
+
+Lead 2 satisfies all four. Term 2 is what pulls the fine-3 dirs' `_ds_6` commit
+from 96 to 95 so its column comes out even.
+
+#### OPEN, and it is not a render term: the line-0 STAT dispatch is 4 dots late
+
+These kernels are pure STAT handlers (`$0048` = `ei; jp $1000`, then a fixed
+NOP sled), so every SCX write on a line is rigid relative to that line's
+dispatch. Measured with an ack probe on `scx_0060c0/_ds_4 [Cgb]`: the ROM takes
+**only** STAT (2169 acks, all bit 1, zero VBlank), and
+
+```
+RISE if=2 ly=1..143 dot=0   ->  ACK ly=N dot=6
+RISE if=2 ly=0      dot=4   ->  ACK ly=0 dot=10
+```
+
+so every line-0 write lands 4 dots later than the same rung on lines 1-143 —
+confirmed on all eight rungs of every directory, and at single speed too. The
+`old/offset_3/_ds_1` disassembly above described this as one ROM's control-flow
+fingerprint; it is not. It is the line-0 OAM interrupt source having no
+prior-line carryover (`update_mode_for_interrupt`: lines 1-143 hold source 2
+across dots 0-3, line 0 pulses at the visible mode-2 edge, dot 4).
+
+The references want that dispatch **2 dots earlier**, uniformly: with the
+line-0 writes 2 dots earlier a single lead of 2 satisfies line 0 and lines
+1-143 alike, and no exemption is needed. Measured directly — pulsing the line-0
+source at dot 2 in double speed (or holding it across dots 2-4) takes the round
+matrix to 136/141 and the whole battery to **49 baselined rows recovered**,
+including `bgtiledata_spx09_ds_*`, `bgtilemap_spx0{8,9}_ds_*`,
+`scx_attrib_spx1_ds`, `scy_during_m3_ds_5/6` and `scy_spx08_ds_3/4`.
+
+**It is not landable as-is: it costs 11 GREEN double-speed rows** —
+`ly0/lycint152_m2irq_ds_1`, `lyc153int_m2irq_{ifw,late_retrigger}_ds_1`,
+`lycEnable/lycwirq_trigger_ly00_stat50_ds_1`, `m2enable/{disable_ly0_ds_1,
+lyc0_late_m2enable_lycdisable_ds_1, m2_late_m1disable_ly0_ds_1}`,
+`miscmstatirq/lycstatwirq_trigger_ly00_10_50_ds_1`,
+`window/late_enable_ly0_ds_2`, plus the pixel rows `scy_during_m3_ds_2` (8 px)
+and `window/on_screen/late_wx_ds_1` (160 px).
+
+The split inside that family is the lead worth chasing: the SAME ROM's
+`lcdoffset1` rung goes the other way. `lycwirq_trigger_ly00_stat50_ds_1` wants
+the old (later) edge while `..._ds_lcdoffset1_2` wants the new one, and
+identically for `lycstatwirq_trigger_ly00_10_50`. `lcdoffset` shifts the LCD-on
+phase by one dot, i.e. the CPU-vs-PPU dot phase — so the discriminator is that
+phase, not the pulse dot. Until it exists the map lead carries an `ly == 0`
+exemption instead, and both the exemption and the older holdback carve-out
+dissolve the moment the line-0 edge is phase-correct.
+
+#### The 11 rows still failing, and what each needs
+
+| row(s) | shape | note |
+|---|---|---|
+| `old/offset_3/_ds_2`, `scx_0360c0/_ds_1`, `_ds_2`, `scx_0367c0/_ds_2`, `scx_0063c0/_ds_1`, `old/revoffset_3/_ds_1`, `scx_0761c0/_ds_1`, `_ds_4`, `_ds_5` | line 0 only | the line-0 dispatch phase above |
+| `scx_0761c0/_ds_6` | first tile, lines 1-143 | its `$61` write commits exactly on the hunt lock dot 96 but is *pre*-lock by raw dot (92 < 96), so term 2 does not reach it; the reference wants it visible at the dot-98 read |
+| `old/offset_3/_ds_3` | 2723 px | EXCEED — SameBoy misses it too |
+
+#### Measured dead end (2026-07-31)
+
+The double-speed **sprite-line** map lead stays 0: swept 0..3 against the spx
+rows with the two landed terms in place — 46, 46, 45, 45 of 55. The
+single-speed sprite exemption carries over unchanged.
 
 #### SUPERSEDED: the DS residual as "the whole-dot contract" (kept for its measurements)
 

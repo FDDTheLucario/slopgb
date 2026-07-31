@@ -306,7 +306,7 @@ impl Ppu {
                         LCDC_BG_MAP,
                         self.ly.wrapping_add(scy) >> 3,
                         bg_map_col(
-                            map_scx_formed(&self.render, self.ds, self.model.is_cgb()),
+                            map_scx_formed(&self.render, self.ds, self.model.is_cgb(), self.ly),
                             self.render.lx,
                             self.render.fetch_x,
                             self.model.is_cgb(),
@@ -456,12 +456,12 @@ fn bg_map_col(
 }
 
 /// SCX as of N fetcher advances before the tile-number read.
-fn map_scx_formed(r: &Render, ds: bool, cgb: bool) -> u8 {
+fn map_scx_formed(r: &Render, ds: bool, cgb: bool, ly: u8) -> u8 {
     // The BG map address is formed two fetcher steps before the VRAM access,
     // so an SCX write inside that window cannot retarget the fetch already in
-    // flight. The lead is single-speed only, and does not hold on a line that
-    // selected sprites: an OBJ fetch stalls the BG fetcher and moves the
-    // address formation with it (gambatte `scx_during_m3_spx*`).
+    // flight. It holds at both speeds, but not on a line that selected
+    // sprites: an OBJ fetch stalls the BG fetcher and moves the address
+    // formation with it (gambatte `scx_during_m3_spx*`).
     //
     // Before the line's first pixel ships (`lx == 0`) the DMG pipeline runs a
     // dot further back than the CGB's — the same offset its `bg_map_col`
@@ -469,7 +469,18 @@ fn map_scx_formed(r: &Render, ds: bool, cgb: bool) -> u8 {
     // earlier still (gambatte `scx_during_m3` rounds 4/5 of every `scx_03*`
     // directory, whose first full tile must miss a write committing one dot
     // after the CGB's cut-off).
-    let d = if ds || r.n_sprites > 0 {
+    //
+    // Double speed drops the lead on LINE 0 only. That line's STAT dispatch
+    // runs 4 dots later than lines 1-143 — its OAM interrupt source has no
+    // prior-line carryover, so the pulse fires at the visible mode-2 edge
+    // (dot 4) instead of leading it (`update_mode_for_interrupt`) — and these
+    // STAT-driven kernels move every SCX write on the line with it. The
+    // `scx_during_m3/*_ds_*` references separate the rungs 2 dots earlier than
+    // that dispatch puts them, so line 0 reads the ring at the write's own dot.
+    // (Moving the line-0 pulse itself is what the references really want, but
+    // the pulse dot is pinned by 11 double-speed `m2enable`/`lyc153int_m2irq`/
+    // `lycEnable` rows — see docs/hardware-state/ppu-render.md.)
+    let d = if r.n_sprites > 0 || (ds && ly == 0) {
         0
     } else if r.lx == 0 && !cgb {
         3

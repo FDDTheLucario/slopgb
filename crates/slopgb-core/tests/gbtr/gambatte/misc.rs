@@ -366,6 +366,33 @@ fn eager_scx_during_m3_map_column_passes() {
             "_cgb04c",
             Model::Cgb,
         ),
+        (
+            // Double speed takes the same map lead 2 as CGB single speed: this
+            // row's `$c0` write commits at dot 241 and its dot-242 last-tile
+            // read must NOT see it (lead 0 does, and lands column 11).
+            "gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_2.gbc",
+            "_cgb04c",
+            Model::Cgb,
+        ),
+        (
+            // The other side of that lead: line 0's STAT dispatch runs 4 dots
+            // later than lines 1-143, so its writes move with it and the lead
+            // drops back to 0 there — at lead 2 this row's first tile misses
+            // its dot-90 commit.
+            "gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_1.gbc",
+            "_cgb04c",
+            Model::Cgb,
+        ),
+        (
+            // A double-speed SCX write landing ON the fine-scroll comparator
+            // lock takes the POST-lock commit debt (`stage_write_dots`
+            // `dot >= hunt_match_dot`): raw dot 92 == the lock, and its
+            // dot-98 first-tile read must see it. With `>` it commits a dot
+            // late and the tile lands on an odd column.
+            "gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_6.gbc",
+            "_cgb04c",
+            Model::Cgb,
+        ),
     ];
     for (rel, suffix, model) in rows {
         let path = root.join(rel);

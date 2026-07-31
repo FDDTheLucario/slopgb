@@ -21,14 +21,14 @@
   - passing/orphaned entry = stale
   - both fail the run.
 - A whole-collection inventory guard pins every on-disk ROM claimed-or-exempt exactly once.
-- 567 baselined floor cases (per-suite below), all 218 suite tests green. The
+- 540 baselined floor cases (per-suite below), all 218 suite tests green. The
   harness emits no total case count, so re-derive one before citing it.
 
 ### Per-suite breakdown (cases/baselined)
 
 Baselined counts are the live entry counts in `tests/gbtr/baselines/*.txt` plus
 each suite's inline `BASELINE` const — one entry is one rom×model case, so they
-sum to the 567 above. The Cases column predates the current tree and is *not*
+sum to the 540 above. The Cases column predates the current tree and is *not*
 verified; re-count it before citing.
 
 | Suite | Cases (unverified) | Baselined |
@@ -36,7 +36,7 @@ verified; re-count it before citing.
 | acid | 4 | 1 |
 | age | 49 | 33 |
 | blargg | 82 | 1 |
-| gambatte | 5330 | 461 |
+| gambatte | 5330 | 434 |
 | gbmicrotest | 483 | 7 |
 | mealybug | 55 | 23 |
 | mooneye2022 | 439 | 1 |
