@@ -9,7 +9,9 @@
 //! attachment is machine *construction*, like the ROM itself — a state loads
 //! into a machine already built with the same boot-ROM-or-not configuration),
 //! and the debugger-only fields (watchpoints, profiler, exception mask) —
-//! those are live UI state, left untouched by a load. Every other field is
+//! those are live UI state, left untouched by a load; and `dma_dispatch_hold`
+//! (set and cleared inside a single interrupt dispatch, so it is always false
+//! at the instruction boundary a state is taken on). Every other field is
 //! serialized, including the unused fields (`m0_halt_hold`,
 //! `ack_squash_deadline_t`, `wake_skew`, `machine_now`, `vram_dma_req_pre`,
 //! `stat_vis_from_t`, `halt_ly_phase`, `deferred_squash`) that always stay at

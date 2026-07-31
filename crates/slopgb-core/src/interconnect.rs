@@ -223,6 +223,11 @@ pub struct Interconnect {
     wake_skew: u32,
     machine_now: u64,
     vram_dma_req_pre: bool,
+    /// The running CPU's interrupt dispatch is mid-sequence: a flagged VRAM
+    /// DMA block must not steal the bus until it finishes (SameBoy calls
+    /// `GB_hdma_run` only after an opcode fetch). Set and cleared inside one
+    /// dispatch, so it is always false at an instruction boundary.
+    dma_dispatch_hold: bool,
     stat_vis_from_t: u64,
     halt_ly_phase: u8,
     /// STAT IF bit raised by the PPU in the *current* M-cycle's second
@@ -445,6 +450,7 @@ impl Interconnect {
             wake_skew: 0,
             machine_now: 0,
             vram_dma_req_pre: false,
+            dma_dispatch_hold: false,
             stat_vis_from_t: 0,
             halt_ly_phase: 0,
             if_stat_late: 0,

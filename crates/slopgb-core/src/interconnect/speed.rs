@@ -81,45 +81,37 @@ impl Interconnect {
         // derivation and the pinning ROMs).
         match bit {
             0 | 1 => {
-                // lcd_.update(cc + 2), no isCgb term: 2 dots into the
-                // next machine tick on both families and at both speeds
-                // (in double speed that is the whole 2-dot tick). The
-                // line-anchored rises' single-speed second-half emission
-                // dots stay OUT of reach — see the field docs.
                 self.ack_squash_mask = 1 << bit;
                 self.ack_squash_ticks = 0;
-                // SameBoy's ack is the bare IF clear at the flushed pending−2
-                // instant (sm83_cpu.c) with no source re-sync window, so a
-                // STAT/VBlank rise 1-2 dots past the ack is DELIVERED (the six
-                // retrigger rows: `late_m0irq_retrigger_ds_1` rise ack+2 ·
-                // `_scx1_1` ack+1 · `m2int_m2irq_late_retrigger_1` next-line pulse
-                // ack+2 · `lyc153int_m2irq_late_retrigger_1` line-0 pulse ack+2 ·
-                // `lycint143_m1irq_late_retrigger_ds_1` m1 re-rise ack+1 ·
-                // `lycint_vblankirq_late_retrigger_ds_1` vblank IF ack+1..2). A
-                // rise at/before the ack still loses: it folded during the
-                // dispatch advance and the ack clears it (the `_2` siblings).
-                // The read-frame enters the STAT/OAM ISR — and fires this ack —
-                // the read-debt earlier than the gambatte cc+4 frame, so widen the
-                // squash window by that shift so the retrigger stays consumed
-                // (irq_precedence `late_m0irq_retrigger_2`/`_scx1_2`/`_ds_2`, want
-                // E0) while the one-M-cycle-later `_1` siblings land outside it and
-                // DELIVER (want E2). DS uses +1 (window 3) for the LYC/mode-2/
-                // mode-1/vblank families; the MODE-0 (HBLANK) retrigger family
-                // (`late_m0irq_retrigger`) needs window 4 — HBLANK is the enabled
-                // STAT source (`stat_src_hblank`) ONLY for those rows.
+                // SameBoy clears IF two T-cycles into the PC-low push's
+                // M-cycle (sm83_cpu.c: `pending_cycles -= 2`, flush, then the
+                // `&= ~(1 << bit)`), with no source re-sync window: a
+                // STAT/VBlank rise past that instant is DELIVERED and re-sets
+                // IF (the six `late_*_retrigger` `_1` rows, want E2), while a
+                // rise at or before it folded during the dispatch advance and
+                // the clear consumes it (their `_2` siblings, want E0). This
+                // acknowledge runs at the push's commit, so the window is the
+                // remaining two T-cycles — 2 dots single speed, 1 in double
+                // speed. The MODE-0 (HBLANK) retrigger family
+                // (`late_m0irq_retrigger*_ds`) takes one dot more; HBLANK is
+                // the enabled STAT source (`stat_src_hblank`) only there.
                 self.ack_squash_dots = if self.double_speed {
-                    if self.ppu.stat_src_hblank() { 4 } else { 3 }
-                } else if !self.model.is_cgb() && self.ppu.line_dot().0 == 153 {
-                    // Line-153 LYC retrigger family: the dot-4 LYC=153
-                    // IF-emission decouple fires this line-153 STAT ISR — and
-                    // its ack — one M-cycle (4 dots) EARLIER than the dot-6
-                    // read frame the SS window `6` was tuned to, so widen by
-                    // the same read-debt (6→10) so the retrigger re-squashes
-                    // (gap 8 ≤ 10 → E0) while its `_1` sibling (gap 12 > 10)
-                    // still DELIVERS (E2). DMG line-153 only.
-                    10
-                } else {
+                    if self.ppu.stat_src_hblank() { 2 } else { 1 }
+                } else if !self.model.is_cgb()
+                    && (matches!(self.ppu.line_dot().0, 0 | 153) || self.ppu.line_dot().1 == 0)
+                {
+                    // DMG line-start emissions: on lines 0 and 153, and on any
+                    // line's first dot, the LYC/OAM IF lands one M-cycle past
+                    // this acknowledge (the dot-4 LYC=153 emission decouple and
+                    // the line-start OAM pulse both sit there), so the window
+                    // widens by that same 4 dots to keep the retriggers
+                    // consumed (`ly0/lycint152_lyc{0,153}irq_late_retrigger_2`,
+                    // `lyc153int_m2irq_late_retrigger_2`,
+                    // `m1/lycint{143_m1irq,_vblankirq}_late_retrigger_2`, want
+                    // E0) while their `_1` siblings still DELIVER.
                     6
+                } else {
+                    2
                 };
                 // Carried-read peek: arm `read_carried` for a STAT OAM/HBlank ISR
                 // so the handler's first FF41 mode read takes the source's
@@ -133,10 +125,10 @@ impl Interconnect {
                 // updateTimaIrq(cc + 2 + isCgb()) / updateSerial(cc + 3 +
                 // isCgb()): with the timer IF on the last T-substep and
                 // the serial IF on the DIV-edge boundary, both windows
-                // cover the set produced by the next machine tick on the
-                // DMG family and the next two on CGB/AGB.
+                // cover the set produced by the machine tick after this
+                // acknowledge on CGB/AGB and none of it on the DMG family.
                 self.ack_squash_mask = 1 << bit;
-                self.ack_squash_ticks = if self.model.is_cgb() { 2 } else { 1 };
+                self.ack_squash_ticks = u8::from(self.model.is_cgb());
                 self.ack_squash_dots = 0;
             }
             _ => {}

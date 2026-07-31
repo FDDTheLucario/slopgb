@@ -42,6 +42,7 @@ A gambatte-shaped request engine (`Interconnect::vram_dma_req`):
 - FF55 is the live register; cancel latches the *written* length `| $80`.
 - The dot-exact mode-0 entry — led by one dot, `Ppu::hdma_trigger_level`, gambatte xpos `lcd_hres+7` — flags one block.
 - Requests steal the bus at the head of the CPU's next bus op, with reads yielding to a same-cycle trigger while in-flight writes commit first (hdma_late_destl vs hdma_start `_1`/`_2` pairs).
+- The **interrupt dispatch holds** the steal (`Bus::set_dispatching`, the `dma_dispatch_hold` flag): SameBoy calls `GB_hdma_run` only from `GB_cpu_run`'s run branch after an opcode fetch, never inside the dispatch branch, so a block flagged while the dispatch is pushing PC waits for the handler's first opcode fetch and copies the *pushed* bytes (`irq_precedence/late_hdma_vs_{ei,ie,tima}`, whose HDMA1/2 point at the pushed stack slot; `hdma_vs_m0_scx2`). Scoped to the running CPU's dispatch — extending the hold to the halt-wake dispatch trades `late_hdma_vs_tima_scx{1,2}_halt_2` for their `_1` siblings and `hdma_vs_m0_scx2_halt`, all three currently green.
 - Each service ends with one teardown M-cycle.
 - The 16-bit dest counter terminates at the 0x10000 crossing — no VRAM wrap.
 - Enabling with the LCD off copies one block immediately.
@@ -49,5 +50,7 @@ A gambatte-shaped request engine (`Interconnect::vram_dma_req`):
 
 ### Parked / disproven
 
+- **Disproven: a longer VRAM-DMA service.** The `{g,h}dma_cycles*_2` rows read `STAT & 3` one M-cycle after their `_1` siblings and want mode 0 where we still read mode 3, and the SameBoy trace puts its FF41 read 4 dots later than ours on the same line — but padding the service with extra teardown M-cycles is monotonically worse over `gambatte/dma/` (72 → 82 → 88 → 92 failures for +0..+3 M-cycles): it recovers the plain `long`/`hdma` rows and breaks the `_scx{2,3,5}` siblings plus the `hdma_late_*` family. The residual is the service's *placement* against the CPU's own fetch, not its length.
+- **Disproven: SameBoy's whole placement (service only after an opcode fetch).** It recovers the `late_hdma_vs_*` family and `hdma_{start_ly0,pc_7ffe}` but breaks the M-cycle-granular races the head placement models (`hdma_late_{destl,length,wrambank}_2`, `hdma_start[_scx*]_2`, `hdma_transition_{oamdma,halt_hdmadst_unhalt}`) — ~15 recovered for ~11 lost. Only the dispatch-hold half of it is kept above.
 - **Parked: SameBoy-derived VRAM wrap** — the old wrap behavior; superseded by terminating at the 0x10000 crossing (no VRAM wrap), per gambatte `dma_dst_wrap_2`.
 - **Parked: chasing the residual `_2`/`a-phase` parity rows with whole-dot timing** — these are documented swaps in `baselines/gambatte.txt`; they need sub-M-cycle phase, so whole-dot timing won't close them.

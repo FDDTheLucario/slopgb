@@ -216,12 +216,24 @@ impl Bus for Interconnect {
         self.intf & self.ie & IF_MASK & !self.if_stat_late
     }
 
+    fn ie(&self) -> u8 {
+        self.ie & IF_MASK
+    }
+
+    fn iflags(&self) -> u8 {
+        self.intf & IF_MASK & !self.if_stat_late
+    }
+
     fn pending_halt_wake_mid(&mut self) -> u8 {
         self.halt_wake_mid_impl()
     }
 
     fn pending_halt_wake(&self) -> u8 {
         self.halt_wake_impl()
+    }
+
+    fn set_dispatching(&mut self, on: bool) {
+        self.dma_dispatch_hold = on;
     }
 
     fn ack(&mut self, bit: u8) {

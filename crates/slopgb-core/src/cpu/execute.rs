@@ -139,7 +139,9 @@ fn run_step(cpu: &mut Cpu, bus: &mut impl Bus) {
     let mut exec_pc = pc_before;
     if cpu.ime && bus.pending_dispatch() != 0 {
         cpu.regs.pc = pc_before;
+        bus.set_dispatching(true);
         dispatch_interrupt(cpu, bus);
+        bus.set_dispatching(false);
         exec_pc = cpu.regs.pc;
         opcode = fetch_opcode(cpu, bus);
     }
@@ -157,7 +159,8 @@ fn run_step(cpu: &mut Cpu, bus: &mut impl Bus) {
 /// whole sequence is 5 M-cycles; the opcode fetch at the target address is
 /// performed by the caller as the start of the handler's first instruction.
 /// IME is cleared immediately; a not-yet-committed EI enable is swallowed
-/// by the dispatch.
+/// by the dispatch. IE is latched after the high push, IF sampled after the
+/// low push, and the chosen bit acknowledged after both.
 fn dispatch_interrupt(cpu: &mut Cpu, bus: &mut impl Bus) {
     cpu.ime = false;
     cpu.ime_pending = false;
@@ -166,24 +169,35 @@ fn dispatch_interrupt(cpu: &mut Cpu, bus: &mut impl Bus) {
     let pc = cpu.regs.pc;
     cpu.regs.sp = cpu.regs.sp.wrapping_sub(1);
     bus.write(cpu.regs.sp, (pc >> 8) as u8);
-    // IE & IF are re-evaluated *after* the high push: the push itself may
-    // have overwritten IE (SP near 0x0000) and cancelled or redirected the
-    // dispatch (mooneye acceptance/interrupts/ie_push). On cancellation
-    // (pending == 0) nothing is acknowledged and the CPU ends up at 0x0000
-    // with IME left disabled.
-    let pending = bus.pending();
+    // IE is latched right after the high push: that push may have
+    // overwritten IE (SP near 0x0000) and cancelled or redirected the
+    // dispatch, while a low push landing on IE is already too late
+    // (mooneye acceptance/interrupts/ie_push rounds 1/3-4).
+    let ie = bus.ie();
+    cpu.regs.sp = cpu.regs.sp.wrapping_sub(1);
+    let low_addr = cpu.regs.sp;
+    // A low push onto IF itself is read OLD — the vector comes from the
+    // pre-push flags, the acknowledge below then clears its bit out of the
+    // pushed value (SameBoy sm83_cpu.c `cycle_write_if`; gambatte
+    // irq_precedence/late_if_via_sp_if_1, want FD).
+    let if_pre_push = (low_addr == 0xFF0F).then(|| bus.iflags());
+    bus.write(low_addr, pc as u8);
+    // IF is sampled *after* the low push, one M-cycle later than IE: a
+    // source raising its flag inside the push cycle still wins the vector
+    // (irq_precedence/late_m0irq_vs_tima_scx{2,3}[_halt]_1, want 4 — the
+    // mode-0 STAT rise beats the already-pending TIMA overflow).
+    let pending = ie & if_pre_push.unwrap_or_else(|| bus.iflags());
+    // On cancellation (pending == 0) nothing is acknowledged and the CPU
+    // ends up at 0x0000 with IME left disabled.
     let (target, ack_bit) = if pending == 0 {
         (0x0000, None)
     } else {
         let bit = pending.trailing_zeros() as u8;
         (0x0040 + (u16::from(bit) << 3), Some(bit))
     };
-    // The chosen IF bit is acknowledged before the low push.
     if let Some(bit) = ack_bit {
         bus.ack(bit);
     }
-    cpu.regs.sp = cpu.regs.sp.wrapping_sub(1);
-    bus.write(cpu.regs.sp, pc as u8);
     cpu.regs.pc = target;
 }
 

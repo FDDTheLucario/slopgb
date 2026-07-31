@@ -74,21 +74,32 @@ fn m0_rise_second_half_commit_is_halt_late() {
     }
 }
 
-/// A timer IF set produced by the machine tick right after a
-/// dispatch ack is consumed by it on both families (gambatte ackIrq
-/// `updateTimaIrq(cc + 2 + isCgb())` reaches past the last-substep
-/// commit of the next M-cycle's reload; tima/tc00_irq_late_retrigger_3
-/// reads E0 on dmg08 *and* cgb04c). The TMA reload itself still
+/// The timer sync-ahead window measured from the acknowledge: zero machine
+/// ticks on the DMG family and one on CGB/AGB (gambatte ackIrq
+/// `updateTimaIrq(cc + 2 + isCgb())`, taken from the acknowledge's position
+/// two T-cycles into the PC-low push). A reload IF committing in the tick
+/// right after the acknowledge therefore survives on DMG and is consumed on
+/// CGB; two ticks out it survives everywhere. The TMA reload itself always
 /// happens — only the IF bit is consumed.
 #[test]
-fn dispatch_ack_consumes_timer_set_due_next_cycle() {
-    for model in [Model::Dmg, Model::Cgb] {
+fn dispatch_ack_timer_window_is_zero_dmg_one_cgb() {
+    for (model, gap, expect) in [
+        (Model::Dmg, 1, 0x04),
+        (Model::Sgb, 1, 0x04),
+        (Model::Cgb, 1, 0x00),
+        (Model::Agb, 1, 0x00),
+        (Model::Dmg, 2, 0x04),
+        (Model::Cgb, 2, 0x04),
+    ] {
         let mut b = ic(model);
         arm_late_timer_irq(&mut b);
-        ticks(&mut b, 4); // overflow armed; reload + IF due next tick
-        b.ack(2); // the dispatch's IF clear
-        ticks(&mut b, 1);
-        assert_eq!(b.read_no_tick(0xFF0F) & 0x04, 0, "{model:?}");
+        // The overflow is armed by tick 4 and the reload + IF commit one
+        // tick later, so acking `gap` ticks before that puts the set in the
+        // `gap`-th tick after the acknowledge.
+        ticks(&mut b, 5 - gap);
+        b.ack(2);
+        ticks(&mut b, gap);
+        assert_eq!(b.read_no_tick(0xFF0F) & 0x04, expect, "{model:?} gap {gap}");
         assert_eq!(
             b.timer.read(0xFF05),
             b.timer.read(0xFF06),
@@ -97,55 +108,19 @@ fn dispatch_ack_consumes_timer_set_due_next_cycle() {
     }
 }
 
-/// The sync-ahead window is one M-cycle on the DMG family and two on
-/// CGB/AGB (`+ isCgb()`): a set committing in the second tick after
-/// the ack survives on DMG and is consumed on CGB — the
-/// tc00_irq_late_retrigger_2 dmg08_outE4 / cgb04c_outE0 split. Three
-/// cycles out it survives everywhere.
-#[test]
-fn dispatch_ack_timer_window_is_one_cycle_dmg_two_cgb() {
-    for (model, expect) in [
-        (Model::Dmg, 0x04),
-        (Model::Sgb, 0x04),
-        (Model::Cgb, 0x00),
-        (Model::Agb, 0x00),
-    ] {
-        let mut b = ic(model);
-        arm_late_timer_irq(&mut b);
-        ticks(&mut b, 3);
-        b.ack(2);
-        ticks(&mut b, 2); // overflow in tick 4, reload + IF in tick 5
-        assert_eq!(b.read_no_tick(0xFF0F) & 0x04, expect, "{model:?}");
-    }
-    for model in [Model::Dmg, Model::Cgb] {
-        let mut b = ic(model);
-        arm_late_timer_irq(&mut b);
-        ticks(&mut b, 2);
-        b.ack(2);
-        ticks(&mut b, 3);
-        assert_eq!(
-            b.read_no_tick(0xFF0F) & 0x04,
-            0x04,
-            "{model:?}: past window"
-        );
-    }
-}
-
-/// Serial transfer-complete IF: same ack windows via gambatte's
-/// `updateSerial(cc + 3 + isCgb())` — with the completion on the
-/// DIV-edge boundary, DMG consumes the set due in the next tick,
-/// CGB also the one after (serial/start_wait_trigger_int8_read_if_2:
-/// dmg08_outE8 vs cgb04c_outE0; round 3 E0 on both).
+/// Serial transfer-complete IF: the same windows as the timer via gambatte's
+/// `updateSerial(cc + 3 + isCgb())` — with the completion on the DIV-edge
+/// boundary, CGB consumes the set due in the tick after the acknowledge and
+/// DMG consumes nothing (serial/start_wait_trigger_int8_read_if_2:
+/// dmg08_outE8 vs cgb04c_outE0).
 #[test]
 fn dispatch_ack_consumes_serial_set_like_gambatte_ackirq() {
     // Completion (8th shift) at div 4096 = machine tick 1024.
     for (model, gap, expect) in [
-        (Model::Dmg, 1, 0x00),
+        (Model::Dmg, 1, 0x08),
         (Model::Cgb, 1, 0x00),
         (Model::Dmg, 2, 0x08),
-        (Model::Cgb, 2, 0x00),
-        (Model::Dmg, 3, 0x08),
-        (Model::Cgb, 3, 0x08),
+        (Model::Cgb, 2, 0x08),
     ] {
         let mut b = ic(model);
         b.serial.write(0xFF01, 0x00);
@@ -175,15 +150,14 @@ fn dispatch_ack_squash_is_per_source() {
     assert_eq!(b.read_no_tick(0xFF0F) & 0x08, 0x08);
 }
 
-/// STAT/VBlank rises go through `lcd_.update(cc + 2)` — only the
-/// first 2 dots of the next tick. The vblank rise is a line-anchored
-/// event emitted in the *second half* of its M-cycle at single
-/// speed, so an ack in the cycle before must NOT consume it
-/// (gambatte m2int_m2irq_late_retrigger_1 and
-/// irq_precedence/late_m0irq_retrigger_scx1_1 pin the keeps; the
-/// consumed cases live on the gambatte `*_late_retrigger_ds_2` rows,
-/// where the 2-dot window spans the whole double-speed tick, and on
-/// the mode-0 rise's early-dot grid).
+/// STAT/VBlank rises are consumed only within the two dots left of the
+/// acknowledge's own M-cycle at single speed. The vblank rise is a
+/// line-anchored event emitted in the *second half* of its M-cycle, so an
+/// acknowledge two whole cycles earlier never reaches it (gambatte
+/// m2int_m2irq_late_retrigger_1 and
+/// irq_precedence/late_m0irq_retrigger_scx1_1 pin the keeps; the consumed
+/// cases live on the `*_late_retrigger_ds_2` rows, where the window spans the
+/// whole double-speed tick, and on the mode-0 rise's early-dot grid).
 #[test]
 fn dispatch_ack_does_not_reach_single_speed_line_anchored_rises() {
     for model in [Model::Dmg, Model::Cgb] {
@@ -205,9 +179,11 @@ fn dispatch_ack_does_not_reach_single_speed_line_anchored_rises() {
             ticks(&mut b, rise - gap);
             b.ack(0);
             ticks(&mut b, gap);
-            // gap-1 ack reaches the (back-dated) rise and consumes it; gap-2
-            // lands a dot too early and the IF is kept.
-            let expect = if gap == 1 { 0 } else { 0x01 };
+            // The DMG vblank rise lands in the first 2 dots of the tick after
+            // a gap-1 acknowledge, inside the window; the CGB line timeline
+            // puts its rise a dot further in, past the window. Gap 2 is a
+            // whole cycle further out on both and the IF is kept.
+            let expect = if gap == 1 && !model.is_cgb() { 0 } else { 0x01 };
             assert_eq!(b.read_no_tick(0xFF0F) & 0x01, expect, "{model:?} gap {gap}");
         }
     }

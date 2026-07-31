@@ -17,9 +17,12 @@ impl Interconnect {
     /// the tick in `Bus::read`/`read_inc`. A request flagged during the
     /// STOP opcode fetch is deliberately still pending when `Bus::stop`
     /// runs (no bus operation in between) — the
-    /// hdma_transition_speedchange matrix needs exactly that request.
+    /// hdma_transition_speedchange matrix needs exactly that request. The
+    /// running CPU's interrupt dispatch holds the steal off entirely
+    /// (`dma_dispatch_hold`), so a request flagged while PC is being pushed
+    /// waits for the handler's first opcode fetch.
     pub(super) fn service_vram_dma(&mut self) {
-        while self.vram_dma_req.is_some() && !self.vram_dma_stall {
+        while self.vram_dma_req.is_some() && !self.vram_dma_stall && !self.dma_dispatch_hold {
             self.run_vram_dma();
         }
     }

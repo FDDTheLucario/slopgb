@@ -5,6 +5,27 @@
 - CPU interrupt sampling is FROZEN: sampled at end of opcode fetch; dispatch aborts the fetched instruction (mooneye-gb prefetch semantics).
 - Recalibrate dependents (PPU IRQ anchors); do **not** move the sampling.
 
+## Dispatch IF sample position
+
+`cpu/execute.rs` `dispatch_interrupt`, after SameBoy `sm83_cpu.c`'s interrupt
+block:
+
+- **IE** is latched right after the PC-high push, so a high push landing on
+  FFFF cancels or redirects the dispatch and a low push onto FFFF is already
+  too late (mooneye `interrupts/ie_push`).
+- **IF** is sampled one M-cycle later, *after* the PC-low push. A source whose
+  flag rises inside that push cycle therefore still wins the vector:
+  `irq_precedence/late_m0irq_vs_tima_scx{2,3}[_halt]_1` (out4) need the mode-0
+  STAT rise to beat the already-pending TIMA overflow, and their `_2` siblings
+  (out2, the write block one M-cycle later) need it not to.
+- A low push onto **FF0F** reads the pre-push flags for the vector choice and
+  the acknowledge then clears its bit out of the *pushed* value
+  (`late_if_via_sp_if_1`, outFD = pushed `$7F` less bit 1).
+- The acknowledge follows the low push. SameBoy clears IF two T-cycles into
+  that M-cycle; the windows below are the remainder.
+- The whole dispatch holds any flagged VRAM-DMA block — see
+  [`dma.md`](dma.md).
+
 ## Dispatch-ack source sync-ahead
 
 `Interconnect::ack` + `ack_squash_*` (gambatte memory.cpp `Memory::ackIrq`). The dispatch's IF clear syncs the acked bit's source slightly past the ack point first, so a hardware re-set due just after the clear is consumed by it.
@@ -19,8 +40,8 @@ Per-source sync-ahead point:
 
 In our grid, the following are swallowed when their bit was just acked — and only the acked source is swallowed; others just get flagged:
 
-- Timer/serial sets produced by the next machine tick (next two on CGB/AGB) — `ack_squash_ticks`.
-- STAT/VBlank rises inside the LCD squash window `ack_squash_dots`: **6** dots at single speed, **10** on DMG line 153 (its dot-4 LYC=153 emission fires the ISR — and this ack — one M-cycle earlier than the dot-6 read frame the 6 was tuned to), **3** in double speed and **4** there when HBlank is the enabled STAT source (`Ppu::stat_src_hblank`, the `late_m0irq_retrigger` family). gambatte's own `lcd_.update(cc + 2)` window is 2 dots; ours is widened by the read-debt because our read frame enters the STAT/OAM ISR that much earlier, which is what keeps the `*_late_retrigger_2` rows consumed while their `_1` siblings deliver.
+- Timer/serial sets produced by the machine tick after the ack on CGB/AGB, none on the DMG family — `ack_squash_ticks`.
+- STAT/VBlank rises inside the LCD squash window `ack_squash_dots`: **2** dots at single speed (the two T-cycles left of the low push's M-cycle), **6** on DMG when the ack lands on line 0 or 153 or on a line's first dot — the line-start LYC/OAM emissions there sit one M-cycle past our ack where SameBoy's clear already covers them (`ly0/lycint152_lyc{0,153}irq_late_retrigger`, `lyc153int_m2irq_late_retrigger`, `m1/lycint{143_m1irq,_vblankirq}_late_retrigger`) — **1** in double speed and **2** there when HBlank is the enabled STAT source (`Ppu::stat_src_hblank`, the `late_m0irq_retrigger` family).
 
 Pins the gambatte `*_late_retrigger_2/3` model splits: tima tc00 dmg08_outE4 / cgb04c_outE0, serial trigger_int8, irq_precedence late_m0irq.
 

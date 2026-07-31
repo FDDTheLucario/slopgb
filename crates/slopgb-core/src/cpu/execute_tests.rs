@@ -135,6 +135,14 @@ impl Bus for TestBus {
         self.mem[0xFF0F] & self.mem[0xFFFF] & 0x1F
     }
 
+    fn ie(&self) -> u8 {
+        self.mem[0xFFFF] & 0x1F
+    }
+
+    fn iflags(&self) -> u8 {
+        self.mem[0xFF0F] & 0x1F
+    }
+
     fn pending_halt_wake(&self) -> u8 {
         let mut p = self.pending();
         if self.late_if {

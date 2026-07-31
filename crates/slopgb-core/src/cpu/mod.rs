@@ -82,6 +82,14 @@ pub trait Bus {
     fn check_incdec16(&mut self, _addr: u16) {}
     /// `IF & IE & 0x1F` right now. Takes no time.
     fn pending(&self) -> u8;
+    /// `IE & 0x1F` right now — the interrupt dispatch latches it after the
+    /// PC-high push. Takes no time. Required (not defaulted) alongside
+    /// [`iflags`](Bus::iflags): the dispatch ANDs the two, so a bus that
+    /// supplied only one would pick a vector its IE never enabled.
+    fn ie(&self) -> u8;
+    /// `IF & 0x1F` right now — the dispatch samples it after the PC-low push.
+    /// Takes no time. See [`ie`](Bus::ie).
+    fn iflags(&self) -> u8;
     /// `IF & IE & 0x1F` as seen by the halted CPU's wake check (both the
     /// IME=1 dispatch and the IME=0 resume). Takes no time; defaults to
     /// [`pending`](Bus::pending).
@@ -149,6 +157,16 @@ pub trait Bus {
     fn halt_entry_rewind(&mut self) -> bool {
         false
     }
+    /// The running CPU's interrupt dispatch sequence has started (`true`) or
+    /// finished (`false`). SameBoy's `GB_cpu_run` services a flagged VRAM DMA
+    /// block only in its run branch, after an opcode fetch — never inside the
+    /// dispatch branch — so a block flagged while the dispatch is pushing PC
+    /// waits for the handler's first opcode fetch (gambatte
+    /// irq_precedence/late_hdma_vs_{ei,ie,tima}). The halt-wake dispatch is
+    /// deliberately NOT wrapped: its block is already serviced at the wake
+    /// (`vram_dma_unhalt`), which is where the `*_halt` rows of that family
+    /// want it. Takes no time; default no-op.
+    fn set_dispatching(&mut self, _on: bool) {}
     /// Clear bit `bit` (0..=4) of IF. Takes no time.
     fn ack(&mut self, bit: u8);
     /// CPU executed STOP: if a speed switch is armed (CGB KEY1.0), perform

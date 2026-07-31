@@ -470,3 +470,93 @@ fn eager_scy_during_m3_read_frame_passes() {
             .unwrap_or_else(|e| panic!("{rel} [{model:?}]: {e}"));
     }
 }
+
+/// The dispatch's IF sample position (`cpu/execute.rs` `dispatch_interrupt`).
+///
+/// SameBoy latches IE right after the PC-high push but reads IF only after the
+/// PC-low push (sm83_cpu.c, the interrupt block), so a source raising its flag
+/// inside the low-push M-cycle still wins the vector, and a low push landing on
+/// FF0F itself supplies the value the acknowledge then clears a bit out of.
+///
+/// `late_m0irq_vs_tima_scx{2,3}[_halt]_1` (out4, both models) need the mode-0
+/// STAT rise inside that cycle to beat the already-pending TIMA overflow;
+/// `late_if_via_sp_if_1` (outFD) needs the pushed PC low byte in IF before the
+/// bit-1 clear, and `if_and_ie_0_vector_4` (out50) needs the vector chosen from
+/// the *pre*-push flags when the low push lands on FF0F.
+#[test]
+fn eager_dispatch_samples_if_after_the_low_push() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "dispatch_if_sample",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let rows = [
+        (
+            "gambatte/irq_precedence/late_m0irq_vs_tima_scx2_1_dmg08_cgb04c_out4.gbc",
+            "4",
+        ),
+        (
+            "gambatte/irq_precedence/late_m0irq_vs_tima_scx3_halt_1_dmg08_cgb04c_out4.gbc",
+            "4",
+        ),
+        (
+            "gambatte/irq_precedence/late_if_via_sp_if_1_dmg08_cgb04c_outFD.gbc",
+            "FD",
+        ),
+        (
+            "gambatte/irq_precedence/if_and_ie_0_vector_4_dmg08_cgb04c_out50.gbc",
+            "50",
+        ),
+    ];
+    for (rel, expect) in rows {
+        let path = root.join(rel);
+        let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        for model in [Model::Dmg, Model::Cgb] {
+            let mut gb = harness::boot(&rom, model);
+            run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+            check_hex_screen(gb.frame(), expect, model.is_cgb())
+                .unwrap_or_else(|e| panic!("{rel} [{model:?}] expected out{expect}: {e}"));
+        }
+    }
+}
+
+/// The dispatch's VRAM-DMA hold (`Bus::set_dispatching`).
+///
+/// SameBoy calls `GB_hdma_run` only from `GB_cpu_run`'s run branch, after an
+/// opcode fetch — never inside the interrupt-dispatch branch — so an HBlank
+/// block flagged while the dispatch is pushing PC waits for the handler's first
+/// opcode fetch and copies the *pushed* bytes.
+///
+/// The `late_hdma_vs_{ei,ie,tima}` kernels point HDMA1/2 at the stack slot the
+/// dispatch pushes into: `_scx1_1` prints the pushed 0x102E instead of the
+/// pre-push 0x1234.
+#[test]
+fn eager_dispatch_holds_the_vram_dma_block() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "dispatch_dma_hold",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let rows = [
+        (
+            "gambatte/irq_precedence/late_hdma_vs_ei_scx1_1_cgb04c_out102E.gbc",
+            "102E",
+        ),
+        (
+            "gambatte/irq_precedence/late_hdma_vs_tima_scx1_2_cgb04c_out11E9.gbc",
+            "11E9",
+        ),
+    ];
+    for (rel, expect) in rows {
+        let path = root.join(rel);
+        let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot(&rom, Model::Cgb);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        check_hex_screen(gb.frame(), expect, true)
+            .unwrap_or_else(|e| panic!("{rel} [Cgb] expected out{expect}: {e}"));
+    }
+}
