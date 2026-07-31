@@ -18,7 +18,18 @@ impl Ppu {
             // fine-scroll pixel legs and holds `late_scx4`'s DS read law (the
             // fine-scroll comparator straddle). SCY/palette keep dots=3 in DS
             // (no DS pixel legs).
-            2
+            //
+            // LINE 0 defers nothing. These kernels write SCX from a STAT
+            // handler, and line 0's STAT source has no prior-line carryover
+            // (`update_mode_for_interrupt`: lines 1-143 hold OAM across dots
+            // 0-3, line 0 pulses at the visible mode-2 edge, dot 4), so the
+            // handler — and every write in it — starts one double-speed
+            // M-cycle later than on lines 1-143. The `scx_during_m3/*_ds_1`
+            // references place the rungs 2 dots ahead of that, which is the
+            // whole deferral. The map-column ring lead stays 2 everywhere
+            // (`map_scx_formed`); only the fine-scroll comparator path — the
+            // hunt lock and `eff.scx` — moves.
+            if self.line == 0 { 0 } else { 2 }
         } else if !self.model.is_cgb() && matches!(addr, 0xFF47..=0xFF49) && !self.glitch_active() {
             // The DMG palette (BGP/OBP FF47-49) commit anchors to the EVEN
             // (CPU-M-cycle) dot grid. SameBoy commits the palette at the write

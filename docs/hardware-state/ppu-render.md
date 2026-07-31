@@ -430,26 +430,24 @@ completes 2 M-cycles (4 dots) later. That is the whole of the 247-vs-243
 difference in the line's `$c0` commit, and with the read at dot 250 it is what
 puts the held last tile at column 11 where the reference wants 12..31.
 
-So the carve-out is a CPU instruction-phase fingerprint of one ROM's control
-flow, not a render law — which is also why no map lead reaches it (swept 0..7,
-plain and with a pre-output exemption; everything >= 3 collapses 129 → 114 →
-103 because other DS rows have writes landing closer still that must stay
-visible). The gate is `ly >= 1 || SCX&7 != 0`, pinned from both sides in
+No map lead reaches it either (swept 0..7, plain and with a pre-output
+exemption; everything >= 3 collapses 129 → 114 → 103 because other DS rows have
+writes landing closer still that must stay visible). The gate is
+`ly >= 1 || SCX&7 != 0`, pinned from both sides in
 `gambatte::misc::eager_scx_during_m3_map_column_passes`.
 
-What would settle it properly: our line-0 dispatch phase depends on the
-VBlank-region (ly 144 → 0) timing this ROM free-runs through. If that phase is
-off by an M-cycle, the exception disappears on its own — that is the
-`lyc153`/`ly0` family, not this cluster. The next section measures that phase
-directly and finds it is a **general** property of the cluster, not one ROM's.
+The dot-10 line-0 dispatch is **not** this ROM's control-flow fingerprint: the
+next section measures it on every rung of every directory and at both speeds,
+and settles what the references actually want done about it.
 
-### The double-speed ladder, mostly closed (LANDED 2026-07-31, +27 rows)
+### The double-speed ladder, mostly closed (LANDED 2026-07-31, +27 then +7 rows)
 
 Three whole-dot terms, all double-speed only, found by tracing the tile-number
 read against the SCX write-commit dot and then classifying every leg against
 what the reference actually accepts (`colreq`). Round matrix 103 → 130 of 141,
 whole battery **27 baselined rows recovered, zero regressions**, golden drift
-confined to 35 `scx_during_m3/*_ds_*` `[Cgb]` keys.
+confined to 35 `scx_during_m3/*_ds_*` `[Cgb]` keys. A fourth term (below)
+replaced term 3 and took another **7 rows, also zero regressions**.
 
 **1. The double-speed map lead is 2, exactly like CGB single speed**
 (`map_scx_formed`). The `ds` special case that forced it to 0 is gone. The
@@ -464,7 +462,17 @@ write commits behind it — the same ordering the same-dot hunt re-open in
 `_ds_7`: raw writes 92 and 94, hunt lock at 92, and the reference wants 92
 visible to the dot-98 fetch and 94 not.
 
-**3. Line 0 keeps lead 0** — a stated exemption, not a law; see below.
+**3. Line 0's double-speed FF43 write defers nothing** (`stage_write_dots`, DS
+FF43: `u8::from(self.line != 0) * 2`). Line 0's STAT source has no prior-line
+OAM carryover, so its handler — and every write in it — starts one double-speed
+M-cycle later than the same rung on lines 1-143; the references place the rungs
+2 dots ahead of that, and the deferral is exactly what absorbs it. The map lead
+is 2 on **every** line at both speeds (`map_scx_formed` has no line-0 arm). This
+replaced the earlier "line 0 keeps lead 0" exemption, which was observationally
+equivalent for the map-column ring but left the fine-scroll comparator path —
+the hunt lock and `eff.scx` — 2 dots late. Both halves are required together:
+the exemption alone scores 1019 of the 1259-ROM double-speed corpus, the
+deferral alone 997, the pair 1026.
 
 #### The measurement that drove it (keep this, it is the whole derivation)
 
@@ -486,12 +494,13 @@ visible to a given read — all DISCRIMINATING, none degenerate:
 Lead 2 satisfies all four. Term 2 is what pulls the fine-3 dirs' `_ds_6` commit
 from 96 to 95 so its column comes out even.
 
-#### OPEN, and it is not a render term: the line-0 STAT dispatch is 4 dots late
+#### The line-0 STAT dispatch: 4 dots late, and the pulse dot may NOT move
 
 These kernels are pure STAT handlers (`$0048` = `ei; jp $1000`, then a fixed
-NOP sled), so every SCX write on a line is rigid relative to that line's
-dispatch. Measured with an ack probe on `scx_0060c0/_ds_4 [Cgb]`: the ROM takes
-**only** STAT (2169 acks, all bit 1, zero VBlank), and
+NOP sled) with `STAT = $20` — the OAM source alone (disassembled at `$01D2` of
+every `scx_*c0` ROM) — so every SCX write on a line is rigid relative to that
+line's dispatch. Measured with an ack probe on `scx_0060c0/_ds_4 [Cgb]`: the ROM
+takes **only** STAT (2169 acks, all bit 1, zero VBlank), and
 
 ```
 RISE if=2 ly=1..143 dot=0   ->  ACK ly=N dot=6
@@ -499,44 +508,70 @@ RISE if=2 ly=0      dot=4   ->  ACK ly=0 dot=10
 ```
 
 so every line-0 write lands 4 dots later than the same rung on lines 1-143 —
-confirmed on all eight rungs of every directory, and at single speed too. The
-`old/offset_3/_ds_1` disassembly above described this as one ROM's control-flow
-fingerprint; it is not. It is the line-0 OAM interrupt source having no
-prior-line carryover (`update_mode_for_interrupt`: lines 1-143 hold source 2
-across dots 0-3, line 0 pulses at the visible mode-2 edge, dot 4).
+confirmed on all eight rungs of every directory, and at single speed too. It is
+the line-0 OAM interrupt source having no prior-line carryover
+(`update_mode_for_interrupt`: lines 1-143 hold source 2 across dots 0-3, line 0
+pulses at the visible mode-2 edge, dot 4).
 
-The references want that dispatch **2 dots earlier**, uniformly: with the
-line-0 writes 2 dots earlier a single lead of 2 satisfies line 0 and lines
-1-143 alike, and no exemption is needed. Measured directly — pulsing the line-0
-source at dot 2 in double speed (or holding it across dots 2-4) takes the round
-matrix to 136/141 and the whole battery to **49 baselined rows recovered**,
-including `bgtiledata_spx09_ds_*`, `bgtilemap_spx0{8,9}_ds_*`,
-`scx_attrib_spx1_ds`, `scy_during_m3_ds_5/6` and `scy_spx08_ds_3/4`.
+**Moving that pulse is refuted.** Pulsing the line-0 source at dot 2 in double
+speed scores **1000** of the 1259-ROM double-speed corpus against 1019 for the
+shipped tree — +21 rows, −40. (An earlier note claimed +49/−11; that was
+measured on a hand-picked row list before the map-lead landing, and the full
+corpus does not support it.) Nor is the pulse dot free: it is bracketed within
+one double-speed M-cycle by ROMs whose own writes come from the LINE-152
+dispatch and so do not move with it —
 
-**It is not landable as-is: it costs 11 GREEN double-speed rows** —
-`ly0/lycint152_m2irq_ds_1`, `lyc153int_m2irq_{ifw,late_retrigger}_ds_1`,
-`lycEnable/lycwirq_trigger_ly00_stat50_ds_1`, `m2enable/{disable_ly0_ds_1,
-lyc0_late_m2enable_lycdisable_ds_1, m2_late_m1disable_ly0_ds_1}`,
-`miscmstatirq/lycstatwirq_trigger_ly00_10_50_ds_1`,
-`window/late_enable_ly0_ds_2`, plus the pixel rows `scy_during_m3_ds_2` (8 px)
-and `window/on_screen/late_wx_ds_1` (160 px).
+| ROM | kernel (disassembled) | pins |
+|---|---|---|
+| `m2enable/disable_ly0_ds_{1,2}` | ISR sets `STAT=$20`, then `STAT=$00` at `$11BA`; reads `IF & 3` | want 1 / 3 — the disable straddles the pulse, so the pulse is at dot 3 or 4 |
+| `m2enable/lyc0_late_m2enable_lycdisable_ds_1` | late OAM *enable* | the enable must still catch a high OAM source |
+| `lycEnable/lycwirq_trigger_ly00_stat50_ds_1`, `miscmstatirq/lycstatwirq_trigger_ly00_10_50_ds_1` | ISR sets `STAT=$50` (LYC + mode-1), then `LYC=0` at `$10D5`; reads `IF` | want E0 — the line is still held HIGH by the line-0 mode-1 carry when `LYC=0` lands, so the carry must survive to dot 4 |
+| `m2enable/m2_late_m1disable_ly0_ds_1` | `STAT=$30` → `$20` at `$11B8` | want 2 — dropping mode-1 must make the line FALL, i.e. OAM is not yet selected |
 
-The split inside that family is the lead worth chasing: the SAME ROM's
-`lcdoffset1` rung goes the other way. `lycwirq_trigger_ly00_stat50_ds_1` wants
-the old (later) edge while `..._ds_lcdoffset1_2` wants the new one, and
-identically for `lycstatwirq_trigger_ly00_10_50`. `lcdoffset` shifts the LCD-on
-phase by one dot, i.e. the CPU-vs-PPU dot phase — so the discriminator is that
-phase, not the pulse dot. Until it exists the map lead carries an `ly == 0`
-exemption instead, and both the exemption and the older holdback carve-out
-dissolve the moment the line-0 edge is phase-correct.
+The last two rows pin the mode-1 carry's END, the first two pin the OAM
+source's rise; both land on dot 4 and a single `mode_for_interrupt` scalar
+cannot separate them. Sweeping the pulse over 0..4 gives only two distinct
+outcomes (0/1/2 vs 3/4) — the double-speed M-cycle is 2 dots, so only its
+parity is observable.
 
-#### The 11 rows still failing, and what each needs
+`lcdoffset` is **not** the discriminator an earlier note proposed. Disassembly
+(`$014E`-`$0163`) shows `lcdoffset1` runs the KEY1 `stop` speed switch three
+times instead of once, shifting the CPU-vs-PPU phase; but both
+`lycwirq_trigger_ly00_stat50_ds_1` and its `..._ds_lcdoffset1_2` sibling are
+satisfied by the shipped term, so there is no split to chase.
+
+The shift the references want is therefore in the **write frame**, not the
+interrupt: term 3 above.
+
+#### The rows still failing, and what each needs
 
 | row(s) | shape | note |
 |---|---|---|
-| `old/offset_3/_ds_2` (10 px), `old/revoffset_3/_ds_1` (3 px), `scx_0063c0/_ds_1` (64 px), `scx_0360c0/_ds_1` (160 px), `_ds_2` (104 px), `scx_0367c0/_ds_2` (84 px), `scx_0761c0/_ds_1` (8 px), `_ds_4` (50 px), `_ds_5` (8 px), `scx_attrib_spx1_ds` (8 px) | line 0 only | the line-0 dispatch phase above; every one was 150-20500 px before this landing |
+| `old/offset_3/_ds_2` (8 px), `scx_0360c0/_ds_2` (160 px), `scx_0761c0/_ds_5` (8 px) | line 0 only | rungs that still straddle a fetch boundary after term 3 |
 | `scx_0761c0/_ds_6` | first tile, lines 1-143 | its `$61` write commits exactly on the hunt lock dot 96 but is *pre*-lock by raw dot (92 < 96), so term 2 does not reach it; the reference wants it visible at the dot-98 read |
 | `old/offset_3/_ds_3` | 2723 px | EXCEED — SameBoy misses it too |
+
+#### OPEN: the SCY line-0 rungs are a sub-dot separation (derived, 2026-07-31)
+
+`scy/scy_during_m3_ds_*` writes FF42 twice per line 0, at dots 86, 88, … 96
+(rungs 1-6) and 248, 246, … 238. Sweeping the line-0 FF42 commit debt 0..3 and
+cross-matching every rung's frame against *every* rung's reference (all seven
+references distinct — none degenerate) puts the fetch's SCY sample dots at 90
+(tile 0), 96 (tile 1) and 240 (tile 19) — spacing 6 then 8×18, exactly the
+`first_discard` geometry, so there is no tile-0 anomaly. What the references
+then demand is:
+
+* `_ds_2` (write 88, tile 0, 8 px at x0-7): commit ≥ 90 → debt ≥ 2;
+* `_ds_5` (write 94, tile 1, 8 px at x8-15): commit ≤ 95 → debt ≤ 1;
+* `_ds_6` (write 238, tile 19, 8 px at x152-159): commit ≤ 239 → debt ≤ 1.
+
+Both constraints are the same "raw + 2 vs the sample dot" relation resolved in
+opposite directions, so **no whole-dot debt and no render-FSM state term
+separates them** — the write dot, the sample geometry and the tile index are
+all identical in form. Debt 1 scores +5/−1 (`_ds_5`, `_ds_6`, `spx08_ds_3/4`,
+`spx09_ds_3` recovered, `_ds_2` lost); it is not landed, because a `+N/−M` with
+a classified SameBoy-PASS on the `−M` side is a missing discriminator. The
+missing discriminator is sub-dot.
 
 #### Measured dead end (2026-07-31)
 

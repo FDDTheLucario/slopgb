@@ -392,22 +392,21 @@ gambatte/oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D.gbc [Cgb]
 # column; docs/hardware-state/ppu-render.md). The `_ds_*` rows below are NOT
 # class A — the "sub-cycle phase" reason was measured false 2026-07-30 (the
 # rotation legs commit on eight distinct whole dots, all the same half), and
-# 27 of them were recovered 2026-07-31 on whole-dot terms: the double-speed
-# map lead is 2 like single speed (lines 1-143), and a write landing ON the
-# fine-scroll comparator lock takes the post-lock commit debt.
-# The holdback runs at double speed too.
+# 34 of them were recovered 2026-07-31 on whole-dot terms: the double-speed
+# map lead is 2 like single speed on EVERY line, a write landing ON the
+# fine-scroll comparator lock takes the post-lock commit debt, and line 0's
+# double-speed FF43 write defers nothing (its STAT handler starts one
+# double-speed M-cycle later than on lines 1-143, having no prior-line OAM
+# carryover). The holdback runs at double speed too.
 #
-# The 11 that remain are all first/last-tile rows in the fine-scroll != 0
-# directories, plus line-0 rows. Their references want the LINE-0 STAT
-# dispatch 2 dots earlier than ours: our line-0 OAM interrupt source pulses at
-# the visible mode-2 edge (dot 4) with no prior-line carryover, so these
-# STAT-driven kernels write SCX 4 dots later on line 0 than on lines 1-143
-# where hardware wants 2. Moving that pulse recovers 49 rows but costs 11 GREEN
-# double-speed rows (m2enable/lyc153int_m2irq/lycEnable/window ly0 + scy_ds_2 +
-# late_wx_ds_1), and the split within that family tracks `lcdoffset` — a
-# CPU/PPU dot-phase term, not the pulse dot itself. Until that discriminator
-# exists the map lead carries an `ly == 0` exemption instead. See
-# docs/hardware-state/ppu-render.md.
+# Moving the line-0 OAM pulse itself is REFUTED: it scores 1000 of the
+# 1259-ROM double-speed corpus against 1019 for the tree it was measured on.
+# The pulse dot is bracketed within one double-speed M-cycle by
+# m2enable/disable_ly0_ds_{1,2} and the line-0 mode-1 carry's end is pinned to
+# the same dot by lycEnable/lycwirq_trigger_ly00_stat50_ds_1 and
+# m2enable/m2_late_m1disable_ly0_ds_1 (kernels disassembled). `lcdoffset` is
+# not a discriminator — both its legs are satisfied by the landed term.
+# See docs/hardware-state/ppu-render.md.
 #
 # The three `spx2` rows are one divergence, and it is POST-BOOT RESIDUE, not a
 # fetch or timing row: the failing pixel is OBJ palette 0 colour 2 (proved by
@@ -419,16 +418,9 @@ gambatte/oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D.gbc [Cgb]
 # `scx_m3_extend_1 [Dmg]` was recovered 2026-07-30.
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_2.gbc [Cgb]
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_3.gbc [Cgb]
-gambatte/scx_during_m3/old/revoffset_3/scx_during_m3_ds_1.gbc [Cgb]
-gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_1.gbc [Cgb]
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_1.gbc [Cgb]
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_2.gbc [Cgb]
-gambatte/scx_during_m3/scx_0367c0/scx_during_m3_ds_2.gbc [Cgb]
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_1.gbc [Cgb]
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_4.gbc [Cgb]
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_5.gbc [Cgb]
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_6.gbc [Cgb]
-gambatte/scx_during_m3/scx_attrib_during_m3_spx1_ds.gbc [Cgb]
 gambatte/scx_during_m3/scx_attrib_during_m3_spx2_ds.gbc [Cgb]
 gambatte/scx_during_m3/scx_during_m3_spx2.gbc [Cgb]
 gambatte/scx_during_m3/scx_during_m3_spx2_ds.gbc [Cgb]

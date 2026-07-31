@@ -354,7 +354,8 @@ fn eager_scx_during_m3_map_column_passes() {
         (
             // Double speed, lines >= 1: the holdback IS required — this
             // reference demands an even first column and an odd last, which
-            // only the held indices produce.
+            // only the held indices produce. It also pins the map lead at 2
+            // on LINE 0: dropping it to 0 there puts the last tile 8 px wrong.
             "gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_3.gbc",
             "_cgb04c",
             Model::Cgb,
@@ -375,10 +376,11 @@ fn eager_scx_during_m3_map_column_passes() {
             Model::Cgb,
         ),
         (
-            // The other side of that lead: line 0's STAT dispatch runs 4 dots
-            // later than lines 1-143, so its writes move with it and the lead
-            // drops back to 0 there — at lead 2 this row's first tile misses
-            // its dot-90 commit.
+            // The other side of that lead: line 0's STAT handler starts one
+            // double-speed M-cycle later than on lines 1-143, so its SCX
+            // writes defer nothing (`stage_write_dots`, FF43 `line != 0`).
+            // With the usual 2-dot defer this row's first tile misses its
+            // dot-90 commit.
             "gambatte/scx_during_m3/scx_0060c0/scx_during_m3_ds_1.gbc",
             "_cgb04c",
             Model::Cgb,
