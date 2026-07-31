@@ -84,6 +84,7 @@ Remaining (not yet pixel-perfect) legs are mostly:
 
 - The first frame after an LCD enable is presented blank (`Ppu::frame_skip`, Pan Docs LCDC.7 / SameBoy frame-skip) — frame-compare harnesses must sample >=2 vblanks after the ROM's re-enable.
 - CGB DMG-compat boot palettes are the real boot-ROM *defaults* (BG table != OBJ table, `interconnect.rs`).
+- Hand-off palette RAM splits on the **cart's** CGB flag, not the hardware (`apply_post_boot_state`). A DMG-flagged cart takes the compatibility palettes and leaves BCPS `$C8` / OCPS `$D0`; a CGB-flagged cart never reaches that code and inherits the boot logo's own state — BG palette 0 = `0000 5294 2108 FFFF`, BG 1-7 white, one OBJ byte cleared (`FF00` in palette 0 colour 0), BCPS `$C8` / OCPS `$C1`. Both arms are byte-for-byte what `bootroms/cgb_boot.bin` (also `cgbE`/`cgb0`) hands off, and `misc/boot_hwio-C` is itself DMG-flagged so it pins only the compat arm. Pinned by `cgb_flagged_cart_keeps_the_boot_logo_palettes`.
 - Do: leave the Nintendo-licensee title-hash table deliberately unmodelled.
 
 ## PPU interrupt raising
@@ -843,26 +844,32 @@ entry at runtime" reading was wrong; the ROM never produces it at all.
   is no `ldh (FF6A/6B)`, no `ld c,6A/6B` and no `ld (FF6A/6B),a` anywhere. The
   ROM never writes an OBJ palette, so the reference's `$4261` is whatever the
   console had in OBJ palette RAM at hand-off.
-* Ours is `$1CF2` because `interconnect/boot.rs` installs
+* Ours was `$1CF2` because `interconnect/boot.rs` installed
   `CGB_COMPAT_OBJ_PALETTE` (`7FFF 421F 1CF2 0000`) on **any** CGB-model machine
-  — including CGB-*flagged* carts. That contradicts the same function's
+  — including CGB-*flagged* carts. That contradicted the same function's
   `cgb_cart_cut` comment, which subtracts `$7D8` T-cycles from the hand-off
   precisely because "the DMG-compat path does its compatibility-palette work
-  after the logo" and a CGB cart skips it. Booting these ROMs through the real
-  `bootroms/cgb_boot.bin` / `cgbE_boot.bin` leaves OBJ palette RAM at its
-  power-on fill instead.
+  after the logo" and a CGB cart skips it.
 
-So the row is a **power-on OBJ-palette-RAM residue** row, not a fetch, timing or
-palette-write row. Making it pass means knowing what a cgb04c leaves there, which
-neither the compat set nor our `0xFF` power-on fill supplies. The genuine bug the
-investigation did surface — the unconditional compat install for CGB-flagged
-carts — is worth fixing on its own merits, but it cannot recover this row (it
-would render `$7FFF`, not `$4261`), and it moves post-boot state for every CGB
-cart, so measure `misc/boot_hwio-C` (BCPS `$C8` / OCPS `$D0`) before touching it.
+That install bug was **fixed on its own merits 2026-07-31** (see "Frame skip and
+CGB boot palettes" above): the CGB-cart arm now reproduces `cgb_boot.bin`
+byte-for-byte, and the constraint that made the pass safe is that
+`misc/boot_hwio-C` is itself a DMG-flagged cart (`$143 == $00`), so its BCPS
+`$C8` / OCPS `$D0` expectation measures the compat arm alone. Golden drift: 141
+of 9020 keys, every one a CGB-flagged cart that renders before setting its own
+palettes; zero suite verdicts moved.
+
+It does not recover these three rows, exactly as predicted. Colour 2 of OBJ
+palette 0 is now `$7FFF` (our `0xFF` power-on fill, which the boot ROM leaves
+untouched — it clears only colour 0's low byte) where it was `$1CF2`; the
+reference still wants `$4261`. So the row is a **power-on OBJ-palette-RAM
+residue** row, not a fetch, timing or palette-write row, and making it pass means
+knowing what one particular cgb04c unit left in undefined RAM. Keep it
+baselined.
 
 `scx_attrib_during_m3_spx2_ds` and `scx_during_m3_spx2_ds` dropped from 1096 px
-to the same 8 px at x0 with the 2026-07-31 double-speed landing: all three spx2
-rows are now this one divergence and nothing else.
+to 16 px each (8 px on the single-speed row) with the 2026-07-31 double-speed
+landing: all three spx2 rows are now this one divergence and nothing else.
 
 #### Measured dead end: the CGB LCDC render-view delay (2026-07-31)
 
@@ -879,3 +886,45 @@ LCDC view reaches the fetch grid, not the deferral length.
 
 The arms measured and rejected in this pass are folded into the canonical dead-end
 list above.
+
+#### The CGB OBJ-stall LCDC rows: what the references actually demand (2026-07-31)
+
+Traced rather than swept, on `bgtilemap_spx0{8,9,A,B}_1 [Cgb]` line 8. The kernel
+is a STAT handler writing `LCDC = $9F` (BG map `9C00`, all-black) then `$97`
+(`9800`, all-white); the OBJ is transparent on lines 0-7 and black on 8-15, so
+it contributes nothing but its fetch stall. Every rung writes at the same dot in
+every directory (112 on the left, 236 on the right) and the render view commits
+at 114/238. Only the fetch grid moves, by the sprite's alignment penalty:
+
+| OAM X | screen x | `fetch_x = 2` tile-number read | reference wants tile 2 |
+|---|---|---|---|
+| `$08` | 0 | 116 | NEW map (`$9F`) |
+| `$09` | 1 | 115 | OLD map (`$97`) |
+| `$0A` | 2 | 114 | NEW map |
+| `$0B` | 3 | 113 | OLD map |
+
+The demanded answer is **not monotone in the read dot** — 113 old, 114 new, 115
+old, 116 new — so no read-frame lever can express it. That rules out the whole
+family of levers at once: the deferred-view length (`RENDER_LCDC_DELAY`, swept
+1..=12 CGB-only, shipped 3 already optimal), an extra deferral on
+sprite-selecting lines (swept 1..=6, monotonically worse: 58, 44, 40, 36, 32,
+32 of 74), holding the deferral countdown while the pipeline is stalled (bit-for
+-bit identical to not holding it), and a per-dot ring lead on the fetch's
+`render_lcdc` view (lead 2 recovers all four `bgtilemap_spx09` rows exactly as
+the dot arithmetic predicts, but breaks `spx08`/`spx0A`/`spx0B` and
+`bgtiledata_spx09`, 61 → 49 of 74).
+
+So the error is in the **stall geometry**, not the read frame: our
+`fetch_x = 2` dot must be wrong for OAM X `$09` specifically. It is
+`98 + 8 + stall` with `stall = obj_fetch_base(cgb, 0) + max(0, 5 - (x + SCX) % 8)`
+= `10 - x` on CGB, and the four references want that fetch at `>= 114` for even
+x and `<= 113` for odd x — a parity the current stall (strictly decreasing in x)
+cannot produce. The mode-3 *length* those same stalls feed is frozen by the
+mooneye `intr_2_mode0_timing_sprites` tables, so the next attempt has to
+separate the pixel grid from the length, not retune the penalty.
+
+The lead-2 ring probe also showed the two LCDC address bits want different
+frames: bit 3 (map select, read at the tile-number phase) takes the lead, bit 4
+(tile-data select, read at the Lo/Hi phases two and four dots later) does not.
+Any future arm here must treat them separately or latch both at the
+tile-number dot.

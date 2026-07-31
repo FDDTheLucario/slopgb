@@ -399,6 +399,12 @@ pub struct Interconnect {
 const CGB_COMPAT_BG_PALETTE: [u16; 4] = [0x7FFF, 0x1BEF, 0x6180, 0x0000];
 const CGB_COMPAT_OBJ_PALETTE: [u16; 4] = [0x7FFF, 0x421F, 0x1CF2, 0x0000];
 
+/// BG palette 0 as a CGB-flagged cart inherits it: the shades the boot ROM's
+/// logo animation last left there. A CGB cart never reaches the
+/// compatibility-palette code, so this is what hand-off carries instead
+/// (measured against `bootroms/cgb_boot.bin`; see `apply_post_boot_state`).
+const CGB_BOOT_LOGO_BG_PALETTE: [u16; 4] = [0x0000, 0x5294, 0x2108, 0xFFFF];
+
 impl Interconnect {
     pub fn new(model: Model, cart: Cartridge) -> Self {
         // CGB mode iff the hardware is a CGB/AGB *and* the cart opts in via

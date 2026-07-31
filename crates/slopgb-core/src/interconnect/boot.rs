@@ -18,9 +18,11 @@ impl Interconnect {
     ///   start a transfer.
     /// * DIV is set directly (`Timer::set_div`); an FF04 write resets the
     ///   counter and can clock TIMA through the falling-edge detector.
-    /// * CGB compat palettes are written through BCPS/BCPD before the mode
-    ///   gate would block them (the boot ROM writes them while still in CGB
-    ///   mode, then locks compatibility mode via KEY0).
+    /// * CGB palette RAM is written through BCPS/BCPD before the mode gate
+    ///   would block them (the boot ROM writes them while still in CGB mode,
+    ///   then locks compatibility mode via KEY0). Which set lands depends on
+    ///   the *cart's* CGB flag: a DMG-flagged cart gets the compatibility
+    ///   palettes, a CGB-flagged one the boot logo's leftovers (below).
     /// * Serial and APU get one seeding tick with the final DIV value so
     ///   their internal previous-DIV edge detectors start in phase
     ///   (boot_sclk_align-dmgABCmgb). A seeding tick from prev_div = 0
@@ -53,19 +55,44 @@ impl Interconnect {
         }
 
         if self.model.is_cgb() {
-            // Compat palette: BG palette 0 (8 bytes) leaves BCPS = $88,
-            // OBJ palettes 0+1 (16 bytes) leave OCPS = $90 — boot_hwio-C
-            // reads $C8/$D0.
-            self.ppu.write(0xFF68, 0x80);
-            for c in CGB_COMPAT_BG_PALETTE {
-                self.ppu.write(0xFF69, c as u8);
-                self.ppu.write(0xFF69, (c >> 8) as u8);
-            }
-            self.ppu.write(0xFF6A, 0x80);
-            for _ in 0..2 {
-                for c in CGB_COMPAT_OBJ_PALETTE {
-                    self.ppu.write(0xFF6B, c as u8);
-                    self.ppu.write(0xFF6B, (c >> 8) as u8);
+            if self.cgb_mode {
+                // A CGB-flagged cart skips the compatibility-palette work
+                // entirely: the boot ROM leaves palette RAM as it stood for the
+                // logo animation. Measured by handing this same cart off through
+                // `bootroms/cgb_boot.bin` (also cgbE/cgb0, identical): BG palette
+                // 0 keeps the logo's four colours, BG 1-7 are white, exactly one
+                // OBJ byte is cleared, and the index registers stop at BCPS $C8 /
+                // OCPS $C1. Every other OBJ entry keeps its power-on contents,
+                // which real silicon leaves undefined and this core fills with
+                // $FF (see `Ppu::new`).
+                self.ppu.write(0xFF68, 0x80);
+                for c in CGB_BOOT_LOGO_BG_PALETTE {
+                    self.ppu.write(0xFF69, c as u8);
+                    self.ppu.write(0xFF69, (c >> 8) as u8);
+                }
+                for _ in 0..7 * 4 {
+                    self.ppu.write(0xFF69, 0xFF);
+                    self.ppu.write(0xFF69, 0x7F);
+                }
+                self.ppu.write(0xFF68, 0x88);
+                self.ppu.write(0xFF6A, 0x80);
+                self.ppu.write(0xFF6B, 0x00);
+            } else {
+                // Compat palette: BG palette 0 (8 bytes) leaves BCPS = $88,
+                // OBJ palettes 0+1 (16 bytes) leave OCPS = $90 — boot_hwio-C
+                // reads $C8/$D0. That ROM is a DMG-flagged cart ($143 == $00),
+                // so it measures this arm only.
+                self.ppu.write(0xFF68, 0x80);
+                for c in CGB_COMPAT_BG_PALETTE {
+                    self.ppu.write(0xFF69, c as u8);
+                    self.ppu.write(0xFF69, (c >> 8) as u8);
+                }
+                self.ppu.write(0xFF6A, 0x80);
+                for _ in 0..2 {
+                    for c in CGB_COMPAT_OBJ_PALETTE {
+                        self.ppu.write(0xFF6B, c as u8);
+                        self.ppu.write(0xFF6B, (c >> 8) as u8);
+                    }
                 }
             }
             // OPRI: DMG-compat mode uses DMG-style X priority (FF6C reads

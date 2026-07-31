@@ -82,3 +82,45 @@ fn new_without_boot_is_unchanged() {
         "post-boot register state unchanged"
     );
 }
+
+/// Hand-off palette RAM splits on the cart's CGB flag, not on the hardware.
+/// A DMG-flagged cart takes the compatibility palettes (BCPS $C8 / OCPS $D0,
+/// mooneye `misc/boot_hwio-C`, itself a DMG-flagged cart); a CGB-flagged cart
+/// skips that code entirely and inherits the boot logo's own palette state
+/// (BCPS $C8 / OCPS $C1), byte-for-byte what `bootroms/cgb_boot.bin` leaves.
+#[test]
+fn cgb_flagged_cart_keeps_the_boot_logo_palettes() {
+    let words = |ram: &[u8; 64], i: usize| u16::from(ram[i * 2]) | (u16::from(ram[i * 2 + 1]) << 8);
+
+    let gb = GameBoy::new(Model::Cgb, rom_with_cgb_flag(0x80)).unwrap();
+    let (bg, obj) = gb.cgb_palette_ram();
+    assert_eq!(
+        [0, 1, 2, 3].map(|i| words(bg, i)),
+        [0x0000, 0x5294, 0x2108, 0xFFFF],
+        "CGB cart BG palette 0"
+    );
+    assert!(
+        (4..32).all(|i| words(bg, i) == 0x7FFF),
+        "CGB cart BG palettes 1-7 are white"
+    );
+    assert_eq!(words(obj, 0), 0xFF00, "CGB cart OBJ palette 0 colour 0");
+    assert!(
+        (1..32).all(|i| words(obj, i) == 0xFFFF),
+        "CGB cart OBJ RAM keeps its power-on fill past the one cleared byte"
+    );
+    assert_eq!((gb.debug_read(0xFF68), gb.debug_read(0xFF6A)), (0xC8, 0xC1));
+
+    let gb = GameBoy::new(Model::Cgb, rom_with_cgb_flag(0x00)).unwrap();
+    let (bg, obj) = gb.cgb_palette_ram();
+    assert_eq!(
+        [0, 1, 2, 3].map(|i| words(bg, i)),
+        [0x7FFF, 0x1BEF, 0x6180, 0x0000],
+        "DMG cart BG compat palette"
+    );
+    assert_eq!(
+        [0, 1, 2, 3].map(|i| words(obj, i)),
+        [0x7FFF, 0x421F, 0x1CF2, 0x0000],
+        "DMG cart OBJ compat palette"
+    );
+    assert_eq!((gb.debug_read(0xFF68), gb.debug_read(0xFF6A)), (0xC8, 0xD0));
+}
