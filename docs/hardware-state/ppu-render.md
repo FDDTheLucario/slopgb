@@ -628,8 +628,48 @@ interrupt: term 3 above.
 | row(s) | shape | note |
 |---|---|---|
 | `old/offset_3/_ds_2` (8 px), `scx_0360c0/_ds_2` (160 px), `scx_0761c0/_ds_5` (8 px) | line 0 only | rungs that still straddle a fetch boundary after term 3 |
-| `scx_0761c0/_ds_6` | first tile, lines 1-143 | its `$61` write commits exactly on the hunt lock dot 96 but is *pre*-lock by raw dot (92 < 96), so term 2 does not reach it; the reference wants it visible at the dot-98 read |
+| `scx_0761c0/_ds_6` | first tile, lines 1-143 | its `$61` write commits exactly on the hunt lock dot; see the ground truth below |
 | `old/offset_3/_ds_3` | 2723 px | EXCEED — SameBoy misses it too |
+
+##### `scx_0761c0/_ds_6`: ground truth and four refuted levers (2026-07-31)
+
+`colreq` on the `[Cgb]` reference at ly 8 makes this row DISCRIMINATING at the
+failing tile and settles what it wants — the earlier "wants it visible at the
+dot-98 read" note was the right instinct with the wrong dots:
+
+| row | x1-8 accepts | x9-16 accepts | we produce at x1-8 |
+|---|---|---|---|
+| `_ds_5` | UNRESOLVED | UNRESOLVED | (fails on line 0 only) |
+| **`_ds_6`** | **even 12..30** | odd 13..31 | **1** |
+| `_ds_7` | odd 1..11 | odd 13..31 | 1 ✓ |
+
+Column 12 is `$61 >> 3`, so `_ds_6`'s first tile has to be formed from the NEW
+SCX and `_ds_7`'s from the old — with both fetching at dot 98. The whole
+difference is the commit: `_ds_6` writes at raw dot 94 and commits at 96, which
+is exactly the dot the fine-scroll comparator resolves on (`HUNT` fires at 96
+against the OLD fine 7, then the write commits behind it); `_ds_7` writes at 96,
+after that dot's `hunt_done`, and commits at 98. The map ring is sampled at the
+top of each fetcher step, so a commit landing on dot 96 misses `scx_ring[96]`
+and the lead-2 read at dot 98 still sees `$07` — hence our column 1 through
+`bg_map_col`'s counter branch (`fine_moved` is false because the ring value's
+fine still equals `hunt_fine`).
+
+Four arms built and measured against the 178-row `scx_during_m3` corpus
+(baseline 170 pass), all refuted:
+
+| arm | result |
+|---|---|
+| DS FF43 pre-lock debt swept 0..4 (blanket `!hunt_done`) | 151, 152, 152, 170, 170 — 4 (the shipped value) is optimal; anything shorter costs 18 rows |
+| flush a pending FF43 stage at the hunt lock (swept over `dots_left` 0..6) | 170, 167, 159, 159, 156, 156, 152 — monotonically worse |
+| DS pre-output (`lx == 0`) map lead swept 0..3 | 151, 160, **170**, 162 — the shipped 2 is optimal, so the lead cannot be the lever either |
+| debt 2 gated on "the commit lands on the comparator's resolve dot" (`hunt_idx == (SCX&7) - 1` at stage time) | 168 — fires on the wrong rungs (`scx_0367c0/_ds_3`, `scx_0360c0/_ds_3` break) and `_ds_6` does not move: the `hunt_idx` visible at `stage_write_dots` is not the render's value for that dot |
+
+So the mechanism is identified — a commit landing ON the resolve dot must reach
+the fetch grid from that dot, the fetch-grid twin of the `dot >= hunt_match_dot`
+ordering term 2 already encodes on the comparator side — but no predicate
+available at *stage* time expresses it. The next attempt should move the
+ordering instead of the debt: sample `scx_ring` after the strobe rather than
+before it, on the lock dot only, and re-score the whole corpus.
 
 #### OPEN: the SCY line-0 rungs are a sub-dot separation (derived, 2026-07-31)
 
