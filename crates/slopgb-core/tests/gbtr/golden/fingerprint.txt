@@ -4242,7 +4242,7 @@ gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_1.gbc [Cgb] | 9ab4e008dd5a4
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_1.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_2.gbc [Cgb] | 2702e476c15219a5 | b6b0632d997517d6
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_2.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
-gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_3.gbc [Cgb] | d3216ce40f8ec5a5 | b6b0632d997517d6
+gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_3.gbc [Cgb] | 64c506d1562437e5 | b6b0632d997517d6
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_3.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_4.gbc [Cgb] | 884771ea52958b25 | b6b0632d997517d6
 gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_4.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
@@ -4376,7 +4376,7 @@ gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_1.gbc [Cgb] | 5a75e6cefc9a2b2
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_1.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_2.gbc [Cgb] | cbc6dc6964781e27 | b6b0632d997517d6
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_2.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_3.gbc [Cgb] | ded62769d5cb0327 | b6b0632d997517d6
+gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_3.gbc [Cgb] | 7fefd31db76cf447 | b6b0632d997517d6
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_3.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_4.gbc [Cgb] | 56578cdb22c1f8a5 | b6b0632d997517d6
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_4.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
@@ -4460,11 +4460,11 @@ gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_1.gbc [Cgb] | e57942e0f879d80
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_1.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_2.gbc [Cgb] | 0dd957655fe526af | b6b0632d997517d6
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_2.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_3.gbc [Cgb] | 00f8eda0b159a7c5 | b6b0632d997517d6
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_3.gbc [Cgb] | 72801163b4d9360f | b6b0632d997517d6
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_3.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_4.gbc [Cgb] | cd84e3bcb7d431aa | b6b0632d997517d6
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_4.gbc [Cgb] | 4e2c6e4a0483760c | b6b0632d997517d6
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_4.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
-gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_5.gbc [Cgb] | 13e053cf95ddbbea | b6b0632d997517d6
+gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_5.gbc [Cgb] | 551b5efdc5b9b3cc | b6b0632d997517d6
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_5.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_6.gbc [Cgb] | 30fea6cad9aff6a5 | b6b0632d997517d6
 gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_6.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6

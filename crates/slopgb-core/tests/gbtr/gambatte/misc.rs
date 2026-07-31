@@ -309,8 +309,9 @@ fn eager_dmg_scx_m3_extend_bare_exit_passes() {
 /// commits one dot after the CGB cut-off. `scx_0360c0/_2` and `scx_0761c0/_4`
 /// pin the holdback: when an SCX write moves `SCX & 7` behind the comparator,
 /// the whole first tile is dropped and must not advance the map counter.
-/// `old/offset_3/_ds_1` guards the double-speed side, where the holdback is
-/// off — running it there moves this row off its reference.
+/// The two double-speed rows pin the speed gate from both sides:
+/// `scx_0360c0/_ds_3` requires the holdback on lines >= 1, and
+/// `old/offset_3/_ds_1` requires it off on line 0.
 #[test]
 fn eager_scx_during_m3_map_column_passes() {
     let Some(root) = common::gbtr_root() else {
@@ -344,8 +345,18 @@ fn eager_scx_during_m3_map_column_passes() {
         ),
         (
             // Bare `<stem>.png` (the .gbc-extension fallback the harness uses).
+            // The line-0 guard: the holdback must stay off there in double
+            // speed, or this row's last tile lands on column 11.
             "gambatte/scx_during_m3/old/offset_3/scx_during_m3_ds_1.gbc",
             "",
+            Model::Cgb,
+        ),
+        (
+            // Double speed, lines >= 1: the holdback IS required — this
+            // reference demands an even first column and an odd last, which
+            // only the held indices produce.
+            "gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_3.gbc",
+            "_cgb04c",
             Model::Cgb,
         ),
     ];

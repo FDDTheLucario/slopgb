@@ -384,36 +384,47 @@ fell to two non-scalar terms.
 **So "these rows need a half-dot PPU clock" is not established.** What IS
 established is narrower, and proven below.
 
-#### PROVEN: the holdback decision itself is welded on the render FSM
+#### The DS holdback: required on lines >= 1, off on line 0 (LANDED)
 
-Do not re-chase a render-state discriminator for the DS holdback.
-`old/offset_3/_ds_1` (its ly 0) and `scx_0360c0/_ds_3` (its ly 1) are
-**bit-identical** everywhere we can observe:
+The earlier "welded on the render FSM" reading in this file was **wrong**, and
+the error is instructive: it compared `old/offset_3/_ds_1` and
+`scx_0360c0/_ds_3` at the *start* of the line, where they are indeed identical
+(same hunt trace, same commit dot 90 / same half, same first-output state: dot
+105, 8 dropped, `fetch_x` 2, `hunt_fine` 0). But `_ds_1`'s failure is at the
+line **end**, where their late `$c0` commits differ — dot 247 against 239.
+Comparing the wrong end manufactured a weld that is not there.
 
-| | ds_1 ly0 | 0360c0/ds_3 ly1 |
+Ground truth, taken by matching each reference's 8-pixel segments against the
+map's own column signatures (`colreq` method: dump MAP/ATTR/TILE/BGPAL, render
+each column, match) rather than by sweeping:
+
+| ROM (ly 1) | first tile | last tile |
 |---|---|---|
-| hunt trace (dots 89-96) | `idx 0..7`, fine 3→0 at dot 91 | identical |
-| SCX commit | dot 90, dhalf 1 | dot 90, dhalf 1 |
-| first output pixel | dot 105, dropped 8, `fetch_x` 2, `hunt_fine` 0 | identical |
+| `scx_0060c0/_ds_1`, `_ds_2` | even 12..30 | odd 13..31 |
+| `scx_0060c0/_ds_3`..`_ds_8` | even 0..10 | odd 1..11 |
+| `scx_0360c0/_ds_1`, `_ds_2` | even 12..30 | odd 13..31 |
+| **`scx_0360c0/_ds_3`** | **even 12..30** | **odd 1..11** |
+| `old/offset_3/_ds_1` | ANY | ANY |
 
-and they want **opposite** answers: `0360c0/_ds_3` needs the hold globally (its
-map alternates every tile, so a ±1 column shift breaks every row);
-`old/offset_3/_ds_1` must not have it.
+`scx_0360c0/_ds_3` is decisive: held, its indices are 0 and 19, giving columns
+12 (even) and 11 (odd, in 1..11) — both satisfied. Unheld, index 1 gives column
+13, odd where an even column is required. **The holdback is required at double
+speed.** It recovers that row with zero regressions.
 
-Nor can a downstream law rescue `_ds_1` under the hold: held, its last visible
-tile is index 19 — odd — so its column is odd under *any* coarse SCX, and
-`old/offset_3`'s map has tile `01` at every odd column while the reference
-wants `00`. That is a proof, not a sweep.
+Line 0 is carved out for `old/offset_3/_ds_1`, the only DS row that exhausts
+its hunt on line 0. Its reference is degenerate everywhere except ly 0's last
+tile, which must land in columns 12..31; held, that tile is index 19 against
+the line's `$c0` (coarse 24) → column 11. Making it right needs that write —
+committed at dot 247, read at 250 — to go *unseen*, and no map lead achieves
+that: swept 0..7, plain and with a pre-output exemption, everything >= 3
+collapses (129 → 114 → 103) because other DS rows have writes landing closer
+still that must be seen. The line-0 exclusion is therefore **empirical, not
+derived**; it is pinned from both sides in
+`gambatte::misc::eager_scx_during_m3_map_column_passes`.
 
-A gate of `ly >= 1 || SCX&7 != 0` scores **+2 rows, zero regressions on the
-full battery** (each clause is independently clean and recovers a different
-row) — but it is a **coincidence fit** on which line each ROM happens to
-exhaust its hunt, and it was NOT landed for that reason. Do not resurrect it as
-written.
-
-The live lever is elsewhere: `_ds_1`'s error under the hold is at the line END
-(the late `$c0` write's column), a different mechanism from `_ds_3`'s global
-shift. Attack that, not the hold.
+What would settle it: `_ds_1`'s line-0 last tile is the only constraint holding
+the exclusion up, and it is a *line-end late-write* question, not a holdback
+question. Attack that write's column, and the exclusion should dissolve.
 
 #### SUPERSEDED: the DS residual as "the whole-dot contract" (kept for its measurements)
 

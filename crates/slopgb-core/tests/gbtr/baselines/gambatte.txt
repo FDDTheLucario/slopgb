@@ -392,8 +392,10 @@ gambatte/oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D.gbc [Cgb]
 # column; docs/hardware-state/ppu-render.md). The `_ds_*` rows below are NOT
 # proven class A — the "sub-cycle phase" reason was measured false 2026-07-30
 # (the rotation legs commit on eight distinct whole dots, all the same half).
-# What IS proven is narrower: the holdback decision is welded on the render
-# FSM for one pair. See ppu-render.md before touching them.
+# The holdback now runs at double speed too, on lines >= 1 (ground truth from
+# the reference column tables, ppu-render.md). Line 0 is excluded empirically
+# for old/offset_3/_ds_1; that exclusion rests on ONE constraint, its line-0
+# last tile, which is a late-write column question — settle that and it goes.
 #
 # The one survivor that is NOT double speed is `scx_during_m3_spx2 [Cgb]`, a
 # CGB OBJ-palette VALUE divergence: its reference pixel is raw $4261, ours
@@ -415,7 +417,6 @@ gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_2.gbc [Cgb]
 gambatte/scx_during_m3/scx_0063c0/scx_during_m3_ds_3.gbc [Cgb]
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_1.gbc [Cgb]
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_2.gbc [Cgb]
-gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_3.gbc [Cgb]
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_6.gbc [Cgb]
 gambatte/scx_during_m3/scx_0360c0/scx_during_m3_ds_7.gbc [Cgb]
 gambatte/scx_during_m3/scx_0363c0/scx_during_m3_ds_2.gbc [Cgb]

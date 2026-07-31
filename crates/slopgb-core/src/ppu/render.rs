@@ -488,7 +488,8 @@ impl Ppu {
             // 12-dot startup anchor is held by the `pos_dot` push gate
             // in `push_allowed`, not by freezing the fetch.
             self.render.prefill_pos += 1;
-            if self.render.prefill_pos == 8 && !self.render.hunt_done && !self.ds {
+            if self.render.prefill_pos == 8 && !self.render.hunt_done && (!self.ds || self.ly >= 1)
+            {
                 // The prefill ran out with no comparator match: an SCX write
                 // moved `SCX & 7` behind the counter, so the whole first tile
                 // shifts out while the hunt carries on through the real pops
@@ -503,9 +504,18 @@ impl Ppu {
                 // to the index the dropped tile would have taken, and
                 // `bg_map_col` masks to 5 bits either way.
                 //
-                // Single speed only. In double speed the write lands on a
-                // half-dot this clock cannot place (the class-A `_ds_` ladder),
-                // and the hold moves `old/offset_3/_ds_1` off its reference.
+                // Double speed excludes LINE 0 only. The hold is required at
+                // double speed too — `scx_0360c0/_ds_3`'s reference demands an
+                // EVEN first column (12/14/../30) and an ODD last (1..11),
+                // which only the held indices 0 and 19 produce. Line 0 is
+                // carved out for `old/offset_3/_ds_1`, whose line-0 reference
+                // wants its last tile at a column in 12..31: held, that tile is
+                // index 19 against the line's late `$c0`, giving column 11.
+                // Fixing it needs that write unseen 3 dots later, and no map
+                // lead does that without breaking the rows whose writes land
+                // closer still and must be seen (swept 0..7, both with and
+                // without a pre-output exemption). Empirical, not derived — the
+                // constraint tables are in docs/hardware-state/ppu-render.md.
                 self.render.fetch_x = self.render.fetch_x.wrapping_sub(1);
             }
             if self.eff.lcdc & LCDC_OBJ_ENABLE != 0 {
