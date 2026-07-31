@@ -1,6 +1,8 @@
 //! Dot-accurate PPU with pixel FIFO. PPU work package.
 //!
-//! Stepped one dot (T-cycle) at a time by the interconnect. Mode timing must
+//! Stepped one 8 MHz half-dot at a time by the interconnect
+//! ([`Ppu::tick_half`]; the whole-dot [`Ppu::tick`] body runs on the
+//! dot-completing half). Mode timing must
 //! be exact: variable-length mode 3 (SCX fine scroll, window, sprite fetch
 //! stalls), STAT interrupt line blocking, LY=153→0 early wrap, LCD-enable
 //! first-frame quirks (mooneye `acceptance/ppu/*`, `lcdon_*`).
@@ -21,7 +23,7 @@
 //! | 4            | STAT mode reads 2; OAM writes blocked; LYC compare valid (line 0's OAM pulse sits here, with its own dispatch-late/m1-blocked rules — see `stat_update_tick`) |
 //! | 80           | VRAM reads blocked (the serial scan's last entry latch sits at dot 81 — see §Dot-serial OAM scan) |
 //! | 84           | STAT mode reads 3; VRAM writes blocked |
-//! | P − 2        | mode 0: STAT reads 0, mode-0 IRQ source asserts, OAM+VRAM unblock, OAM blocking level drops — two dots before the pipe end P = 256 + SCX%8 + sprite/window penalties (three on sprite-laden DMG lines, whose first OBJ fetch costs 6 dots: the flip stays on its mooneye dot while the pixels shift — see `obj_fetch_base`); `m0_flip_events` in render.rs: the gbmicrotest hblank_int/int_hblank grids pin the IRQ dot, mooneye intr_2_mode0_timing/_sprites and the gbmicrotest ppu_sprite0/win*_b grids the flip — both at 254 + SCX%8 on a bare line. The pipe-end anchors (HBlank-DMA trigger, CGB palette-RAM blocking) stay at P |
+//! | P − 2        | mode 0: STAT reads 0, mode-0 IRQ source asserts, OAM+VRAM unblock, OAM blocking level drops — two dots before the pipe end P = 256 + SCX%8 + sprite/window penalties (three on sprite-laden DMG lines, whose first OBJ fetch costs 6 dots: the flip stays on its mooneye dot while the pixels shift — see `obj_fetch_base`); `m0_flip_events` in render/mode0.rs: the gbmicrotest hblank_int/int_hblank grids pin the IRQ dot, mooneye intr_2_mode0_timing/_sprites and the gbmicrotest ppu_sprite0/win*_b grids the flip — both at 254 + SCX%8 on a bare line. The pipe-end anchors (HBlank-DMA trigger, CGB palette-RAM blocking) stay at P |
 //!
 //! VBlank: line 144 dots 0-3 still read STAT mode 0 (the mode-0 IRQ source
 //! stays asserted, keeping the STAT line gapless for `stat_irq_blocking`);
@@ -114,7 +116,7 @@
 //! * On MGB with the transfer frozen mid-byte by the core-clock gate,
 //!   every entry reads as the documented glitch sprite instead
 //!   (madness/mgb_oam_dma_halt_sprites.s — `mgb_dma_freeze_glitch_entry`
-//!   in render.rs); the other models' frozen-DMA glitches are
+//!   in render/sprite.rs); the other models' frozen-DMA glitches are
 //!   unreferenced and keep the plain $FF disconnect, which the
 //!   dmg08-verified oamdma_late_halt_stat rows confirm for selection.
 
@@ -408,7 +410,7 @@ pub struct Ppu {
     /// as (OAM index about to be replaced, in-flight source byte). Set by
     /// the interconnect; while set, the MGB OAM scan sees glitched data
     /// (madness/mgb_oam_dma_halt_sprites.s — see
-    /// `mgb_dma_freeze_glitch_entry` in render.rs).
+    /// `mgb_dma_freeze_glitch_entry` in render/sprite.rs).
     dma_freeze: Option<(u8, u8)>,
     /// The OAM DMA controller owns OAM for the current M-cycle's dots: the
     /// PPU's OAM view is disconnected and the mode-2 scan latches $FF — a
@@ -539,7 +541,7 @@ pub struct Ppu {
     halt_refetch: bool,
     /// The externally visible mode-0 flip (STAT mode bits, OAM/VRAM
     /// unblock): rises with `m0_src` ahead of the pipe end (see
-    /// `m0_flip_events` in render.rs), and can drop back mid-line when
+    /// `m0_flip_events` in render/mode0.rs), and can drop back mid-line when
     /// a late write arms a new stall (`m0_unflip`).
     line_render_done: bool,
     /// The dot `line_render_done` fired on this line (0 =
@@ -593,7 +595,7 @@ pub struct Ppu {
     /// The mode-0 STAT IRQ source level: rises on the visible flip's
     /// dot — 2 dots before the pipe end on a bare line, 1 in double
     /// speed and on window-stalled lines, 0 on DMG window-aborted lines
-    /// (see `m0_flip_events` in render.rs) — taking over the OAM
+    /// (see `m0_flip_events` in render/mode0.rs) — taking over the OAM
     /// blocking level gaplessly, and drops at dot 4 of the next line
     /// when the mode-2 window becomes visible.
     m0_src: bool,

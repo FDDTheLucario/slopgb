@@ -7,7 +7,8 @@ implements one capability trait and invokes its macro. Human guide:
 
 ## The unsafe rule (why this crate is `deny`, not the workspace `forbid`)
 
-Crate-level `#![deny(unsafe_code)]` — a wasm guest needs two linkage MARKERS the
+`[lints.rust] unsafe_code = "deny"` in this crate's own `Cargo.toml` (it opts OUT
+of `[lints] workspace = true`) — a wasm guest needs two linkage MARKERS the
 workspace `forbid` rejects: the `unsafe extern` import block (`abi.rs`) and the
 `#[unsafe(no_mangle)]` exports (the macros). Both are scope-`allow`ed and are the
 ENTIRE unsafe surface. No `unsafe` blocks, no raw pointers, no `from_raw_parts`.
@@ -21,7 +22,7 @@ bounds-checked `Memory`).
 |---|---|---|
 | `Plugin` | `slopgb_plugin!` | tier 1: per-frame read-only `on_frame(&GameBoyView)` |
 | `ToolPlugin` | `slopgb_tools!` (many) / `slopgb_tool_plugin!` (one) | tier 2: on-demand `call(args, &view) -> ToolResult`; a module lists several tools, each with `name`/`description`/`input_schema` for MCP `tools/list` |
-| `Coprocessor` | `slopgb_coprocessor_plugin!` | tier 3: host-driven `reset`/`run_until`/comm-ports |
+| `Coprocessor` | `slopgb_coprocessor_plugin!` | tier 3: host-driven `reset`/`run_until`/comm-ports, plus a `MANIFEST` declaring `id`/`name`/`provides` role(s)/contributed `flag`s + `menu` rows |
 
 `GameBoyView` also carries the tool-only debug helpers (`read_banked`, `cdl_flag`,
 `set_breakpoint`, and the bulk-result `registers_text`/`cdl_ranges`/`disassemble`/
@@ -29,14 +30,19 @@ bounds-checked `Memory`).
 without a JSON dep. These require the tool host, not the per-frame host.
 
 **Subsystem plugins are first-class.** A `Coprocessor` (`SUBSYSTEM`) plugin — e.g.
-the SPC700, 65C816, MSU-1 chips (`slopgb-{spc700,w65c816,msu1}-plugin`) — is as
+the SPC700, 65C816, SNES-PPU, MSU-1, SF2 units
+(`slopgb-{spc700,w65c816,snes-ppu,msu1,sf2}-plugin`) — is as
 valid a plugin as any introspection one. The plugin **system** must support
 *every* valid subsystem type: `LoadedCoprocessor` is generic (any module
-exporting the `reset`/`run_until`/`port_read`/`port_write` ABI loads). What
+exporting the coprocessor ABI loads; `reset`/`run_until`/`port_read`/`port_write`
+are the only trait methods without a default). What
 differs is the *loader*, not the validity — a `SUBSYSTEM` plugin exports the
 coprocessor ABI, not `on_frame`, so it loads through `LoadedCoprocessor` (driven
-by the frontend's coprocessor seams — the SGB coprocessor auto-loads from the
-`--plugins` dir, MSU-1 from a `--msu1` pack), **not** the tier-1 `PluginHost`
+by the frontend's coprocessor seams — the SGB coprocessor auto-loads spc700 +
+w65c816 + the optional snes-ppu + msu1 from the `--plugins` dir, while `sf2.wasm`
+is driven straight by the frontend; a plugin-contributed flag like `--msu1` /
+`--sf2` names the chip's *data* — the `.pcm` pack dir, the SoundFont file — never
+the wasm), **not** the tier-1 `PluginHost`
 per-frame pump. The tier-1 `--plugins` *scanner* skips a subsystem plugin in that
 dir — a loader mismatch, never "an invalid plugin".
 

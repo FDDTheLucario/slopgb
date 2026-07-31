@@ -1,15 +1,17 @@
-//! Startup resource resolution: the boot-ROM / SGB-BIOS bytes and the opt-in
-//! plugin hosts (`--plugins` dir, MSU-1 pack), each resolved from CLI flag /
-//! env var / persisted setting. Split out of `main.rs` to keep it under the
-//! size cap.
+//! Startup resource resolution: the boot-ROM / SGB-BIOS bytes, the plugin
+//! registry (manifest-declared CLI flags — see `docs/ui-state/plugin-api.md`),
+//! and the opt-in tier-1 plugin host (`--plugins` dir), each resolved from CLI
+//! flag / env var / persisted setting. Split out of `main.rs` to keep it under
+//! the size cap.
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process;
 
-use slopgb_plugin_host::PluginHost;
+use slopgb_plugin_host::{PluginHost, PluginRegistry, RegistryError};
 
 use crate::cli::Options;
-use crate::{msu1, windows};
+use crate::windows;
 
 /// Resolve the boot ROM bytes from `--boot` or the `SLOPGB_BOOT` env var,
 /// reading the file. A read error is logged and treated as no boot ROM
@@ -53,8 +55,9 @@ pub(crate) fn load_plugins(opts: &Options, settings: &windows::options::Settings
                 // higher-tier (subsystem/tool), driven via their own seams.
                 eprintln!(
                     "slopgb: {total} subsystem/tool plugin(s) in '{}' — the SGB \
-                     coprocessor (spc700 + w65c816) auto-loads from here; MSU-1 via \
-                     --msu1. Not the per-frame --plugins pump.",
+                     coprocessor (spc700 + w65c816) auto-loads from here; MSU-1/SF2 \
+                     via their own manifest-declared flags. Not the per-frame \
+                     --plugins pump.",
                     dir.display()
                 );
             }
@@ -67,28 +70,10 @@ pub(crate) fn load_plugins(opts: &Options, settings: &windows::options::Settings
     }
 }
 
-/// Load an MSU-1 pack from `--msu1` or `SLOPGB_MSU1` (in that precedence).
-/// Absent → `None` (no MSU-1; the core + audio path stay byte-identical). A pack
-/// that fails to load (missing plugin wasm, bad module) is logged and treated as
-/// absent (non-fatal — the game still runs, just without MSU-1 audio).
-pub(crate) fn load_msu1(opts: &Options) -> Option<msu1::Msu1> {
-    let dir = opts
-        .msu1
-        .clone()
-        .or_else(|| env::var_os("SLOPGB_MSU1").map(PathBuf::from))?;
-    match msu1::Msu1::load(&dir) {
-        Ok(m) => Some(m),
-        Err(e) => {
-            eprintln!("slopgb: {e}");
-            None
-        }
-    }
-}
-
 /// Resolve the optional SGB BIOS bytes from `--sgb-bios` or `SLOPGB_SGB_BIOS`,
 /// reading the file. A read error is logged and treated as no BIOS (non-fatal).
-/// The border/title-palette are *not* extracted from it — slopgb is high-level
-/// and never runs the SNES CPU — so only the SGB audio path is fed; the honest
+/// The border/title-palette are *not* extracted from it — core is high-level and
+/// runs no SNES CPU itself — so only the SGB audio path is fed; the honest
 /// status is logged and the default border stands (`docs/hardware-state/sgb.md`).
 pub(crate) fn resolve_sgb_bios(opts: &Options) -> Option<Vec<u8>> {
     let path = opts
@@ -111,3 +96,134 @@ pub(crate) fn resolve_sgb_bios(opts: &Options) -> Option<Vec<u8>> {
         }
     }
 }
+
+/// Pre-scan `args` for `--plugins <dir>` (bypassing the full [`Options::parse`],
+/// which needs the declared-flag table this very directory produces — see
+/// [`build_registry`]), falling back to `SLOPGB_PLUGINS_DIR` then the persisted
+/// `settings.plugins.dir`, matching [`load_plugins`]'s precedence so a
+/// directory set only in Options doesn't lose its declared flags.
+pub(crate) fn prescan_plugins_dir(
+    args: impl Iterator<Item = String>,
+    settings: &windows::options::Settings,
+) -> Option<PathBuf> {
+    let mut cli_dir = None;
+    let mut args = args.peekable();
+    while let Some(a) = args.next() {
+        if a == "--plugins" {
+            cli_dir = args.next().map(PathBuf::from);
+        }
+    }
+    cli_dir
+        .or_else(|| env::var_os("SLOPGB_PLUGINS_DIR").map(PathBuf::from))
+        .or_else(|| {
+            (!settings.plugins.dir.is_empty()).then(|| PathBuf::from(&settings.plugins.dir))
+        })
+}
+
+/// Build the [`PluginRegistry`] for `dir` (from [`prescan_plugins_dir`]): an
+/// empty registry with no dir; every manifest [`PluginRegistry::scan`] finds in
+/// one. Two plugins declaring the same role is a fatal startup error (prints
+/// naming both files and exits `2`) — unlike a bad/missing directory
+/// ([`RegistryError::Io`]), which is logged and treated as an empty registry so
+/// a typo can't wedge startup.
+pub(crate) fn build_registry(dir: Option<&Path>) -> PluginRegistry {
+    let Some(dir) = dir else {
+        return PluginRegistry::new();
+    };
+    match PluginRegistry::scan(dir) {
+        Ok(reg) => {
+            // A coprocessor that could not be used contributes no flags or menu
+            // rows, so its absence surfaces as `unknown option '--sf2'` — which
+            // points at the flag, not at the stale plugin that caused it. Say
+            // which file and why.
+            for line in reg.skipped() {
+                eprintln!("slopgb: plugin ignored — {line}; re-run `cargo xtask stage-plugins`");
+            }
+            reg
+        }
+        Err(e @ RegistryError::DuplicateRole { .. }) => {
+            eprintln!("slopgb: fatal: {e}");
+            process::exit(2);
+        }
+        Err(e @ RegistryError::Io(_)) => {
+            eprintln!("slopgb: cannot read plugins dir '{}': {e}", dir.display());
+            PluginRegistry::new()
+        }
+    }
+}
+
+/// Apply each declared plugin flag's explicit value into `registry`: the CLI
+/// value (`cli_flags`, from `Options::plugin_flags`) if given, else the
+/// generic env fallback `SLOPGB_<NAME>` (the flag's declared name, uppercased,
+/// `-` → `_` — e.g. `sf2` → `SLOPGB_SF2`, `msu1` → `SLOPGB_MSU1`, matching
+/// today's fixed names). Neither present leaves the manifest's own default
+/// (already resolved lazily by `PluginRegistry::flag` against its `Context`).
+pub(crate) fn apply_plugin_flags(registry: &mut PluginRegistry, cli_flags: &[(String, String)]) {
+    let declared: Vec<String> = registry
+        .flags()
+        .into_iter()
+        .map(|(_, f)| f.name.clone())
+        .collect();
+    for name in declared {
+        if let Some((_, v)) = cli_flags.iter().find(|(n, _)| n == &name) {
+            registry.set_flag(&name, v);
+        } else {
+            let env_name = format!("SLOPGB_{}", name.to_ascii_uppercase().replace('-', "_"));
+            if let Ok(v) = env::var(&env_name) {
+                registry.set_flag(&name, &v);
+            }
+        }
+    }
+}
+
+/// The registry's already-resolved effective value for every flag it declares
+/// (`[(name, value)]`, only the flags that resolved to `Some` — an explicit
+/// CLI/env value, else the manifest's own default expanded against the
+/// registry's current [`Context`], else omitted) — what
+/// `Session::set_plugin_flags` consumes.
+pub(crate) fn effective_plugin_flags(registry: &PluginRegistry) -> Vec<(String, String)> {
+    registry
+        .flags()
+        .into_iter()
+        .map(|(_, f)| f.name.clone())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .filter_map(|name| registry.flag(&name).map(|v| (name, v)))
+        .collect()
+}
+
+/// Push the persisted per-plugin enable flags onto the freshly scanned `host`.
+pub(crate) fn apply_disabled_plugins(host: &mut PluginHost, cfg: &windows::options::PluginConfig) {
+    let subsystem: Vec<String> = host
+        .infos()
+        .into_iter()
+        .filter(|i| i.capabilities.contains("subsystem"))
+        .map(|i| i.name)
+        .collect();
+    for name in disabled_to_apply(cfg, &subsystem) {
+        host.set_enabled(&name, false);
+    }
+}
+
+/// Which plugin names to turn off, given the persisted config and the names the
+/// live host reports as tier-3 `SUBSYSTEM` plugins.
+///
+/// Each persisted key governs **its own tier**. [`PluginHost::set_enabled`]
+/// matches by name across both the driven and the discovered lists, so a
+/// tier-1 name that collides with a subsystem plugin's is dropped: builds
+/// before the subsystem toggle wrote every discovered subsystem plugin into the
+/// tier-1 key, and honouring that stale name would silently kill SGB audio.
+/// Only `disabled_subsystems` speaks for a subsystem plugin.
+fn disabled_to_apply(cfg: &windows::options::PluginConfig, subsystem: &[String]) -> Vec<String> {
+    let mut names: Vec<String> = cfg
+        .disabled_names()
+        .into_iter()
+        .filter(|n| !subsystem.contains(n))
+        .collect();
+    names.extend(cfg.disabled_subsystem_names());
+    names
+}
+
+#[cfg(test)]
+#[path = "app_boot_tests.rs"]
+mod tests;

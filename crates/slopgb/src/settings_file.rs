@@ -72,7 +72,16 @@ pub fn load() -> Loaded {
 
 /// Persist `settings` + `recent` to the native file (preserving unknown
 /// keys/sections), atomically. No-op without a config dir; errors are logged.
+///
+/// Inert under `cfg(test)`: the frontend tests build real `App`s, and every load
+/// path calls `push_recent`, which persists. Against the ambient config that
+/// rewrites the developer's own `slopgb.conf` and evicts their recent ROMs with
+/// temp-dir fixture paths. The tests that cover the writer drive `to_doc` /
+/// `to_ini` on an in-memory `Doc`/`Ini` instead, so nothing here is under test.
 pub fn save(settings: &Settings, recent: &[PathBuf]) {
+    if cfg!(test) {
+        return;
+    }
     if let Some(path) = native_path() {
         save_native(&path, settings, recent);
     }

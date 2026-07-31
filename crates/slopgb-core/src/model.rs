@@ -36,6 +36,12 @@ impl Model {
     pub fn is_cgb(self) -> bool {
         matches!(self, Model::Cgb | Model::Agb)
     }
+
+    /// True for the Super Game Boy models — the ones whose PPU carries the SGB
+    /// command/colorization view and that accept a SNES-side coprocessor.
+    pub fn is_sgb(self) -> bool {
+        matches!(self, Model::Sgb | Model::Sgb2)
+    }
 }
 
 /// Exact machine state at the moment the boot ROM hands control to the

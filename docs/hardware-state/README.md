@@ -2,7 +2,7 @@
 
 Per-subsystem implementation-state + hardware-behavior notes (timing laws, quirks, the test ROMs that pin each, the parked/disproven approaches). **Read the relevant file before touching that subsystem** — every baselined cluster is an A/B-swept trade, and most notes name a dead-end not to re-chase. The floor-class index with lift conditions lives in `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt`; `docs/ARCHITECTURE.md` has the timing contract and module ownership.
 
-State date: 2026-06-14.
+State date: 2026-07-30.
 
 | File | Covers |
 |---|---|
@@ -18,3 +18,4 @@ State date: 2026-06-14.
 | [sgb-icd2.md](sgb-icd2.md) | ICD2 bridge: SNES-side `$6000-$7FFF` register spec (fullsnes), packet mailbox / pad-latch semantics, the host-window plugin crossing design |
 | [sgb-arcade-takeover.md](sgb-arcade-takeover.md) | Full-takeover protocol black-box pinned from the pilot: the BIOS-runtime WRAM/entry-point contract, resident firmware, the IPL upload chains, the pad-latch phase machine |
 | [sgb-snes-ppu.md](sgb-snes-ppu.md) | SNES PPU LLE: the `slopgb-snes-ppu` crate's port/render/OBJ model, the wasm plugin wiring, the coprocessor scanline pump |
+| [spc700.md](spc700.md) | SPC700 (S-SMP) CPU core in `slopgb-snes-apu`: instruction/timer/IPL model, why core never instantiates it, the `spc700.wasm` plugin seam |

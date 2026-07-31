@@ -97,6 +97,11 @@ pub const HW_PAD_RING: u32 = HOST_WIN + 0x5000;
 /// engine sources A-bus reads of the ICD2 through here (a raw `read_ram`
 /// has no device semantics: `$7800`'s auto-increment must run per byte).
 pub const HW_ICD2_BUS: u32 = HOST_WIN + 0x6000;
+/// `W len L` at `HW_MSU + i`: the MSU-1 read shadows for `$2000 + i` (`i < 8`).
+/// The host refreshes `$2000` (MSU_STATUS) and `$2002-$2007` (`S-MSU1`) from the
+/// loaded MSU-1 coprocessor each flush so a game's SNES-side driver can detect
+/// the chip and poll its status. Above the `$6000` ICD2 bus span.
+pub const HW_MSU: u32 = HOST_WIN + 0x8000;
 /// Port-ring capacity in captured writes (a flush window is ~2.5 K CPU
 /// cycles; the resident shim's 4-write loop peaks near 340).
 // Sized for the writes one whole flush window can produce: the host drains
@@ -367,6 +372,15 @@ impl W65816Cop {
                     }
                 }
             }
+            a if (HW_MSU..HW_MSU + 8).contains(&a) => {
+                let mmio = &mut self.bus.mmio;
+                for (j, &v) in bytes.iter().enumerate() {
+                    let off = (a - HW_MSU) as usize + j;
+                    if off < 8 {
+                        mmio.host_set_msu(off as u8, v);
+                    }
+                }
+            }
             a if (HW_CHAR_ROWS..HW_CHAR_ROWS + (icd2::CHAR_ROWS * CHAR_ROW_LEN) as u32)
                 .contains(&a) =>
             {
@@ -491,6 +505,9 @@ impl W65816Cop {
 }
 
 impl Coprocessor for W65816Cop {
+    const MANIFEST: &'static str =
+        concat!("id\tw65c816\n", "name\t65C816\n", "provides\tsnes-cpu\n");
+
     fn new() -> Self {
         let mut me = W65816Cop {
             cpu: Cpu::new(),

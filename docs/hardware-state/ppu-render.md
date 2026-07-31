@@ -12,7 +12,7 @@ Parked: chasing the residual late_sp `_ds` out3 rows (half-dot, cc-granular race
 
 ## Window machine
 
-`ppu/render.rs`.
+`ppu/render/window.rs`.
 
 - WX comparator runs every dot, including the 8-dot prefill. Match position by WX value:
 
@@ -24,7 +24,7 @@ Parked: chasing the residual late_sp `_ds` out3 rows (half-dot, cc-granular race
 
 - Rising-edge only (`win_match_prev`); checked **before** the same-dot sprite trigger (window start wins).
 - `win_line` = gambatte winYPos (`0xFF` at frame start, `++` per activation, so same-line retriggers draw the next row).
-- LCDC.5 off mid-line aborts at the eff commit, with the BG resuming on the live column `(scx+x+1-cgb)/8` (`window_abort`).
+- LCDC.5 off mid-line aborts at the eff commit, with the BG resuming on the live column `(scx+x+1-cgb)/8` (`window_abort_render`; `window_abort_flags` carries the pre-draw / DMG-abort classification).
 - WX=166 on DMG never starts in-line — instead a 2-dot freeze + carryover into the next line's mode-3 start (`win_start_pending`, window drawn from col 1).
 - A WX match while drawing injects one color-0 pixel when it lands on a window tile boundary (mealybug "reactivation").
 - WX=0 start adds `SCX&7+1` discards.
@@ -44,7 +44,7 @@ Parked: chasing the residual late_sp `_ds` out3 rows (half-dot, cc-granular race
 
 ## Mode-3 fetch grid
 
-`ppu/render.rs` `fetcher_step`.
+`ppu/render/mode0.rs` `fetcher_step`.
 
 - Every fetch VRAM access samples `eff` clean at its read dot on **both** families.
 - LCDC.1 gates sprite pixels at the mix as well as the fetch (m3_lcdc_obj_en_change).
@@ -67,7 +67,7 @@ Remaining (not yet pixel-perfect) legs are mostly:
 - [Cgb] fetch-law residue — see the parked rising-late CGB LCDC fetch view above and the baseline comments (`_cgb_c` photo columns vs hardware-captured gambatte bgtiledata spx0B rows).
 - Small [Dmg] scy / bg_en / obj_en single-pixel residue.
 - The obj_size pair.
-- Sub-dot LCDC-write races: win_en_change_multiple_wx, m2_win_en_toggle [Dmg].
+- Sub-dot LCDC-write races: m3_lcdc_win_en_change_multiple_wx [Dmg] (m2_win_en_toggle now passes on both legs).
 
 ## DMG OAM corruption bug
 

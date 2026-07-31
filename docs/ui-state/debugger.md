@@ -72,10 +72,13 @@ accept routes back to `main` as a `MenuOutcome` (`feed_dialog`/`dialog_click`).
 ## Menu bar (File/Search/Run/Debug/Window/Execution profiler)
 
 Items reuse the keyboard dispatch via `MenuChoice::Command(input::Action)` →
-`MenuOutcome` → `main::run_action`, so a menu item and its hotkey never diverge.
+`MenuOutcome` → `App::run_action` (`app_run.rs`), so a menu item and its hotkey never
+diverge.
 
 - **Run** — Run/Trace/Step Over/Step out/Reset/Run to Cursor/Jump to cursor/Call cursor.
-- **Window** — VRAM viewer / I/O map.
+- **Window** — VRAM viewer (F5) / Memory viewer / IO map (F10); bgb's other captured
+  rows (SGB packets, link-transfer log, Options, cheats, screen, joypads, debug
+  messages) render greyed.
 - **File** — save screenshot · save memory_dump (64 KiB `debug_read` dump) · save
   asm... (4096 disasm rows from the base, honouring code/data hints →
   `slopgb-asm-<ms>.txt`, `toolwin::debugger_disasm_dump`) · Save state... (Ctrl+W) /
@@ -96,12 +99,15 @@ Items reuse the keyboard dispatch via `MenuChoice::Command(input::Action)` →
 
 ## Disassembler
 
-Core `debug::decode_with(bytes, pc, Syntax)` renders **RGBDS by default** (`$`-hex,
-`[mem]`, `ld [hli]/[hld],a`, `ldh [$ffNN],a`, `db $xx`) or bgb/no$gmb. `decode()`
-stays a `Bgb` wrapper so the bgb ground-truth + gbtr fingerprint stay byte-identical
-(decode is debug-only; `Insn.target`/`branch_target` likewise). The Options→Debug
-**RGBDS syntax** checkbox (`Settings.rgbds_disasm`/`DisasmFmt.rgbds`, default on)
-flips it live.
+Core `debug::decode_with(bytes, pc, Syntax)` renders RGBDS (`$`-hex, `[mem]`,
+`ld [hli]/[hld],a`, `ldh [$ffNN],a`, `db $xx`) or bgb/no$gmb; `Syntax`'s own default
+is `Bgb` and `decode()` stays a `Bgb` wrapper, so the bgb ground-truth + gbtr
+fingerprint stay byte-identical (decode is debug-only; `Insn.target`/`branch_target`
+likewise). The **debugger** asks for RGBDS by default, via the Options→Debug
+**"Disasm syntax:"** dropdown (`Field::RgbdsDisasm`, one click cycles `rgbds` ↔
+`no$gmb` — it is the single control for the syntax, not a checkbox) →
+`Settings.rgbds_disasm`/`DisasmFmt.rgbds` (default `rgbds`), pushed live by
+`push_disasm_fmt`.
 
 ## Pane scrolling (mouse wheel + draggable scrollbars)
 
@@ -144,7 +150,8 @@ without moving the view.
 Two reverse controls in the debugger (Run menu: "Reverse step" Ctrl+Backspace,
 "Run back to breakpoint" Shift+Backspace — non-bgb keys, so the greyed bgb reverse
 stubs above them stay free) and the frame-exact player rewind (held Backspace) all
-run on one engine in `session/reverse.rs`, over the existing save-state ring
+run on one engine in `reverse.rs` (a `#[path]` submodule of `session.rs`, so its
+methods are `impl Session`), over the existing save-state ring
 (`Session::rewind`). The ring's frame-boundary snapshots are **replay anchors**:
 each is keyed by its emulated cycle, so the engine loads the nearest checkpoint
 before the target and `step()`s forward deterministically to the exact
@@ -160,15 +167,27 @@ and re-anchors capture.
   watch / profiler / exception halt strictly before now.
 - **Player rewind** (`reverse_frame`) — the previous *frame* boundary, one
   displayed frame per held-Backspace tick (frame-exact, not the old 2-frame pop).
+  Frame boundaries are *numbered*, so this landing is named rather than searched
+  for: replay whole `run_frame`s from the nearest checkpoint until `frame_count`
+  reaches the target — at most `REWIND_INTERVAL_FRAMES` frames, and none at all
+  when the checkpoint already is the landing. No exploratory scan, no second
+  replay pass. Divergent replay (joypad input inside the window) that overruns
+  the start falls back to landing on the checkpoint.
 
 Both debugger commands stay broken and re-center the disasm; they no-op (no view
 change) past the oldest checkpoint. Known ceilings: reverse depth = the oldest
-retained checkpoint (~20 s at the ring cap); `reverse_to_breakpoint` is O(history)
+retained checkpoint (~20 s at the ring cap, ~9 s once an SGB coprocessor doubles
+the state size — see [`save-states-and-link.md`](save-states-and-link.md));
+`reverse_to_breakpoint` is O(history)
 worst case (a halt far back re-replays the tail — fine interactively, since a
-per-frame breakpoint resolves in the newest window); and replay drives the machine
-via `step()`, so a **link-cable / SGB-coprocessor** peer not advanced identically
-to the normal loop can diverge — reverse is reliable for a self-contained DMG/CGB
-machine.
+per-frame breakpoint resolves in the newest window); and a **link-cable** peer is
+not part of the save state, so a linked session can diverge on replay — reverse is
+reliable for a self-contained machine. An installed SGB coprocessor is *not* such a
+case: `run_frame`/`run_frame_until_breakpoint` are loops of `step()`, which clocks
+the coprocessor itself, and its chip state rides in the save state's coprocessor
+tail (`STATE_VERSION` 10) — `load_state` moves the coprocessor into the restored
+machine instead of rebuilding its wasm, so a rewound frame doesn't re-instantiate
+it.
 
 ## .sym symbols
 
@@ -252,7 +271,8 @@ non-mapped bank like the MCP `peek`/`cdl` tools do (parity). `None` **follows th
 live-mapped bank** (the default — the classic view); `Some(b)` pins to bank `b`. `[` /
 `]` step it (`windows::stepped_bank`, starting from the live bank and **re-following**
 when you land back on it); a `BB:AAAA` Go-to pins bank + base together (standalone
-`apply_goto`, debugger `apply_mem_bank_goto` in `accept_dialog`). One shared read path
+`MemoryView::apply_goto`, debugger `windows::debugger::interaction::apply_goto` from
+`accept_dialog`). One shared read path
 (`windows::banked_read`) folds the selection to **each address's own region** so a
 window straddling a region boundary stays coherent per cell; edits route through
 `debug_write_banked` at the same resolved bank (WYSIWYG; ROM "edits" still poke the

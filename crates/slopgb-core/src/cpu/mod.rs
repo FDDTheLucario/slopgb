@@ -108,8 +108,10 @@ pub trait Bus {
     /// sub-M-cycle T, holding the 2-T offset until the machine re-aligns. The
     /// default (the base impl and every
     /// non-interconnect test bus) is the plain end-sampled
-    /// [`pending_halt_wake`](Bus::pending_halt_wake); the interconnect
-    /// overrides it for the DMG family.
+    /// [`pending_halt_wake`](Bus::pending_halt_wake); the interconnect overrides
+    /// it for CGB single-speed only (`halt_wake_mid_impl`'s
+    /// `is_cgb() && !double_speed` arm) — the DMG half-M-cycle sampler is not
+    /// modelled, so DMG keeps the end-sampled default.
     fn pending_halt_wake_mid(&mut self) -> u8 {
         self.pending_halt_wake()
     }

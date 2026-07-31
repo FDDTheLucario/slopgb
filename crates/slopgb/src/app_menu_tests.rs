@@ -18,10 +18,17 @@ fn blank_app() -> App {
         sgb_bios: None,
         mcp_port: None,
         plugins_dir: None,
-        msu1: None,
         ram_init: None,
+        plugin_flags: Vec::new(),
     };
-    App::new(opts, Session::blank(Model::Dmg), false, None, None)
+    App::new(
+        opts,
+        Session::blank(Model::Dmg),
+        false,
+        None,
+        None,
+        slopgb_plugin_host::PluginRegistry::new(),
+    )
 }
 
 /// The stretch <-> window-size reconciliation must hold both directions, and

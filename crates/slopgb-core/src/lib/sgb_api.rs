@@ -1,7 +1,7 @@
 //! Super Game Boy accessors on [`GameBoy`]: the colorized border surface and
 //! the SNES-side command seams (SOUND / SOU_TRN / OBJ_TRN / DATA_TRN /
-//! DATA_SND / flags + JUMP) the S-DSP consumes, plus the opt-in SGB
-//! audio BIOS loader.
+//! DATA_SND / flags + JUMP) an installed coprocessor consumes, plus the opt-in
+//! SGB BIOS loader.
 //!
 //! A second `impl GameBoy` block, split out of `lib.rs` to keep it under the
 //! 1000-line cap. `use super::*` pulls in
@@ -16,9 +16,11 @@ use super::*;
 
 impl GameBoy {
     /// The 256×224 SGB border surface (32×28 tiles) with the colorized 160×144
-    /// GB screen composited as an inset at (48, 40), or `None` until a
-    /// CHR_TRN+PCT_TRN border pair has landed (and always `None` off
-    /// `Model::Sgb`/`Sgb2`). The frontend renders this in place of [`Self::frame`]
+    /// GB screen composited as an inset at (48, 40). `Some` whenever the PPU
+    /// carries an `SgbView` — from power-on with the built-in default border,
+    /// swapped for the game's own once CHR_TRN+PCT_TRN land. That means Sgb/Sgb2,
+    /// or any model on which the frontend called [`Self::enable_sgb_border`];
+    /// `None` otherwise. The frontend renders this in place of [`Self::frame`]
     /// when present. ([`Self::frame`] itself stays 160×144 — the golden hash reads it.)
     pub fn sgb_border(&self) -> Option<&[u32; SGB_BORDER_PIXELS]> {
         self.bus.ppu().sgb_border()
@@ -66,13 +68,13 @@ impl GameBoy {
     /// neutral palette stand, and output stays byte-identical.
     ///
     /// It feeds two things:
-    /// - **Audio** — the image is handed to the APU exactly as before (a
-    ///   self-uploaded driver still plays with no BIOS; the *default* driver
-    ///   needs the image, but without a 65816 core it is stored, not executed).
+    /// - **Audio** — the image is handed to the installed SNES coprocessor, if
+    ///   any, which decides what to do with it. With an empty slot nothing
+    ///   happens: core runs no SNES chip.
     /// - **Border + title→palette** — the two `Ppu` seams
     ///   ([`Ppu::sgb_install_border`] / [`Ppu::sgb_apply_bios_palette`]).
     ///
-    /// **The honest limit:** slopgb is high-level — it never runs the SNES
+    /// **The honest limit:** core is high-level — it runs no SNES
     /// 65816 — so it can neither *execute* the firmware to build the
     /// border/palette nor trust a raw, firmware-revision-specific offset (an
     /// unverifiable guess would ship a wrong border dressed up as right). The
@@ -82,7 +84,7 @@ impl GameBoy {
     /// seams are the wired upgrade path — a checked locator drops into
     /// [`sgb_bios_border`] / [`sgb_bios_palette`] with no other change.
     ///
-    /// A no-op off `Model::Sgb`/`Sgb2`. See [`crate::sgb::apu`],
+    /// A no-op off `Model::Sgb`/`Sgb2`. See
     /// `docs/hardware-state/sgb-audio.md` and `docs/hardware-state/sgb.md` for
     /// exactly what does and does not happen with and without it.
     pub fn load_sgb_bios(&mut self, bios: &[u8]) {
@@ -100,14 +102,14 @@ impl GameBoy {
         }
     }
 
-    /// Install an alternative SGB SNES-side audio coprocessor in place of the
-    /// built-in [`sgb::apu::SgbApu`] — the injection seam a frontend/host uses to
-    /// run a plugin-backed [`sgb::AudioCoprocessor`] (e.g. a combined 65C816 +
-    /// SPC700 + S-DSP chip forwarding to a wasm plugin's `drain_pcm`).
+    /// Fill the SGB SNES-side coprocessor slot — the injection seam a
+    /// frontend/host uses to run a plugin-backed [`sgb::AudioCoprocessor`]
+    /// (e.g. a combined 65C816 + SPC700 + S-DSP chip forwarding to a wasm
+    /// plugin's `drain_pcm`). Core ships no SNES implementation, so until this
+    /// is called the slot is empty and there is no SNES side at all.
     ///
-    /// Only meaningful on `Model::Sgb`/`Sgb2`: off SGB the machine holds no audio
-    /// coprocessor slot, so there is nothing to replace — the passed `cop` is
-    /// dropped and `Dmg`/`Cgb` stay byte-identical (golden-safe). Like
+    /// Only accepted on `Model::Sgb`/`Sgb2`: off SGB the passed `cop` is dropped
+    /// and `Dmg`/`Cgb` stay byte-identical (golden-safe). Like
     /// [`Self::debug_set_reg`] / load-state, this is an explicit user-initiated
     /// mutation, never taken on the passive frame loop.
     ///
@@ -115,8 +117,22 @@ impl GameBoy {
     /// [`Self::set_sample_rate`] afterwards to align it with the host (it
     /// propagates to the newly installed coprocessor).
     pub fn set_audio_coprocessor(&mut self, cop: Box<dyn sgb::AudioCoprocessor>) {
-        if self.sgb_apu.is_some() {
+        if self.model().is_sgb() {
             self.sgb_apu = Some(cop);
+        }
+    }
+
+    /// Tell the SGB coprocessor whether its SNES-side framebuffer is being
+    /// presented right now — a frontend fast-forwarding past frames nobody
+    /// sees calls this with `false` to skip rasterization, and `true` to
+    /// resume it for normal play. A no-op off `Model::Sgb`/`Sgb2` (there is
+    /// no coprocessor installed) and on a coprocessor with no framebuffer to
+    /// skip. Never called, or called with `true`, leaves emulation
+    /// byte-identical to today (golden-safe) — only whether pixels get drawn
+    /// changes, never chip timing or audio.
+    pub fn set_coprocessor_render(&mut self, on: bool) {
+        if let Some(apu) = self.sgb_apu.as_mut() {
+            apu.set_render_enabled(on);
         }
     }
 
@@ -152,13 +168,35 @@ impl GameBoy {
         self.bus
             .install_sgb_border(border.tiles.clone(), border.raw.clone());
     }
+
+    /// The SGB audio coprocessor's self-describing manifest (the plugin-host
+    /// manifest wire format), for the frontend's menu-row table. Empty with an
+    /// empty slot, or when the engaged coprocessor contributes no rows.
+    /// Read-only.
+    pub fn coprocessor_manifest(&self) -> &'static str {
+        self.sgb_apu.as_ref().map_or("", |a| a.manifest())
+    }
+
+    /// Whether the coprocessor's export named `name` (one its manifest
+    /// declares in a `menu` record) can produce a blob right now — the UI
+    /// greys the row when false. Read-only.
+    pub fn coprocessor_export_ready(&self, name: &str) -> bool {
+        self.sgb_apu.as_ref().is_some_and(|a| a.export_ready(name))
+    }
+
+    /// Run the coprocessor's export named `name` and return its blob, or
+    /// `None` off SGB or when `name` names no export the engaged coprocessor
+    /// declares. Read-only.
+    pub fn coprocessor_export(&self, name: &str) -> Option<Vec<u8>> {
+        self.sgb_apu.as_ref().and_then(|a| a.call_export(name))
+    }
 }
 
 /// Locate the SGB firmware's real default border (two 4096-byte SNES-4bpp tile
 /// banks + the 2176-byte tilemap/palette payload — the CHR_TRN/PCT_TRN formats
 /// [`Ppu::sgb_install_border`] takes) inside a user-supplied BIOS image.
 ///
-/// Returns `None`: slopgb never runs the SNES 65816, so it cannot execute the
+/// Returns `None`: core runs no SNES 65816, so it cannot execute the
 /// firmware to produce the border, and the raw payload offset is
 /// firmware-revision-specific — trusting one blind would ship a wrong border.
 /// A locator that first *validates* a documented structure drops in here; until

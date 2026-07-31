@@ -1,7 +1,7 @@
 # Options control panel
 
 **Options...** (F11) opens a bgb-style tabbed control panel (`windows::options`,
-captures in [`../bgb-reference/options/`](../bgb-reference/)). A 10-tab two-row
+captures in [`../bgb-reference/options/`](../bgb-reference/options/)). A 10-tab two-row
 property sheet (Graphics/System/Debug/Exceptions · Sound/GB Colors/Joypad/Misc, plus
 slopgb Theme + Plugins tabs; the active tab's group sits in the bottom row, bgb's
 multi-row behaviour) drawn as a
@@ -20,37 +20,47 @@ where bgb itself greys them).
 
 | Tab | Setting → effect |
 |---|---|
-| System | Emulated system (Gameboy/Gameboy Color/automatic → `ModelChoice` → `Session::set_model` rebuilds the machine on change; palette re-applied after); **Save RTC in SAV file (VBA compatible)** — writes an MBC3 cart's RTC as VBA's portable `.sav` footer (raw SRAM + a wall-clock-stamped 48-byte block) instead of slopgb's own, via the golden-safe read-only `GameBoy::battery_sram` / `rtc_state` + `rtc_export::vba_footer` (`Session::save_image`; the dirty check stays on the timestamp-free image so the moving clock doesn't force redundant writes). slopgb's core already reads the VBA footer back. **Save BGB legacy RTC files** additionally writes a `<rom>.rtc` sidecar (the same shared 48-byte footer) on the same dirty edge (`Session::write_rtc_sidecar`) |
+| System | Emulated system — eight live radios (`Gameboy`/`Gameboy Color`/`Super Gameboy`/`automatic, prefer GBC`/`automatic, prefer SGB`/`SGB + GBC`/`GBC + initial SGB border`/`Gameboy or GBC` → `ModelChoice` → `ModelChoice::resolve` → `Session::set_model` rebuilds the machine on change; palette re-applied after). **automatic reset on system change** gates that rebuild: off, the choice is deferred to the next Reset. **Rewind enabled** (the save-state ring — see [`debugger.md`](debugger.md) § Reverse execution); **uninitialized RAM at power-on** (bgb's ini-only `UninitedWRAM`, surfaced here as a checkbox → `cli::effective_ram_init` → `Session::set_ram_init`, applied on the next reset/load, never to the running machine); **Save RTC in SAV file (VBA compatible)** — writes an MBC3 cart's RTC as VBA's portable `.sav` footer (raw SRAM + a wall-clock-stamped 48-byte block) instead of slopgb's own, via the golden-safe read-only `GameBoy::battery_sram` / `rtc_state` + `rtc_export::vba_footer` (`Session::save_image`; the dirty check stays on the timestamp-free image so the moving clock doesn't force redundant writes). slopgb's core already reads the VBA footer back. **Save BGB legacy RTC files** additionally writes a `<rom>.rtc` sidecar (the same shared 48-byte footer) on the same dirty edge (`Session::write_rtc_sidecar`) |
 | GB Colors | scheme (`SCHEMES` presets → `GameBoy::set_dmg_palette`) |
-| Sound | volume + mono (`AudioPipe::set_volume` gain/downmix). No SGB-backend control: the SGB coprocessor is a plugin — `spc700.wasm` + `w65c816.wasm` in the plugins dir (Options→Plugins / `--plugins`) auto-replace the built-in HLE `SgbApu` on an SGB machine (`Session::set_plugins_dir`); absent, the HLE default stands (byte-identical). A no-op off SGB |
+| Sound | volume + mono (`AudioPipe::set_volume` gain/downmix). No SGB-backend control: the SGB coprocessor is a plugin — `spc700.wasm` + `w65c816.wasm` in the plugins dir (Options→Plugins / `--plugins`) fill core's coprocessor slot on an SGB machine (`Session::set_plugins_dir`); absent or disabled, the slot stays empty and there is no SNES side at all (core emulates no SNES chip). A no-op off SGB |
 | Graphics | stretch (→ fullscreen-stretched window size); **frame blend** (`postfx` present filter — averages the frame with the previous one); **SGB border in screenshot** (`save_screenshot` uses the 256×224 composite when a border is loaded) |
 | GB Colors | (above) plus **per-colour RGB editor** (bgb's three sliders + number readouts editing the selected shade of `dmg_palette`; **select** dropdown picks the shade; **0-31 numbers** toggles the readouts between 8-bit 0-255 and native 5-bit 0-31 — `v8>>3`, captured 1:1 from real bgb: 232/252/204→29/31/25, `docs/bgb-reference/options/options-gbcolors-031.png`; edits snap to `v5<<3` in 5-bit mode) + **DMG on GBC LCD colors** + **contrast** wheel — `postfx` per-pixel present filters (frontend-only, golden-safe) |
-| Debug | lowercase-hex + show-clocks (→ `DisasmFmt` via `tools.set_disasm_fmt`); "pressing Esc shows debugger" (`Settings.esc_shows_debugger`, default on → `handle_key` opens the debugger on Esc instead of quitting); RGBDS syntax; "memory viewer in own window"; **Registers can be edited** (→ `DebuggerState.registers_editable` via `tools.set_registers_editable`; off greys the register-edit menu); **Start in debugger** (opens the debugger window at launch); **Live update memory viewer** (`tools.request_redraw_live` skips the standalone memory window's per-frame redraw when off — it then repaints only on interaction, bgb's non-continuous refresh); **GB CPU usage meter** (the emulated CPU's non-halted duty %, from the golden-safe `GameBoy::halt_cycles` counter, shown in the window title alongside FPS) |
+| Debug | lowercase-hex + lowercase-disassembler + show-counted-clocks (→ `DisasmFmt` via `tools.set_disasm_fmt`); "pressing Esc shows debugger" (`Settings.esc_shows_debugger`, default on → `handle_key` opens the debugger on Esc instead of quitting); the **"Disasm syntax:" dropdown** (one click cycles `rgbds` ↔ `no$gmb` — the single syntax control, not a checkbox; default `rgbds`); "8-bit tile hex ($7F not $17F)" (→ the VRAM viewer, see [viewers.md](viewers.md)); "memory viewer in own window"; **Registers can be edited** (→ `DebuggerState.registers_editable` via `tools.set_registers_editable`; off greys the register-edit menu); **Start in debugger** (opens the debugger window at launch); **Live update memory viewer** (`tools.request_redraw_live` skips the standalone memory window's per-frame redraw when off — it then repaints only on interaction, bgb's non-continuous refresh); **GB CPU usage meter** (the emulated CPU's non-halted duty %, from the golden-safe `GameBoy::halt_cycles` counter, shown in the window title alongside FPS) |
 | Misc | fast-forward-speed + framerate-limit sliders (→ `app_pacing` `turbo_max_frames`/`frame_interval`); show-framerate (title); freeze-recent-ROMs (`push_recent` gate); pause-if-losing-focus (auto-pause on focus loss, auto-resume on refocus unless manually paused via `App.paused_by_focus`); **Show errors on ROM load** (a failed load pops an info box, default on); **Load ROM dialog on startup** (opens the picker at launch when no CLI ROM) |
 | Joypad | **Screenshot button** saves↔copies (copies puts the frame on the clipboard as PNG via `clipboard::copy_image_png`); **Screenshots** format bmp↔png (`ScreenshotFormat` → `screenshot::to_bmp` / `mcp::png::encode`); **Audio** records a WAV, **Video** records an uncompressed AVI (`avi::AviWriter` streams the 160×144 LCD one frame per rendered batch, patching sizes + `idx1` on finalise; toggling off / quitting finalises); **Audio channels** records the 4 GB sound channels to separate WAVs (`slopgb-<stamp>-chN.wav`) via the golden-safe core tap `GameBoy::set_record_channels` / `drain_audio_channels` — each channel's isolated mono output, box-averaged over the mix's own window |
 | Theme | Light/Dark/Classic radios → `Settings.theme` (`ThemeChoice`; the render path recolors from it each redraw — see [theming.md](theming.md)). Custom themes stay config-only. |
-| Plugins | Per-plugin **enable** checkbox (`Field::PluginEnable(i)` → `PluginConfig.entries[i].enabled` → `PluginHost::set_enabled`, skipping a disabled plugin's `on_frame`), the read-only plugins-dir display, and an **allow-mutation** toggle (`Field::PluginAllowMutation`, default off). No bgb equivalent — see [plugin-api.md](plugin-api.md#managing-plugins-from-the-ui). |
+| Plugins | One row per discovered plugin — `name [caps]` beside a live **enable** checkbox (`Field::PluginEnable(i)` → `PluginConfig.entries[i].enabled`), for tier-1 and tier-3 plugins alike. An `apply_settings` pushes every entry's state to the live host (`PluginHost::set_enabled`), so a disabled tier-1 plugin's `on_frame` stops at the next pump; the disabled tier-3 SUBSYSTEM names go to `Session::set_disabled_plugins` (`PluginConfig::disabled_subsystem_names`) instead, so a disabled subsystem plugin (`spc700`/`w65c816`/`snes-ppu`/`msu1`) leaves its slot empty from the next reset / model switch / ROM load — never mid-run (swapping a running chip out would need live state migration). When the list holds a subsystem plugin, a note under it says so. Empty dir → an inert `(no plugins discovered)` line. Plus the **plugins dir** row — a `...` browse button (`Field::PickPluginsDir` → `OptionsOutcome::PickPluginsDir` → the shared path modal) beside the current path; a changed dir rescans on OK/Apply (`App::rebuild_plugins`) — and an **allow-mutation** toggle (`Field::PluginAllowMutation`, default off): a persisted preference only, nothing reads it yet (grep `allow_mutation`: the checkbox, the defaults reset, and the two settings writers). A tool plugin's `MUTATE` capability is gated by the plugin's own declared caps inside `LoadedTool`, not by this toggle. No bgb equivalent — see [plugin-api.md](plugin-api.md#managing-plugins-from-the-ui). |
 
 **Pure bgb mode** (Debug tab): one toggle flips every slopgb-departure setting
-(rgbds→off, memory-window→off) to bgb-faithful.
+(rgbds→off, memory-window→off, 8-bit-tile-hex→off) to bgb-faithful; checked while
+already there, and clicking it then restores the slopgb default (rgbds back on).
 
 ## Exceptions (golden-safe core break mask)
 
-Four live break conditions feed an `exc_mask: u16` on `Interconnect` (inert/`0` ⇒
-fingerprint byte-identical; `GameBoy::set_exceptions`/`exceptions`, the `EXC_*` bits;
-`App::apply_exceptions` pushes `Settings::exception_mask` at startup/load/OK-Apply),
-halting the debugger free-run via `exc_hit` in `run_frame_until_breakpoint`:
+All **seven** break conditions the tab renders are live, feeding an `exc_mask: u16` on
+`Interconnect` (inert/`0` ⇒ fingerprint byte-identical; `GameBoy::set_exceptions`/
+`exceptions`, the `EXC_*` bits; `App::apply_exceptions` pushes
+`Settings::exception_mask` at startup/load/OK-Apply), halting the debugger free-run
+via `exc_hit` in `run_frame_until_breakpoint`:
 
 - break on ld b,b (`0x40`) / invalid opcode (the 11 undefined ops, **default-checked
-  like bgb**) — checked in `Bus::check_exec` at instruction-execute.
+  like bgb**, `options-exceptions.png`) — checked in `Bus::check_exec` at
+  instruction-execute.
 - break on echo-RAM (E000-FDFF) access (`check_access`) / disabling the LCD outside
   vblank (FF40 bit7→0 while on + PPU mode≠1, `check_exc_lcd`) — checked in the ticked
   bus path.
+- break on OAM-DMA bad accesses (a CPU access outside HRAM while an OAM DMA is
+  transferring, so the bus is contended) / 16-bit inc/dec FE00-FEFF (the address an
+  `INC rr`/`DEC rr` pair drives onto the bus — the OAM-corruption trigger) / SGB
+  transfer start (a command packet's first P1 reset pulse; a no-op off SGB) —
+  `interconnect/debug.rs`.
 
-Armed only while the debugger window is open (`dbg_armed`). The tab's other
-conditions (OAM-DMA bad access, 16-bit inc/dec FE00-FEFF, SGB transfer, MBC,
-inaccessible VRAM, halt+ints bug, uninitialized RAM) render but are **inert** — no
-clean golden-safe detector/backend.
+Armed only while the debugger window is open (`dbg_armed`, which also requires a live
+halt source). The only other controls on the tab are the two greyed
+`… (as in reality)` sub-items bgb itself greys (`emulate locked ram`, `10 sprites per
+line limit`). bgb's MBC / Halt+ints-disabled-bug / Inaccessible-VRAM /
+Uninitialized-RAM groupboxes (`options-exceptions.png`) are **not rendered** here at
+all — uninitialized RAM is instead a live System-tab checkbox (see the Live table).
 
 ## Joypad (`keymap`)
 
@@ -84,10 +94,10 @@ clean golden-safe detector/backend.
   only if app has focus** (`Settings.gamepad_needs_focus`, default on) gates the
   input on window focus — meaningful because gilrs reads the device directly, unlike
   the keyboard.
-- **Screenshot button** (saves↔copies) and **Screenshots** (bmp↔png) combos are
-  live (see the Live-settings table). The still-inert Joypad chrome is the
-  Mappable-button-records (Audio/Video/channels are live), Rapid-speed combo (live),
-  the joypad-0 selector, "configure extra buttons", the MBC7 joystick-ID, and the
+- **Screenshot button** (saves↔copies), **Screenshots** (bmp↔png), **Rapid speed**,
+  and the three Mappable-button-records checkboxes (Audio/Video/Audio channels) are
+  all live (see the Live-settings table). The still-inert Joypad chrome is the
+  joypad-0 selector, "configure extra buttons", the MBC7 joystick-ID, and the
   "Keyboard works only if app has focus" check (winit only delivers keys to the
   focused window, so it is always in effect).
 
@@ -120,13 +130,20 @@ Apply/OK, ROM load, and Quit. Atomic write (temp+rename) in the config dir
 (`$XDG_CONFIG_HOME/slopgb/` else `~/.config/slopgb/`; `%APPDATA%\slopgb\` on
 Windows).
 
-**Native format (phase 2, default):** `slopgb.conf` — a versioned sectioned
-text file (`native.rs`): `version = 1`, `[system]`/`[sound]`/`[graphics]`/
-`[debug]`/`[misc]`/`[exceptions]`/`[recent]`, `true`/`false`, `0xRRGGBB` colors,
-comma-list palette, numbered `[recent]` POSIX paths. Unknown keys/sections +
-comments preserved; missing keys default.
+`settings_file::save` is **inert under `cfg(test)`** (the frontend tests build real
+`App`s, and every load path calls `push_recent`, which would persist — rewriting the
+developer's own `slopgb.conf`); the writer is covered by driving `to_doc`/`to_ini` on
+an in-memory `Doc`/`Ini`. Note the read direction is *not* stubbed: `App::new` →
+`settings_file::load()` reads the ambient config.
 
-**bgb.ini (phase 1, import/export):** the `ini` module keeps an ordered-line
+**Native format (the default store):** `slopgb.conf` — a versioned sectioned
+text file (`native.rs`): `version = 1`, `[system]`/`[sound]`/`[graphics]`/
+`[debug]`/`[misc]`/`[exceptions]`/`[plugins]`/`[ui]`/`[recent]` (plus any
+`[theme.NAME]` custom-theme sections, see [theming.md](theming.md)), `true`/`false`,
+`0xRRGGBB` colors, comma-list palette, numbered `[recent]` POSIX paths. Unknown
+keys/sections + comments preserved; missing keys default.
+
+**bgb.ini (import/export only):** the `ini` module keeps an ordered-line
 model that round-trips a real bgb.ini byte-identically (bgb's ~250 unmodelled
 keys survive verbatim); `bgb.rs` maps ~19 keys (`DisasmSyntax`, `DebugHexLower`,
 `Volume`, `SystemMode`↔model, `Color0..3` BGR-hex, `Recent0..9` with wine
@@ -137,8 +154,7 @@ explicit interop. `model` maps to bgb `SystemMode` (System-tab radio index:
 Auto↔3, Dmg↔0, Cgb↔1); an explicit CLI `--model` still wins the session.
 **Recent ROMs** persist via `Recent0..9` (wine `Z:\`↔POSIX path translation),
 saved on ROM load + Quit. bgb's window-geometry / open-on-start keys have no
-slopgb equivalent — preserved verbatim, not acted on. Phase 1 complete; phase 2
-(a modern native format) is planned.
+slopgb equivalent — preserved verbatim, not acted on.
 
 Now live (were inert): reduce-CPU-usage, recovery-save-state, auto-reset-on-
 system-change, the three remaining Exceptions breaks (OAM-DMA-bad-access,
@@ -160,8 +176,13 @@ Still inert — each is a genuine hard constraint (a banned dep, absent core
 hardware, the golden-safe law, or no softbuffer/desktop equivalent), NOT a
 buildable control:
 
-- **Model detection** (GB-pocket/SGB2 · GBA · GB Player · MGB-auto-border) — the
-  core has no distinct GBA/MGB/GB-Player models to detect into.
+- **Model detection** checkboxes ("detect GB pocket / SGB2", "detect GBA",
+  "GB Player" on System; "MGB auto border/colors" on Graphics) — these are bgb's
+  *auto-detect-from-header* policies, and `ModelChoice` implements only one detection
+  policy (`resolve`: `GameBoy::auto_model` + `rom_supports_sgb`). Core does have
+  `Model::Mgb`/`Sgb2`/`Agb` — reachable via CLI `--model mgb|sgb2|agb`, and SGB2 has
+  its own live radio — but no `ModelChoice` variant routes to Mgb/Agb and
+  `from_model` folds them onto Dmg/Cgb. `Model::GbPlayer` does not exist.
 - **Waitloop detection** — a speed hack that skips CPU wait loops → perturbs
   emulated timing → forbidden by the golden-safe law.
 - **Hard-blocked**: `bpp`/`output`/`vsync` (DirectDraw-era concepts, no softbuffer

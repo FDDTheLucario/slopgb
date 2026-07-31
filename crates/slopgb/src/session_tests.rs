@@ -486,26 +486,26 @@ fn sgb_coprocessor_plugin_in_the_dir_swaps_the_audio_backend() {
     let path = dir.join("game.gb");
     fs::write(&path, sgb_rom()).unwrap();
 
-    // Default (built-in HLE APU): a bare SOUND command with no game driver / BIOS
-    // makes no real audio (the default sound bank isn't present) — the golden-safe
-    // default. The HLE path leaves only a noise-floor residue, far below a tone.
+    // No coprocessor: the emulator ships no SNES implementation, so a bare SOUND
+    // command produces nothing at all on the SNES side.
     let mut off = Session::load(&path, ModelChoice::Sgb, &BootSpec::NONE, None).expect("load");
     assert_eq!(off.gb.model(), Model::Sgb);
     send_sgb_packet(&mut off.gb, &sound_packet());
     let off_peak = play_and_peak(&mut off.gb, 16);
     assert!(
         off_peak < 1e-3,
-        "default built-in backend makes no tone for a bare SOUND command (peak {off_peak})"
+        "an SGB machine with an empty coprocessor slot is silent on the SNES side \
+         (only the GB APU's own noise floor remains: peak {off_peak})"
     );
 
-    // No plugins directory set: no coprocessor plugin to load, so the built-in
-    // APU stands (the golden-safe fallback) — no panic, still silent.
+    // No plugins directory set: nothing to load, the slot stays empty — no panic,
+    // still silent.
     let mut nodir = Session::load(&path, ModelChoice::Sgb, &BootSpec::NONE, None).expect("load");
     nodir.set_plugins_dir(None);
     send_sgb_packet(&mut nodir.gb, &sound_packet());
     assert!(
         play_and_peak(&mut nodir.gb, 16) < 1e-3,
-        "no plugins directory falls back to the silent built-in backend"
+        "no plugins directory leaves the coprocessor slot empty"
     );
 
     // With the two plugins present in a directory: the coprocessor loads them and
@@ -532,6 +532,184 @@ fn sgb_coprocessor_plugin_in_the_dir_swaps_the_audio_backend() {
     assert!(
         play_and_peak(&mut on.gb, 16) > 1e-2,
         "reset re-injects the coprocessor backend"
+    );
+
+    // Turning `spc700` off in Options -> Plugins is exactly as if the file were
+    // absent: there is no fallback implementation, so the whole slot stays empty
+    // and the SNES side goes silent again. The toggle is read when a machine is
+    // built, so it lands on the reset, never mid-run.
+    on.set_disabled_plugins(vec!["spc700".to_owned()]);
+    send_sgb_packet(&mut on.gb, &sound_packet());
+    assert!(
+        play_and_peak(&mut on.gb, 16) > 1e-2,
+        "the running coprocessor is NOT swapped out mid-run"
+    );
+    on.reset();
+    send_sgb_packet(&mut on.gb, &sound_packet());
+    assert!(
+        play_and_peak(&mut on.gb, 16) < 1e-3,
+        "after the reset the disabled spc700 leaves the slot empty"
+    );
+
+    // Re-enabling it brings the coprocessor back on the next reset.
+    on.set_disabled_plugins(Vec::new());
+    on.reset();
+    send_sgb_packet(&mut on.gb, &sound_packet());
+    assert!(
+        play_and_peak(&mut on.gb, 16) > 1e-2,
+        "re-enabling restores the coprocessor at the next reset"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// A minimal synthetic APU RAM image (one dir entry, one instrument, one
+/// looping BRR sample) — the same shape `slopgb-sf2`'s own `mapping_tests.rs`
+/// uses — just enough for `export_sf2` to build a valid, tiny SF2 file.
+fn synthetic_apu_ram() -> [u8; 0x1_0000] {
+    let mut ram = [0u8; 0x1_0000];
+    let brr_addr: usize = 0x2000;
+    let square = [0x93u8, 0x77, 0x77, 0x77, 0x77, 0x88, 0x88, 0x88, 0x88];
+    ram[brr_addr..brr_addr + 9].copy_from_slice(&square);
+    // dir[0]: start = loop = brr_addr (a self-looping one-block sample).
+    ram[slopgb_sf2::DIR_DEST as usize] = (brr_addr & 0xFF) as u8;
+    ram[slopgb_sf2::DIR_DEST as usize + 1] = (brr_addr >> 8) as u8;
+    ram[slopgb_sf2::DIR_DEST as usize + 2] = (brr_addr & 0xFF) as u8;
+    ram[slopgb_sf2::DIR_DEST as usize + 3] = (brr_addr >> 8) as u8;
+    let e = slopgb_sf2::INSTR_DEST as usize;
+    ram[e] = 0; // SRCN 0
+    ram[e + 1] = 0x9F; // ADSR1
+    ram[e + 2] = (3 << 5) | 10; // ADSR2
+    ram[e + 3] = 0x7F; // GAIN
+    ram[e + 4] = 0x10; // base16 hi: $1000 = unity
+    ram[e + 5] = 0x00;
+    ram
+}
+
+/// Build `sf2.wasm` (pkg `slopgb-sf2-plugin`) and drop it into `dir`. `false`
+/// if the wasm32 target / build is unavailable (the caller then skips). Own
+/// temp `CARGO_TARGET_DIR`, mirroring [`build_sgb_plugins`].
+fn build_sf2_plugin(dir: &Path) -> bool {
+    let manifest = format!(
+        "{}/../slopgb-sf2-plugin/Cargo.toml",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let target = std::env::temp_dir().join("slopgb-sf2-plugin-target");
+    let ok = process::Command::new(env!("CARGO"))
+        .args([
+            "build",
+            "--release",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--manifest-path",
+            &manifest,
+        ])
+        .env("CARGO_TARGET_DIR", &target)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        return false;
+    }
+    let wasm = target.join("wasm32-unknown-unknown/release/slopgb_sf2_plugin.wasm");
+    fs::copy(&wasm, dir.join("sf2.wasm")).is_ok()
+}
+
+/// The `.smpl` cache path `load_or_import_sf2` computes for `sf2_bytes` sitting
+/// at `sf2_path` — replicated here (same `DefaultHasher` + naming) so a test can
+/// pre-seed or later find the cache file.
+fn sf2_cache_path(sf2_path: &Path, sf2_bytes: &[u8]) -> PathBuf {
+    use std::hash::Hasher;
+    let mut h = std::hash::DefaultHasher::new();
+    h.write(sf2_bytes);
+    let key = h.finish();
+    sf2_path.parent().unwrap().join(format!("{key:016x}.smpl"))
+}
+
+#[test]
+fn load_or_import_sf2_cache_hit_needs_no_plugin() {
+    let dir = scratch("sf2-cache-hit");
+    let sf2_path = dir.join("x.sf2");
+    let ram = synthetic_apu_ram();
+    let sf2_bytes =
+        slopgb_sf2::export_sf2(&ram, slopgb_sf2::DIR_DEST, slopgb_sf2::INSTR_DEST, 64, 1)
+            .expect("export must succeed");
+    fs::write(&sf2_path, &sf2_bytes).unwrap();
+
+    // Pre-seed the cache with a sentinel that could not come from a real
+    // import, then call with NO plugins dir — a cached SF2 must load with no
+    // plugin at all.
+    let cache_path = sf2_cache_path(&sf2_path, &sf2_bytes);
+    let sentinel = slopgb_sf2::Regions {
+        dir: vec![0xAA; 8],
+        instr: vec![0xBB; 12],
+        brr: vec![0xCC; 16],
+    };
+    slopgb_sf2::write_cache(&cache_path, &sentinel).expect("seed cache");
+
+    let got = load_or_import_sf2(&sf2_path, None).expect("cache hit must succeed with no plugin");
+    assert_eq!(
+        got.dir, sentinel.dir,
+        "cache hit returns the sentinel dir region"
+    );
+    assert_eq!(
+        got.instr, sentinel.instr,
+        "cache hit returns the sentinel instr region"
+    );
+    assert_eq!(
+        got.brr, sentinel.brr,
+        "cache hit returns the sentinel brr region"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn load_or_import_sf2_cache_miss_drives_the_plugin() {
+    let dir = scratch("sf2-cache-miss-plugin");
+    if !build_sf2_plugin(&dir) {
+        eprintln!(
+            "skipping load_or_import_sf2_cache_miss_drives_the_plugin: wasm32 build unavailable"
+        );
+        let _ = fs::remove_dir_all(&dir);
+        return;
+    }
+    let sf2_path = dir.join("x.sf2");
+    let ram = synthetic_apu_ram();
+    let sf2_bytes =
+        slopgb_sf2::export_sf2(&ram, slopgb_sf2::DIR_DEST, slopgb_sf2::INSTR_DEST, 64, 1)
+            .expect("export must succeed");
+    fs::write(&sf2_path, &sf2_bytes).unwrap();
+
+    let got = load_or_import_sf2(&sf2_path, Some(&dir)).expect("plugin conversion must succeed");
+    let want = slopgb_sf2::import_sf2(&sf2_bytes).expect("native import must succeed");
+    assert_eq!(got.dir, want.dir, "plugin dir region matches native import");
+    assert_eq!(
+        got.instr, want.instr,
+        "plugin instr region matches native import"
+    );
+    assert_eq!(got.brr, want.brr, "plugin brr region matches native import");
+
+    let smpl_files: Vec<_> = fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "smpl"))
+        .collect();
+    assert_eq!(smpl_files.len(), 1, "exactly one .smpl cache file written");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn load_or_import_sf2_missing_plugin_cache_miss_returns_none() {
+    let dir = scratch("sf2-missing-plugin");
+    let sf2_path = dir.join("x.sf2");
+    let ram = synthetic_apu_ram();
+    let sf2_bytes =
+        slopgb_sf2::export_sf2(&ram, slopgb_sf2::DIR_DEST, slopgb_sf2::INSTR_DEST, 64, 1)
+            .expect("export must succeed");
+    fs::write(&sf2_path, &sf2_bytes).unwrap();
+
+    assert!(
+        load_or_import_sf2(&sf2_path, None).is_none(),
+        "no cache + no plugins dir -> None, caller falls back to the ROM's own samples"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -589,6 +767,28 @@ fn reverse_frame_steps_back_one_frame_at_a_time() {
     );
     assert!(s.reverse_frame(), "history still available");
     assert_eq!(s.gb.frame_count(), start - 2, "and one more frame back");
+}
+
+#[test]
+fn reverse_frame_reproduces_the_earlier_machine_exactly() {
+    // Frame-exactness, not just the frame counter: each rewound frame must be
+    // byte-identical to the machine as it stood at that frame going forward.
+    let mut s = Session::blank(Model::Dmg);
+    s.gb = GameBoy::new(Model::Dmg, loop_rom()).unwrap();
+    let mut forward = Vec::new();
+    for _ in 0..10 {
+        s.gb.run_frame();
+        s.capture_rewind();
+        forward.push(s.gb.save_state());
+    }
+    for back in 1..=4 {
+        assert!(s.reverse_frame(), "history available {back} frames back");
+        assert_eq!(
+            s.gb.save_state(),
+            forward[forward.len() - 1 - back],
+            "rewinding {back} frame(s) restores that exact machine",
+        );
+    }
 }
 
 #[test]

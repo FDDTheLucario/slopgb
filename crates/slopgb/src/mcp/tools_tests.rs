@@ -148,24 +148,62 @@ fn cdl_ranges_lists_continuous_spans_in_address_form() {
 }
 
 #[test]
-fn coprocessor_reports_not_sgb_on_dmg_and_a_backend_on_sgb() {
+fn coprocessor_reports_an_empty_slot_on_dmg_and_on_pluginless_sgb() {
     let syms = SymbolTable::default();
     let mut bps = Breakpoints::default();
-    // A DMG machine has no SGB coprocessor at all.
+    // Neither a DMG machine nor a pluginless SGB one has a coprocessor: the
+    // emulator ships no SNES implementation, so both report the empty slot and
+    // say what it takes to fill it.
+    for model in [Model::Dmg, Model::Sgb] {
+        let gb = GameBoy::new(model, rom_at_0100(&[0x00])).unwrap();
+        let out = call_text(&Call::Coprocessor, &gb, &mut bps, &syms);
+        let lower = out.to_lowercase();
+        assert!(
+            lower.contains("no sgb coprocessor installed") && lower.contains("spc700.wasm"),
+            "{model:?} must report the empty slot and how to fill it: {out:?}"
+        );
+    }
+}
+
+#[test]
+fn dump_spc_explains_when_nothing_to_dump() {
+    let syms = SymbolTable::default();
+    let mut bps = Breakpoints::default();
+    // DMG has no SPC700 — a live dump reports that, and writes no file.
     let dmg = GameBoy::new(Model::Dmg, rom_at_0100(&[0x00])).unwrap();
-    let out = call_text(&Call::Coprocessor, &dmg, &mut bps, &syms);
-    let lower = out.to_lowercase();
-    assert!(
-        lower.contains("not") && lower.contains("super game boy"),
-        "DMG must report no SGB coprocessor: {out:?}"
+    let out = call_text(
+        &Call::DumpSpc {
+            mode: "live".into(),
+        },
+        &dmg,
+        &mut bps,
+        &syms,
     );
-    // An SGB machine has the built-in HLE APU by default (no wasm coprocessor).
+    assert!(out.to_lowercase().contains("no spc"), "DMG live: {out:?}");
+    // SGB with no song played yet has no from-start snapshot.
     let sgb = GameBoy::new(Model::Sgb, rom_at_0100(&[0x00])).unwrap();
-    let out = call_text(&Call::Coprocessor, &sgb, &mut bps, &syms);
-    assert!(
-        out.contains("HLE"),
-        "SGB default backend is the built-in HLE: {out:?}"
+    let out = call_text(
+        &Call::DumpSpc {
+            mode: "start".into(),
+        },
+        &sgb,
+        &mut bps,
+        &syms,
     );
+    assert!(
+        out.to_lowercase().contains("no from-start"),
+        "SGB start, no song: {out:?}"
+    );
+    // A bogus mode is a clear error, not a panic or a write.
+    let out = call_text(
+        &Call::DumpSpc {
+            mode: "sideways".into(),
+        },
+        &sgb,
+        &mut bps,
+        &syms,
+    );
+    assert!(out.contains("unknown mode"), "bad mode: {out:?}");
 }
 
 #[test]

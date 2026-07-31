@@ -2,13 +2,15 @@
 
 Clean-room WDC 65C816 CPU core — the SNES-side CPU the Super Game Boy runs.
 Bus-generic (`Bus` trait) so the same code is tested natively against vectors and
-hosted as a slopgb coprocessor plugin (`Coprocessor`, comm-port bus).
-`forbid(unsafe_code)` while it's a pure core; switches to the plugin-api `deny` +
-`slopgb_coprocessor_plugin!` when wrapped for wasm.
+hosted as a slopgb coprocessor plugin (`Coprocessor`, comm-port bus). This crate is
+`forbid(unsafe_code)` (workspace lints) and depends on nothing; the wasm wrapper is
+the separate `slopgb-w65c816-plugin`, which supplies the `Coprocessor` impl +
+`slopgb_coprocessor_plugin!` and therefore opts down to `deny(unsafe_code)` for the
+export markers.
 
-This is one first-class `SUBSYSTEM` plugin type (alongside the SPC700 + MSU-1);
-the plugin host supports **every** valid subsystem via the generic
-`LoadedCoprocessor` ABI — see
+This is one first-class `SUBSYSTEM` plugin type (alongside the SPC700, SNES-PPU,
+MSU-1 and SF2 units); the plugin host supports **every** valid subsystem via the
+generic `LoadedCoprocessor` ABI — see
 [`../slopgb-plugin-host/CLAUDE.md`](../slopgb-plugin-host/CLAUDE.md). As
 `w65c816.wasm` it auto-loads (with `spc700.wasm`) from the `--plugins` dir on SGB
 models via the SGB-coprocessor seam, not the tier-1 `--plugins` per-frame pump.

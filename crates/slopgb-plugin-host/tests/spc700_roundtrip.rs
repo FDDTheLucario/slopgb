@@ -119,3 +119,26 @@ fn spc700_pcm_drains_to_the_host() {
 fn sample_count(cop: &mut LoadedCoprocessor) -> u64 {
     u64::from(cop.port_read(4).unwrap()) | (u64::from(cop.port_read(5).unwrap()) << 8)
 }
+
+/// The dynamic-export path (`call_export`) used to dispatch a manifest-declared
+/// menu row must return the exact same bytes as the typed `dump_spc()` — it is
+/// the same guest export (`slopgb_dump_spc`) resolved by name instead of at load.
+#[test]
+fn call_export_matches_typed_dump_spc() {
+    let Some(bytes) = build_plugin() else {
+        eprintln!("skipping call_export_matches_typed_dump_spc: wasm32 build unavailable");
+        return;
+    };
+
+    let mut cop = LoadedCoprocessor::load(&bytes).unwrap();
+    cop.reset().unwrap();
+    cop.run_until(60_000).unwrap();
+
+    let typed = cop.dump_spc().unwrap();
+    let dynamic = cop.call_export("dump_spc").unwrap();
+    assert_eq!(dynamic, typed, "call_export(\"dump_spc\") == dump_spc()");
+    assert!(
+        !typed.is_empty(),
+        "the SPC700 plugin emits a non-empty .spc"
+    );
+}

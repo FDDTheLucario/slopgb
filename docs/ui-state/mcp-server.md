@@ -25,11 +25,12 @@ The server binds `127.0.0.1` only (never `0.0.0.0`) — localhost, not the netwo
 | `peek` | `from`, `to` | 16 hex bytes/row, `BB:AAAA<tab>…` |
 | `cdl` | `from`, `to` | like `peek`, each byte → an `r`/`w`/`x` access word or `.` |
 | `cdl-ranges` | — | the continuous address ranges the CDL has logged (non-`.`), one `AAAA-AAAA` / `BB:AAAA-BB:AAAA` per line; empty when off / nothing logged |
-| `vram` | `view` (`bg`\|`win`\|`tile0`\|`tile1`\|`oam`\|`palette`), optional `scale` | a PNG (`image/png` content); `bg`/`win` game-paletted, Tiles grey-ramp |
+| `vram` | `view` (`bg`\|`win`\|`tile0`\|`tile1`\|`oam`\|`palette`\|`palreg`), optional `scale`, `no_palette` | a PNG (`image/png` content); `bg`/`win` game-paletted, Tiles grey-ramp. `palreg` is the palette registers as **text**, not a PNG; `no_palette=true` forces the neutral grey ramp on `bg`/`win`/`oam` (raw tile pixels) |
 | `screencap` | optional `scale` | the current 160×144 screen (`gb.frame()`) as a PNG — cross-reference against `vram *` |
-| `breakpoint` | `address` | sets a PC breakpoint (the only mutating tool) |
+| `breakpoint` | `address` | sets a PC breakpoint (the only mutating built-in tool) |
 | `registers` | — | `af=… bc=… … lcdc=… stat=… ly=… cnt=… ie=… if=… ime=… ima=… spd=… rom=… ram=… wave=…` |
-| `coprocessor` | — | SGB coprocessor status: whether the SPC700 + 65C816 subsystem plugins are engaged (or the built-in HLE / not-SGB) |
+| `coprocessor` | — | SGB coprocessor status: the SPC700 + 65C816 plugins engaged, or the slot is empty (not SGB, or no plugins loaded) |
+| `dump-spc` | optional `mode` | writes the SGB SPC700 state to `slopgb-<ms>-<mode>.spc` and reports the path. `mode` = `live` (default — the driver's current state, for debugging mid-song) or `start` (the from-the-top snapshot the UI's "Export SPC" writes) |
 | `expr` | `expression` | evaluates a bgb-style debugger expression (hex default, register names, `[addr]`) |
 | `memdump` | `from`, `to`, `file` | writes the range's raw bytes to a local `file` (feeds `simulate`); text confirms `N bytes … to file` |
 | `savestate` | `file` | writes a full savestate (CPU + VRAM + all machine state, **not** the ROM) to `file` — capture a checkpoint before a glitch |
@@ -50,14 +51,16 @@ The tool set is **pluggable**: a wasm tool plugin (see
 via `--plugins` registers new MCP tools, which `tools/list` advertises and
 `tools/call` dispatches alongside these built-ins. A plugin tool whose name
 matches a built-in wins (so the reference plugins in
-`crates/slopgb/reference-tools/` — the nine built-ins re-implemented on the
-plugin ABI, parity-pinned byte-identical — can stand in for them).
+`crates/slopgb/reference-tools/` — nine of the fifteen built-ins re-implemented on
+the plugin ABI, parity-pinned byte-identical — can stand in for them).
 
 The introspection built-ins stay native; the plugins call back into the same
 `mcp::tools` formatters through a borrowed `plugin_host::FrontendToolContext`, so
-a ported tool's output (text or PNG) is identical to the built-in's. The
-file/fork tools (`memdump`, `savestate`, `simulate`, `sim-result`) are built-in
-only — they have no reference-plugin counterparts. The socket
+a ported tool's output (text or PNG) is identical to the built-in's. Six built-ins
+have no reference-plugin counterpart: the four file/fork tools (`memdump`,
+`savestate`, `simulate`, `sim-result`) plus `coprocessor` and `dump-spc`, which
+read the SGB coprocessor slot (`GameBoy::sgb_coprocessor_status` / `export_spc`) —
+a surface the tool-plugin imports don't expose. The socket
 thread advertises plugin tools from a metadata snapshot taken at server start;
 `tools/call` for a plugin name is forwarded to the UI thread like a built-in and
 run against the live machine. Loading plugins is opt-in, so the default path is
@@ -143,6 +146,6 @@ on the fork) — the live machine never advances a cycle, verified by a unit tes
 that runs a fork and asserts the live `PC` is unmoved. Two core accessors back the banked tools —
 `GameBoy::debug_read_banked` and `cdl_flag_banked` (both cover ROMX/VRAM/SRAM/
 WRAMX via the cartridge `ram_read_banked` / `ram_offset_banked` helpers), all
-read-only `&self`, verified golden byte-identical + mooneye 91/91. The whole server is opt-in and
+read-only `&self`, verified golden byte-identical + mooneye 439/439. The whole server is opt-in and
 inert by default, so no golden path is touched. See the golden-safe law in the
 [README](README.md).

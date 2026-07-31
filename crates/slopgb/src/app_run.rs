@@ -246,6 +246,7 @@ impl App {
                 self.request_game_redraw();
             }
             Action::SaveScreenshot => self.save_screenshot(),
+            Action::PluginMenu(i) => self.run_plugin_menu(i),
             Action::DbgSaveMemDump => self.save_memory_dump(),
             // bgb's "Options..." (F11): open the tabbed control panel, seeded
             // from the live settings. Routed/applied by `on_game_click` +
@@ -345,6 +346,32 @@ impl App {
         match fs::write(&path, &dump) {
             Ok(()) => eprintln!("saved memory dump to {path}"),
             Err(e) => eprintln!("error: could not save memory dump: {e}"),
+        }
+    }
+
+    /// Run the manifest-declared coprocessor menu row at `idx` in the cached
+    /// `plugin_menu_rows` table (built when the popup opened — see
+    /// `build_plugin_menu_rows`), writing its blob to
+    /// `slopgb-<unix-millis>.<ext>` — the same naming/logging shape the
+    /// previous SPC-specific "Export SPC" action used. A stale index (the row
+    /// table changed after the popup closed) or an export that yields nothing
+    /// logs and no-ops.
+    fn run_plugin_menu(&self, idx: u8) {
+        let Some(row) = self.plugin_menu_rows.get(idx as usize) else {
+            eprintln!("slopgb: plugin menu row {idx} no longer exists");
+            return;
+        };
+        let Some(blob) = self.session.gb.coprocessor_export(&row.export) else {
+            eprintln!("slopgb: {} produced nothing to export", row.label);
+            return;
+        };
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis());
+        let path = format!("slopgb-{stamp}.{}", row.ext);
+        match fs::write(&path, &blob) {
+            Ok(()) => eprintln!("saved {} ({} bytes) to {path}", row.label, blob.len()),
+            Err(e) => eprintln!("error: could not save {}: {e}", row.label),
         }
     }
 

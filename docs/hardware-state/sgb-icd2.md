@@ -30,9 +30,13 @@ otherwise).
 Semantics worth pinning (each has a unit test):
 
 - **Packet handshake:** `$6002` bit 0 sets when a packet lands; a `$7000` read
-  clears it (reads of `$7001-$700F` do not). The SGB BIOS also forwards six
-  reset-time packets carrying GB cart header bytes `$0104-$014F` — slopgb's HLE
-  boot already emits these on the GB side, so the tee delivers them naturally.
+  clears it (reads of `$7001-$700F` do not). On real hardware the GB boot ROM
+  also sends six reset-time packets (`$F1` + 2n) carrying cart header bytes
+  `$0104-$014F`. slopgb's HLE boot does **not** emit them: it models only their
+  *bit-timing*, as the SGB DIV base value
+  (`interconnect.rs::sgb_header_zero_bits`), so nothing reaches the tee at
+  reset. Any code that genuinely pulses P1 — a game, or an opt-in real boot ROM
+  — is teed by the same receiver path.
 - **Pad direction:** `$6004-$6007` is how the SNES *feeds* the GB joypad — the
   return path this whole phase exists for. The bit layout maps 1:1 onto the GB
   P1 matrix: low nibble = d-pad column (Down/Up/Left/Right = bits 3-0), high
@@ -42,9 +46,12 @@ Semantics worth pinning (each has a unit test):
   rows out of it). Four row buffers; `$6000` bits 1-0 name the one being
   written, `$6001` picks the one to read.
 - **`$6003` GB reset** (bit 7 = 0) is a *GB-side mutation* — not wired in
-  slopgb (golden-safe: the coprocessor never mutates the GB core); captured and
-  logged so a title that needs it is visible. Multiplayer count is already
-  handled GB-side by the HLE MLT_REQ path.
+  slopgb. The one SNES→GB mutation that *is* wired is the pad-latch feed
+  (`AudioCoprocessor::joypad_feed`, default `None`); nothing else in the
+  coprocessor touches the GB core, so the reset bit stays a no-op. The write is
+  captured plugin-side (readable at `HW_CONTROL`), but the host never reads it,
+  so a title that needs a reset fails silently rather than visibly. Multiplayer
+  count is already handled GB-side by the HLE MLT_REQ path.
 
 ## JUMP / SNES-side notes (fullsnes "SGB Commands" details)
 
@@ -58,8 +65,9 @@ Semantics worth pinning (each has a unit test):
 
 ## Crossing design (the one architecture decision)
 
-Constraints: `LoadedCoprocessor` stays generic (`reset`/`run_until`/`port_*`/
-`write_ram`/`read_ram`/`set_pc` only — no ABI widening, no host special-casing);
+Constraints: the crossing must fit the *existing* generic `LoadedCoprocessor`
+ABI — for this path `reset`/`run_until`/`port_*`/`write_ram`/`read_ram`/`set_pc`
+— with no ICD2-specific method and no host special-casing;
 read side-effects (`$7000` clears `$6002`; `$7800` auto-increments) must happen
 **synchronously with the SNES CPU's read**, which executes inside the wasm
 sandbox where the host cannot intervene per-access.
@@ -71,13 +79,19 @@ on the existing `read_ram`/`write_ram` calls:
 
 - The 65C816 bus is 24-bit, so any `u32` address `>= 0x0100_0000` can never be
   a CPU address. The plugin reserves a **host window** there:
-  - `HOST_ICD2` (`0x0100_0000` +): packet deposit (16 bytes + an arm byte that
-    sets the `$6002` flag), the four pad latches (host reads what the SNES
-    wrote), the `$6000` LCD-row shadow (host writes it each pump), captured
-    `$6003` writes, and the `$7800` row buffers (host writes GB tile rows).
-  - Later phases extend the same window: an MMIO write-capture ring
-    (`$21xx`/`$42xx`/`$43xx` writes as `(addr, val)` entries) and host-fed read
-    shadows (RDNMI/HVBJOY/joypad autopoll), plus an NMI-request byte.
+  - The ICD2 block itself, at `HOST_WIN` (`0x0100_0000`) and just above:
+    packet deposit (`HW_PACKET` — 16 bytes, the write also sets the `$6002`
+    flag), the four pad latches + a sticky written flag (`HW_PADS`, host reads
+    what the SNES wrote), the `$6000` LCD-row shadow (`HW_LCD_ROW`, host writes
+    it each pump), captured `$6003` writes (`HW_CONTROL`), and the `$7800` row
+    buffers (`HW_CHAR_ROWS`, host writes GB tile rows).
+  - The same window carries the rest of the SNES-side plumbing: an MMIO
+    write-capture ring (`HW_MMIO_RING` — `$2000-$2007`/`$21xx`/`$42xx`/`$43xx`
+    writes as `(addr, val)` entries), host-fed read shadows
+    (`HW_SHADOW`/`HW_MSU`: RDNMI/HVBJOY/joypad autopoll, MSU-1 status), the
+    NMI-request byte (`HW_NMI`), the DMA stall flag (`HW_DMA_STALL`), the ordered
+    APU-port ring (`HW_PORT_RING`) and the ICD2 bus-read path
+    (`HW_ICD2_BUS`) GP-DMA sources `$7800` through.
 - `write_ram`/`read_ram` with addresses `< 0x0100_0000` keep their existing
   meaning (raw memory install — firmware, `DATA_SND`, `DATA_TRN`), so every
   existing caller is untouched and a generic host sees one uniform ABI.
@@ -106,8 +120,9 @@ with *host*-side effects (`$6003` reset bit) are capture-only.
 - **Core packet tee** (landed): every accepted 16-byte packet (MLT_REQ and
   mid-command packets included) is queued on the joypad's SGB state and
   drained via `SgbCommandSource::take_packet` (`sgb::SGB_PACKET_LEN`);
-  bounded at 16, serialized (save-state v8). The HLE presentation path is
-  untouched — a tee, not a takeover.
+  bounded at `SGB_PACKET_QUEUE_CAP` = 16, serialized (the machine stream is
+  `STATE_VERSION` 10; older states are rejected, there is no migration). The HLE
+  presentation path is untouched — a tee, not a takeover.
 - **Core joypad return seam** (landed): `AudioCoprocessor::joypad_feed()
   -> Option<[u8; 4]>`, polled on `GameBoy::step`; `Some` installs the ICD2
   pad latches as the P1 line source (per-current-player, IRQ edges intact).
@@ -130,9 +145,11 @@ with *host*-side effects (`$6003` reset bit) are capture-only.
   the guest-visible `$6002` flag is clear, reads the pad latches back into
   `joypad_feed` (sticky-written gated), and maintains the `$6000` LCD-row
   shadow off the GB frame position.
-- **MMIO capture + shadows** (landed): write-capture ring (`$2100-$213F`,
-  `$2180-$2183`, `$4000-$44FF`) drained per flush; host-fed read shadows for
-  `$4200-$421F` + `$4016/17` with guest-side RDNMI/TIMEUP read-clear.
+- **MMIO capture + shadows** (landed): write-capture ring (`$2000-$2007`,
+  `$2100-$213F`, `$2180-$2183`, `$4000-$44FF` — `Mmio::captured`) drained per
+  flush; host-fed read shadows for `$4200-$421F` + `$4016/17` with guest-side
+  RDNMI/TIMEUP read-clear. Not every slot is host-fed: `$4214-$4217` are filled
+  plugin-side by the multiply/divide unit below, and the host never writes them.
 - **NMI + frame clock** (landed): hardware NMI in `slopgb-w65c816`
   (datasheet vectors, both modes, WAI wake) + `HW_NMI` trigger; the GB frame
   position scaled onto 262 NTSC lines drives the vblank edge — RDNMI/HVBJOY
@@ -147,19 +164,29 @@ with *host*-side effects (`$6003` reset bit) are capture-only.
   and JOY2-4 read 0 (one physical controller). Manual `$4016` serial
   bit-shifting is not modeled (shadows are static bytes) — extend if a
   title manual-polls.
-- **Pilot probe** (headless, scratch): ARCADE-mode select on Space Invaders
-  runs DATA_SND bootstrap → JUMP → dispatcher → DATA_TRN payload staging on
-  the real wasm 65C816; the arcade program enters and now needs the PPU
-  (`$21xx`) + joypad autopoll to survive its hardware init.
-- **Next**: probe whether the pilot touches the multiplier/divider
-  (`$4202-$4206`), then the SNES PPU plugin chain (`goal.md` T13-T18).
+- **CPU multiply/divide** (landed): `$4202-$4206` → `$4214-$4217` served
+  plugin-side in `Mmio::cpu_write` (fullsnes 4202h-4206h; div/0 → quotient
+  `$FFFF`, remainder = dividend). Results land complete on the kick write
+  because programs read them a handful of cycles later — far inside one host
+  flush, so a host round trip could never answer in time. The write-only operand
+  latches sit in their own shadow slots, so the unit adds no serialized state.
+- **SNES PPU plugin** (landed): the captured `$2100-$213F` writes and the
+  GP-DMA B-bus bytes route through `apply_mmio` into `snes-ppu.wasm` — see
+  [sgb-snes-ppu.md](sgb-snes-ppu.md).
+- **Pilot** (Space Invaders USA, ARCADE mode): runs end to end on the real wasm
+  65C816 — DATA_SND bootstrap → JUMP → dispatcher → DATA_TRN staging → the
+  arcade program's own main loop. The BIOS-runtime contract it pins is
+  [sgb-arcade-takeover.md](sgb-arcade-takeover.md).
+- **Known ceilings** (each stated where it lives in this file): H-DMA (`$420C`)
+  inert, DMA `$43xx` read-back unimplemented, manual `$4016` serial polling
+  unmodeled.
 
 ## GP-DMA (`$420B` / `$43x0-$43x6`) + the WRAM port (`$2180-$2183`)
 
 The GP-DMA engine is **host-side** (`slopgb-sgb-coprocessor/src/dma.rs`),
-executing off captured `$43xx`/`$420B` writes — the same consumer path a
-future PPU gets (`bbus_write` routes B-bus bytes through `apply_mmio`, so
-DMA feeds the PPU for free once `$21xx` routing lands).
+executing off captured `$43xx`/`$420B` writes — the same consumer path the SNES
+PPU uses: `bbus_write` routes B-bus bytes through `apply_mmio`, so a DMA upload
+reaches `snes-ppu.wasm` by exactly the route a direct `$21xx` write does.
 
 - **Atomicity**: a nonzero `$420B` write stalls the plugin CPU (absorbing
   cycles like STP/WAI — hardware pauses the CPU during GP-DMA, fullsnes
@@ -179,9 +206,4 @@ DMA feeds the PPU for free once `$21xx` routing lands).
   only); per-byte wasm crossings (bulk when PPU uploads make size matter);
   a `$420B` entry dropped by ring overflow loses its transfer (the CPU is
   still un-stalled; only the overflow warning fires — unreachable for real
-  write rates, see the `MMIO_RING_CAP` comment); the CPU multiplier/divider
-  (`$4202-$4206` → `$4214-$4217`) is unimplemented — a byte-scan of the
-  pilot's whole 4 KB arcade payload finds no absolute-addressed access to
-  either block, and the resident BIOS surface is an RTS sled with no math
-  services to call, so the `$4214-$4217` shadows read 0; implement when a
-  probe shows a title touching them.
+  write rates, see the `MMIO_RING_CAP` comment).

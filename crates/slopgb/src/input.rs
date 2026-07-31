@@ -1,9 +1,10 @@
 //! Keyboard mapping: physical key codes to Game Boy buttons and frontend
 //! actions, **focus-dependent** like bgb (see [`map`] / [`Focus`]).
 //!
-//! Global (any focus): Z=A, X=B, Enter=Start, Right Shift / Backspace=Select,
-//! arrows=D-pad, Tab (held)=turbo, Backspace (held)=rewind, `[`/`]` (held)=rapid
-//! A/B, P=pause, R=reset, Esc=debugger (bgb-style; never quits), F9=break toggle.
+//! Global (any focus), showing [`crate::keymap::KeyBindings`]' defaults for the
+//! rebindable buttons: Z=A, X=B, Enter=Start, Right Shift=Select, arrows=D-pad,
+//! Tab (held)=turbo, Backspace (held)=rewind, `[`/`]` (held)=rapid A/B, P=pause,
+//! R=reset, T=theme, Esc=debugger (bgb-style; never quits), F9=break toggle.
 //! Game-window F-keys: F2/F3/F4 open the debugger / VRAM / I-O-map windows.
 //! Debugger-window F-keys: F2 toggle breakpoint, F3 step over, F4 run to cursor,
 //! F7 trace (step), F8 step out, Ctrl+G go to, F5/F10 open VRAM/iomap.
@@ -138,14 +139,20 @@ pub enum Action {
     /// Save the current frame to a BMP (bgb's main-menu "Save screenshot").
     /// Menu-only — no key binds it.
     SaveScreenshot,
+    /// Run the manifest-declared coprocessor menu row at this index in the
+    /// live [`PluginMenuRow`](crate::PluginMenuRow) table (e.g. "Export SPC",
+    /// declared by the engaged SGB coprocessor's manifest — see
+    /// `docs/ui-state/game-menu.md`). Menu-only — no key binds it.
+    PluginMenu(u8),
     /// Dump the whole 64 KiB address space to a file (debugger File →
     /// "save memory_dump..."). Menu-only.
     DbgSaveMemDump,
-    /// Show the Options info box (main menu "Options...", F11). Menu-only stub.
+    /// Open the Options dialog (main menu "Options...", F11) — the full tabbed
+    /// `OptionsState` over a working copy of the live settings.
     MainOptions,
-    /// Show the Cheats info box (main menu "Cheat...", F10). Menu-only stub.
+    /// Open the Cheat dialog (main menu "Cheat...") — the full `CheatDialog`.
     MainCheats,
-    /// Execution profiler → "logging mode": tally each executed PC (MB5).
+    /// Execution profiler → "logging mode": tally each executed PC.
     /// Menu-only (Execution-profiler dropdown).
     ProfilerLogging,
     /// Execution profiler → "break mode": logging + halt on each address's first
@@ -202,9 +209,11 @@ pub enum Action {
     DbgMemBankStep(i32),
 }
 
-/// Tracks which physical keys currently hold each button, so two keys mapped
-/// to the same button (Right Shift and Backspace both press Select) don't
-/// release it while the other key is still physically held.
+/// Tracks which physical keys currently hold each button: the button stays
+/// pressed while *any* recorded key for it is still down, so releasing one key
+/// can't cut a press another key is still holding. [`crate::keymap::KeyBindings`]
+/// maps at most one key per button today, so this only bites if that changes —
+/// the contract is pinned by `tracker_keeps_select_held_while_either_key_is_down`.
 #[derive(Default)]
 pub struct ButtonTracker {
     /// Currently held mapped keys. At most one entry per `KeyCode`; tiny, so

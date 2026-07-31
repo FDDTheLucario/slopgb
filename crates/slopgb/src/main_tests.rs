@@ -12,10 +12,17 @@ fn blank_app() -> App {
         sgb_bios: None,
         mcp_port: None,
         plugins_dir: None,
-        msu1: None,
         ram_init: None,
+        plugin_flags: Vec::new(),
     };
-    App::new(opts, Session::blank(Model::Dmg), false, None, None)
+    App::new(
+        opts,
+        Session::blank(Model::Dmg),
+        false,
+        None,
+        None,
+        slopgb_plugin_host::PluginRegistry::new(),
+    )
 }
 
 #[test]
@@ -34,6 +41,17 @@ fn no_rom_idles_emulation_like_pause() {
     );
 }
 
+/// A `blank_app` with the recovery machinery armed. `blank_app` seeds its
+/// settings from the developer's real `slopgb.conf`, where Misc → "Recovery
+/// save state" may be off — and both `arm_recovery` and `write_recovery_state`
+/// gate on it. This test drives that machinery directly, so it pins the setting
+/// rather than inheriting whichever way the option happens to be left.
+fn recovery_app() -> App {
+    let mut app = blank_app();
+    app.settings.recovery_save_state = true;
+    app
+}
+
 #[test]
 fn recovery_save_state_restores_a_crashed_session_and_clears_on_clean_quit() {
     let dir = std::env::temp_dir().join(format!("slopgb-recov-{}", std::process::id()));
@@ -44,7 +62,7 @@ fn recovery_save_state_restores_a_crashed_session_and_clears_on_clean_quit() {
     std::fs::write(&rom_path, &rom).unwrap();
 
     // Load, stamp a WRAM marker, and force a recovery write (bypass the throttle).
-    let mut app = blank_app();
+    let mut app = recovery_app();
     app.load_dropped(&rom_path);
     app.session.gb.debug_write(0xC000, 0xAB);
     app.recovery_next = std::time::Instant::now();
@@ -55,7 +73,7 @@ fn recovery_save_state_restores_a_crashed_session_and_clears_on_clean_quit() {
     );
 
     // A crash = no clean quit → the file survives, so the next load restores it.
-    let mut crashed = blank_app();
+    let mut crashed = recovery_app();
     crashed.load_dropped(&rom_path);
     assert_eq!(
         crashed.session.gb.debug_read(0xC000),
@@ -65,7 +83,7 @@ fn recovery_save_state_restores_a_crashed_session_and_clears_on_clean_quit() {
 
     // A clean quit deletes the recovery, so the following load starts fresh.
     crashed.clear_recovery_state();
-    let mut fresh = blank_app();
+    let mut fresh = recovery_app();
     fresh.load_dropped(&rom_path);
     assert_eq!(
         fresh.session.gb.debug_read(0xC000),

@@ -10,10 +10,10 @@ mod view;
 
 pub use abi::{ABI_VERSION, META_DESCRIPTION, META_NAME, META_SCHEMA, Reg};
 pub use coprocessor::{
-    Coprocessor, EMIT_KIND_MANIFEST, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_STATE, read_file,
-    recv_mailbox,
+    Coprocessor, EMIT_KIND_MANIFEST, EMIT_KIND_PCM, EMIT_KIND_RAM, EMIT_KIND_SPC, EMIT_KIND_STATE,
+    read_file, recv_mailbox,
 };
-pub use tool::{__emit, ToolPlugin, ToolResult};
+pub use tool::{__emit, __emit_words, ToolPlugin, ToolResult};
 pub use view::{GameBoyView, Registers};
 
 /// What a plugin is allowed to do, as a bit set. Tier 1 ([`INTROSPECTION`]) is
@@ -26,9 +26,12 @@ pub struct Capabilities(u32);
 impl Capabilities {
     /// Read-only observation of the live machine (tier 1).
     pub const INTROSPECTION: Self = Self(1 << 0);
-    /// Reserved: writing registers/memory/breakpoints (tier 2).
+    /// Writing registers/memory/breakpoints. Served on the tool loader, which
+    /// accepts `INTROSPECTION | MUTATE` and no-ops `host_set_breakpoint` for a
+    /// module that didn't declare this bit. Rejected by the tier-1 per-frame host.
     pub const MUTATE: Self = Self(1 << 1);
-    /// Reserved: hosting a whole subsystem, e.g. the SPC700 (tier 3).
+    /// Hosting a whole subsystem, e.g. the SPC700. The tier-3 gate:
+    /// `LoadedCoprocessor` requires it.
     pub const SUBSYSTEM: Self = Self(1 << 2);
 
     #[must_use]

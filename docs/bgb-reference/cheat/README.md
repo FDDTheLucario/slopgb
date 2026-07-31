@@ -27,9 +27,8 @@ Opened from the game window's right-click menu → **Cheat… (F10)**.
 `C10A` — exactly bgb's `(C10A)=FF`. Applied every frame (a RAM poke), which is
 why bgb re-applies it continuously.
 
-**Game Genie** (ROM patch, `AAA-BBB[-CCC]`) is accepted in the Code field too;
-it patches ROM reads (needs a core read hook — recognized but not yet applied in
-slopgb).
+**Game Genie** (ROM patch, `AAA-BBB[-CCC]`) is accepted in the Code field too; it
+patches ROM reads, so it needs a core read hook (slopgb has one — see below).
 
 ## slopgb mapping
 

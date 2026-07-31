@@ -3,7 +3,7 @@
 # mealybug_matrix against the pinned v7.0 collection; shrinking this list is
 # progress, growing it is a regression (harness::assert_against_baseline).
 #
-# 26 of 55 rom x model legs fail. Passing: mbc/mbc3_rtc.gb (both),
+# 23 of 55 rom x model legs fail. Passing: mbc/mbc3_rtc.gb (both),
 # dma/hdma_during_halt-C (HBlank DMA defers across the core-clock gate
 # and re-fires at the wake - the gambatte-shaped HDMA engine),
 # m2_win_en_toggle [Cgb], m3_lcdc_bg_en_change/change2 [Cgb] (mode-0

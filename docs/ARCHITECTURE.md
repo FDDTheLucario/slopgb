@@ -2,8 +2,23 @@
 
 slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
 
-- `crates/slopgb-core` — the emulator. **Zero dependencies, `forbid(unsafe_code)`, deterministic.**
-- `crates/slopgb` — desktop frontend (winit + softbuffer + cpal). Keeps deps minimal and pure-Rust.
+- `crates/slopgb-core` — the emulator. **No external (crates.io) dependencies — std
+  only, plus one in-tree path dep (`slopgb-snes-apu`, re-exported for the shared
+  save-state `Reader`/`Writer`/`StateError`). `forbid(unsafe_code)`, deterministic.**
+  It emulates no SNES chip: the SGB border, palettes and command-packet handling
+  are core-side HLE (`ppu/sgb.rs` + `ppu/sgb/`, `src/sgb/`; the packet *receiver*
+  is in `joypad.rs`), but every SNES-side *chip* arrives from outside as a wasm
+  coprocessor plugin.
+- `crates/slopgb` — desktop frontend (winit + softbuffer + cpal + gilrs). Keeps deps
+  minimal and pure-Rust.
+- The rest of the workspace `members` (root `Cargo.toml`) is the plugin system and
+  its support crates: `slopgb-plugin-api` (guest SDK), `slopgb-plugin-host` (the
+  `wasmi` runtime — the only crate that depends on it, so core and the frontend
+  stay off it), `slopgb-sgb-coprocessor`, the clean-room chip cores
+  `slopgb-snes-apu` / `slopgb-w65c816` / `slopgb-snes-ppu` with their
+  `slopgb-{spc700,w65c816,snes-ppu}-plugin` wasm wrappers, `slopgb-sf2` +
+  `slopgb-sf2-plugin`, `slopgb-msu1-plugin`, `slopfp`, and `xtask`. Nothing below
+  applies to them: this file is the **core** contract.
 
 ## Ground rules (all work packages)
 
@@ -22,17 +37,21 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
      GitHub repo) — each test's asm states exactly what it checks; read it when
      a test fails.
    - SameBoy / mooneye-gb source — tie-breakers for undocumented corners.
-4. No `unsafe`, no new dependencies in core, rustfmt defaults, clippy clean
+4. No `unsafe`, no new external dependencies in core, rustfmt defaults, clippy clean
    (`cargo clippy --all-targets -- -D warnings`).
-5. Unit tests live in the same file (`#[cfg(test)] mod tests`) or in
-   `crates/slopgb-core/tests/` for cross-module behavior.
+5. Unit tests live in a `#[cfg(test)] #[path = "X_tests.rs"] mod tests;` sibling of
+   the module they cover, or in `crates/slopgb-core/tests/` for cross-module
+   behavior. No `.rs` over 1000 lines (`tests/source_size.rs` enforces it), so
+   inline `mod tests` blocks get externalized as a file grows.
 6. **The golden-safe law.** Every core hook added for the UI is either read-only
    `&self` introspection or a default-off mutating hook (watchpoints, exception
    mask, profiler, CDL, link, channel mute, boot ROM, RAM init, Game Genie) that
    never perturbs emulation when disarmed — so the debugger/viewers stay
-   byte-identical to the golden. The debug surface lives in `lib/debug.rs`,
-   `interconnect/{accessors,debug,link}.rs`, and the `debug/` module (they are
-   *not* in the module-ownership table below). See CLAUDE.md "The golden-safe law".
+   byte-identical to the golden. A third class — explicit user-initiated mutations
+   (`debug_set_reg`, `debug_write`, load-state) — changes state only on a direct
+   user action, never on the passive frame loop. The debug surface lives in
+   `lib/debug.rs`, `interconnect/{accessors,debug,link}.rs`, and the `debug/`
+   module. See CLAUDE.md "The golden-safe law".
 
 ## Timing model (the contract everything hangs on)
 
@@ -45,14 +64,26 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
   2. then perform the memory access (if any).
   So a read observes peripheral state *after* the cycle's ticks; this is the
   same ordering mooneye-gb uses and the mooneye timing tests expect.
+  The CPU-side clock underneath is SameBoy's deferred-commit `pending_cycles`
+  clock (`crate::cycle_clock`, with SameBoy's per-IO-write `Conflict` classes),
+  which puts a bus access's *sample instant* at the M-cycle's leading edge
+  (cc+0). One address is routed to that instant instead of the post-tick view:
+  FF41, sampled by `Interconnect::leading_edge_sample` before `tick_machine`.
+  Everything else reads the post-tick value.
 - `Bus::pending`/`pending_halt_wake`/`ack` are free (no time). The CPU samples
   `pending()` at the architecturally correct points (see CPU notes); the halt
   idle loop samples `pending_halt_wake()` instead, an earlier intra-cycle view
   that misses timer IF bits committed in the second half of the current
   M-cycle for one cycle (SameBoy `GB_cpu_run` halt path; gambatte tima/,
   wilbertpol timer_if).
-- The PPU is stepped per dot; the timer per M-cycle on the CPU clock
-  (4 internal T-ticks); the APU per M-cycle with the DIV counter passed in
+- The PPU is stepped per **half-dot** (`Ppu::tick_half`, the 8 MHz grain: two
+  half-dots per dot at single speed, one per dot in double speed). The first half
+  does no structural work and the second runs the whole-dot body, so a run of
+  aligned half-dots is byte-identical to a whole-dot advance; the grain exists so
+  a mode-3-exit or read boundary can sit on the odd half-dot. IF bits and
+  accessibility edges are folded only on a dot-completing half
+  (`Interconnect::fold_ppu_events`). The timer is stepped per M-cycle on the CPU
+  clock (4 internal T-ticks); the APU per M-cycle with the DIV counter passed in
   (DIV-APU = falling edge of DIV bit 4, bit 5 in double speed).
 - **Mode-3 write strobe** (a refinement *inside* tick-then-access, not an
   exception to it): the CPU drives the data bus during the second half of a
@@ -103,35 +134,49 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
   readable through FF0F immediately but misses the CPU's interrupt sample
   for the M-cycle it was raised in (`Interconnect::if_stat_late`, the same
   shape as the timer's `if_late` halt-wake mask), and it is blocked
-  entirely while the vblank source enable is set — gambatte
+  entirely while the vblank source enable is set (both rules live in
+  `Ppu::stat_update_tick`) — gambatte
   `mstat_irq.h doM2Event` and the mealybug handlers' "line 0 timing is
-  different by 4 cycles" compensation pin both rules.
-- **STAT IRQs are per-source events with predicates**
-  (`Ppu::stat_events_tick`, a function-by-function port of gambatte
-  mstat_irq.h `MStatIrqEvent` + lyc_irq.cpp `LycIrq`; the truth table
-  lives in its doc comment): there is no wired-OR STAT line on the IRQ
-  side — each source fires at its own dot (m2 pulses at line-start dot
-  0 on lines 1-144, dot 4 on line 0, DMG dot 12 on lines 145-153; m1 at
-  144:4; LYC at (N,4) and (153,12); m0 at the visible-flip dot), gated
-  by the *other* sources' enables sampled through delayed FF41/FF45
-  copies (the `statRegChange`/`lycRegChange` guard windows, staged
-  6/6/8 dots at single speed, 2 in double speed, with per-event fresh
-  views). m0 is blocked only by a matching delayed LYC — never by the
-  m2 enable; m1 by delayed m2en|m0en; per-line m2 pulses are routed
-  away entirely while m0en is live (mode2IrqSchedule) and are
-  lyc-blocked against the previous line's compare; LYC events are
-  m2-blocked for values 1-144 and m1-blocked otherwise. The dot-0
+  different by 4 cycles" compensation pin them.
+- **The STAT IRQ side is a single level line with rising-edge detection**
+  (`Ppu::stat_update_tick`, a port of SameBoy `GB_STAT_update`,
+  `display.c:523`; the rising-edge core itself is the unit-tested
+  `crate::stat_update::StatUpdate`). The line is the OR of the **one**
+  mode source selected by `Ppu::mode_for_interrupt` and the LYC source,
+  and `IF |= STAT` fires only on its 0→1 rise — the classic STAT-blocking
+  model, so a second source joining an already-high line raises nothing.
+  `mode_for_interrupt` carries a deliberate no-mode-source state
+  (`MODE_FOR_INTERRUPT_NONE`) that holds the mode side low between
+  transitions; the LYC input is the `Ppu::lyc_interrupt_line` latch,
+  re-derived from the delayed `Ppu::ly_for_comparison` whenever that is a
+  real line and held across those gaps. `Ppu::stat_update_half`
+  re-evaluates the level on the odd half-dot so a coincident FF41
+  write-commit / LYC re-latch / mode-0 rise resolves at its true sub-dot
+  phase (idempotent on the aligned grid). The mode-1/mode-2 pulses are
+  direct pokes on top of that level (`stat_update_vblank_oam_pulses`):
+  OAM at line-start dot 0 on lines 1-143, at dot 4 on line 0, at 144:0
+  on both families, and on DMG again at dot 12 of every later vblank
+  line; mode 1 and the VBlank IF bit at 144:4. The *readable* FF41
+  mode/LYC bits are a separate path (`Ppu::refresh_cmp` →
+  `Ppu::vis_mode`/`vis_mode_read`), not the IRQ source. The dot-0
   pulses stay second-half commits: IF reads back at once, but both the
   halt-exit sampler (`Ppu::take_stat_halt_late` → `Interconnect::
   if_late`) and the running CPU's same-cycle interrupt sample
   (`Ppu::take_stat_late` → `if_stat_late`) miss them for one M-cycle —
-  the CGB 144:0 pulse is exempt. Register writes raise IF only through
+  the CGB 144:0 pulse is exempt. Those emission masks have no
+  `GB_STAT_update` equivalent and are set by
+  `Ppu::stat_update_halt_masks`. Register writes raise IF only through
   the ported trigger predicates: the DMG STAT-write glitch branch table
   (`stat_write_trigger_dmg`) plus a dots-0/4 line-start pulse
   re-decide, the CGB newly-enabled-bits table
   (`stat_write_trigger_cgb`) plus a dot-0 re-decide, and the FF45
   tables (`write_lyc_dmg`/`write_lyc_cgb`, gambatte
-  lycRegChangeTriggersStatIrq). Double-speed/lcd-offset sub-cells stay
+  lycRegChangeTriggersStatIrq). The gambatte delayed event-register
+  copies survive on that write side only (`stage_stat_copies` +
+  `Ppu::m2_pulse_fires`, whose blocking the level-OR otherwise
+  reproduces): on CGB the FF41/FF45 copies land 6/6/8 dots after the
+  architectural commit — 2 in double speed — while DMG copies update
+  immediately. Double-speed/lcd-offset sub-cells stay
   documented-swap baselines. (See the CGB-C deltas section in
   `ppu/mod.rs` for the per-model timeline: readable-LYC holds, the
   delayed FF45 event copy, line-0 mode-1 tail, VRAM/OAM blocking
@@ -188,19 +233,13 @@ slopgb is a cycle-accurate Game Boy (DMG) / Game Boy Color (CGB) emulator.
 
 | Range | Target |
 |---|---|
-| 0000-7FFF | `Cartridge::read_rom/write_rom` |
+| 0000-7FFF | `Cartridge::read_rom/write_rom` (an opt-in boot ROM overlays the low region until it writes FF50 — `interconnect/boot_rom.rs`) |
 | 8000-9FFF | `Ppu` (VRAM, current VBK bank on CGB) |
 | A000-BFFF | `Cartridge::read_ram/write_ram` |
 | C000-DFFF | WRAM (CGB: D000 banked via SVBK, banks 1-7) |
 | E000-FDFF | echo of C000-DDFF |
 | FE00-FE9F | `Ppu` OAM (mode + DMA blocking) |
 | FEA0-FEFF | prohibited area (DMG: 00/FF; CGB-C: 24 B extra OAM RAM, 4× mirrored; AGB: nibble echo — Pan Docs) |
-
-Any CPU access with a $FE00-$FEFF value on the address bus during the
-mode-2 OAM scan triggers the DMG-family OAM corruption bug (Pan Docs "OAM
-Corruption Bug"): `Interconnect` gates on model/halt/DMA and routes to
-`Ppu::oam_bug`; the 16-bit inc/dec-unit CPU cycles reach it through
-`Bus::tick_addr`/`Bus::read_inc` (blargg `oam_bug/` is the oracle).
 | FF00 | `Joypad` |
 | FF01-FF02 | `Serial` |
 | FF04-FF07 | `Timer` |
@@ -211,9 +250,16 @@ Corruption Bug"): `Interconnect` gates on model/halt/DMA and routes to
 | FF80-FFFE | HRAM |
 | FFFF | IE (all 8 bits writable/readable) |
 
+Any CPU access with a $FE00-$FEFF value on the address bus during the
+mode-2 OAM scan triggers the DMG-family OAM corruption bug (Pan Docs "OAM
+Corruption Bug"): `Interconnect` gates on model/halt/DMA and routes to
+`Ppu::oam_bug`; the 16-bit inc/dec-unit CPU cycles reach it through
+`Bus::tick_addr`/`Bus::read_inc` (blargg `oam_bug/` is the oracle).
+
 ## Models
 
-`Model = {Dmg0, Dmg, Mgb, Sgb, Sgb2, Cgb, Agb}`. No boot ROM is executed;
+`Model = {Dmg0, Dmg, Mgb, Sgb, Sgb2, Cgb, Agb}`. By default no boot ROM is
+executed (`GameBoy::new`; every golden and test path);
 `Registers::post_boot(model)` + `Interconnect::apply_post_boot_state()` set
 the exact PC=0x100 state including the internal 16-bit DIV counter (this is
 what `boot_div*` ROMs measure). Values come from gbctr/mooneye-gb and are
@@ -222,7 +268,9 @@ hand-off moment depends on the cart type: the boot ROM's DMG-compat tail
 runs 0x7D8 T-cycles longer than the CGB-cart path, so `apply_post_boot_state`
 shifts DIV and the LCD phase together for CGB-flagged carts (mooneye ROMs —
 DMG carts — pin one side, gambatte's `$143=$C0` ROMs the other; see the
-model.rs table docs).
+model.rs table docs). A real boot ROM can be attached opt-in
+(`GameBoy::new_with_boot`, the frontend's `--boot`); it overlays 0000-7FFF until
+it writes FF50 and is inert on every other path (`interconnect/boot_rom.rs`).
 
 ## CGB revision policy (Model::Cgb)
 
@@ -297,12 +345,19 @@ A test ends by executing `LD B,B` (opcode 0x40, exposed as
 `GameBoy::debug_breakpoint_hit()`).
 Pass ⇔ registers are the Fibonacci sequence B=3, C=5, D=8, E=13, H=21, L=34.
 Anything else (or 120 emulated seconds without the breakpoint) is a failure.
-The harness (`crates/slopgb-core/tests/mooneye.rs`) maps every ROM under
+The harness is `crates/slopgb-core/tests/mooneye.rs`; the model mapping itself
+lives in `tests/common/mod.rs::models_for`, which maps every ROM under
 `test-roms/` to the model(s) it applies to via its filename suffix:
-`-dmg0`, `-dmgABC(mgb)`, `-mgb`, `-S`(=SGB+SGB2), `-sgb`, `-sgb2`, `-GS`(=DMG+SGB families),
-`-C`/`-cgb*`(=CGB), `-A`(=AGB), no suffix = every supported model.
-`manual-only/sprite_priority` is verified by frame compare against a
-reference image instead.
+`-dmg0`, `-dmgABC`, `-dmgABCmgb`, `-mgb`, `-sgb`, `-sgb2`, `-cgb`/`-cgbABCDE`,
+`-agb`, plus the group letters `G`(=DMG+MGB) / `S`(=SGB+SGB2) / `C`(=CGB) /
+`A`(=AGB) in any combination (`-GS`, `-C`, `-A`, …). `-cgb0` maps to the empty
+model list — CGB revision 0 is not modeled, so no machine can pass it. With no
+recognized suffix a ROM runs on DMG+MGB+SGB+SGB2+CGB+AGB (**not** DMG0), except
+`misc/` (CGB+AGB — the suite README calls it CGB/AGB extras) and
+`emulator-only/` (DMG+CGB: mapper tests are model-agnostic).
+`manual-only/sprite_priority` and `madness/` are verified by frame compare
+against a vendored reference image instead (`tests/expected/`); the latter halts
+forever and never executes `LD B,B`.
 
 ## game-boy-test-roms battery (harness)
 
@@ -310,7 +365,8 @@ reference image instead.
 v7.0 collection (fetched by `test-roms/download.sh` alongside the mooneye
 bundle): one module per suite — acid, age, blargg, gambatte, gbmicrotest,
 mealybug, mooneye2022, same-suite, smallsuites (bully/strikethrough/
-turtle/scribbl/little-things/mbc3-tester/rtc3test), wilbertpol — each
+turtle-tests/scribbltests/little-things-gb/mbc3-tester/rtc3test),
+wilbertpol — each
 implementing its suite's documented pass protocol (the
 `game-boy-test-roms-howto.md` inside each suite directory) and asserting
 its full rom×model matrix against an exact known-failure baseline
@@ -319,10 +375,13 @@ regression, a now-passing or orphaned baseline entry fails the run too —
 shrinking the baselines is the tracked progress. A whole-collection
 inventory guard (`gbtr/inventory.rs`) pins that every `.gb`/`.gbc` on
 disk is claimed or documented-exempt by exactly one suite, so a re-pinned
-collection can never silently shrink coverage. The residual-failure floor
-is classified — classes A–H: double-speed sub-cycle phase,
+collection can never silently shrink coverage. `gbtr/golden.rs`'s
+`golden_fingerprint` is the byte-identity gate the golden-safe law above is
+verified against. The residual-failure floor
+is classified — classes A, B, C, E, F, G, H: double-speed sub-cycle phase,
 speed-switch/HDMA seams, APU write phase, 2016-era expectation chains,
-asset/build defects, upstream tie-breaks, one-dot conflicts — in the
+asset/build defects, upstream tie-breaks, one-dot conflicts (class D, the
+dot-serial OAM scan, was lifted) — in the
 index header of `tests/gbtr/baselines/gambatte.txt` with per-class lift
 conditions (several require sub-dot event modeling, i.e. a revision of
 the whole-dot timing contract above). Read that index before touching any
@@ -333,12 +392,13 @@ baselined behavior: every cluster is an A/B-swept trade whose one-sided
 
 | Package | Files (exclusive) |
 |---|---|
-| CPU | `src/cpu/execute.rs`, `src/cpu/registers.rs`, `src/cpu/mod.rs` |
+| CPU | `src/cpu/execute.rs`, `src/cpu/registers.rs`, `src/cpu/mod.rs` (the `Bus` trait), `src/cycle_clock.rs` |
 | Timer/serial/joypad | `src/timer.rs`, `src/serial.rs`, `src/joypad.rs` |
-| Cartridge | `src/cartridge.rs` |
-| PPU | `src/ppu/mod.rs` (struct + driver) + submodules below |
+| Cartridge | `src/cartridge.rs` + `src/cartridge/` (`banking`/`header`/`mbc6`/`rtc`/`save`/`state`) |
+| PPU | `src/ppu/mod.rs` (struct + driver) + submodules below, `src/stat_update.rs`, `src/mode_timeline.rs` |
 | APU | `src/apu/mod.rs` + `envelope`/`length`/`noise`/`pulse`/`wave` |
-| Interconnect | `src/interconnect.rs` (struct + sub-dot machinery + `Bus` impl) + submodules below, `src/model.rs`, `src/lib.rs`, `tests/` |
+| Interconnect | `src/interconnect.rs` (struct + sub-dot machinery) + submodules below, `src/model.rs`, `src/lib.rs` + `src/lib/`, `tests/` |
+| SGB presentation | `src/ppu/sgb.rs` + `src/ppu/sgb/` (`commands`/`transfer`/`border`/`defaults`/`bios`), `src/sgb/` (the SNES-side seams), `src/lib/sgb_api.rs` |
 
 Each god-file split keeps the struct, its fields, and shared consts in the
 parent; every submodule is a second `impl` block (`use super::*`) owning one
@@ -346,19 +406,35 @@ concern. Module ownership (each file's `//!` header names its oracle suite):
 
 | Parent | Submodule | Owns |
 |---|---|---|
-| `interconnect.rs` | `interconnect/boot.rs` | power-on / post-boot state install |
+| `interconnect.rs` | `interconnect/bus.rs` | `impl Bus for Interconnect` (a trait impl cannot split across files, so its bodies live in the siblings below) |
+| | `interconnect/boot.rs` | power-on / post-boot state install |
+| | `interconnect/boot_rom.rs` | opt-in boot-ROM overlay (inert with none attached) |
+| | `interconnect/cycle.rs` | deferred-commit clock driving + leading-edge (cc+0) read helpers |
+| | `interconnect/phase.rs` | the eighth-grid sub-cc phase model (`EdgeKind`, the edge-stamp helpers) |
+| | `interconnect/speed.rs` | STOP / speed switch, halt-wake samplers, IF ack, dispatch retime |
 | | `interconnect/oam_dma.rs` | OAM DMA engine + bus conflicts |
 | | `interconnect/hdma.rs` | CGB VRAM (HBlank/General) DMA request engine |
 | | `interconnect/memory.rs` | memory-map routing + IO register read/write |
 | | `interconnect/tick.rs` | per-M-cycle machine advance + HALT/STOP gate |
-| `ppu/mod.rs` | `ppu/stat_irq.rs` | STAT IRQ event engine + mode readout |
+| | `interconnect/state.rs` | save-state (de)serialization |
+| | `interconnect/accessors.rs`, `debug.rs`, `link.rs` | the golden-safe debug surface (see the golden-safe law above) |
+| `ppu/mod.rs` | `ppu/engine.rs` | the half-dot tick driver (`tick_half`) + read-position helpers |
+| | `ppu/stat_irq.rs` | mode readout, FF41 write triggers, delayed event copies |
+| | `ppu/stat_irq/reclock.rs` | the production STAT IRQ engine (`stat_update_tick`, the `GB_STAT_update` port) |
+| | `ppu/stat_irq/ff0f.rs` | the FF0F read-view / squash family |
+| | `ppu/stat_irq/read_laws.rs`, `read_laws_exit.rs` | the CPU-visible FF41 mode read + its mode-3-exit table |
 | | `ppu/lyc.rs` | LYC compare + FF45 write triggers |
-| | `ppu/blocking.rs` | mode/DMA access-block predicates + OAM bug |
-| | `ppu/regs.rs` | FF40-FF4B read/write + mode-3 write strobe |
+| | `ppu/blocking.rs` | mode/DMA access-block predicates |
+| | `ppu/access.rs` | accessibility queries + the HDMA trigger level |
+| | `ppu/oam_bug.rs` | the DMG OAM-corruption patterns (free fns, not an `impl` block) |
+| | `ppu/regs.rs` | FF40-FF4B read/write |
+| | `ppu/regs/stage.rs` | mode-3 write strobe (`stage_write`/`commit_eff`/`strobe_tick`) |
+| | `ppu/line_setup.rs` | per-line setup at a line boundary (`start_line`) |
 | | `ppu/render.rs` | mode-3 pipeline driver (struct + `render_step`) |
 | | `ppu/render/sprite.rs` | OAM scan + OBJ fetch/mix |
 | | `ppu/render/window.rs` | window machine |
 | | `ppu/render/mode0.rs` | BG fetcher + mode-0/IRQ end-of-line grid |
+| | `ppu/state.rs` | save-state (de)serialization |
 
 Public signatures in the skeleton are the inter-package API. If you must
 change one, it's a coordination point — keep the change minimal and adjust

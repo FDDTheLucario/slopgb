@@ -20,6 +20,15 @@ fn is_cgb_only_for_color_models() {
     }
 }
 
+/// `is_sgb` gates the PPU's SGB view, the coprocessor slot, and the save-state
+/// cross-model check — it must name exactly the two Super Game Boy models.
+#[test]
+fn is_sgb_only_for_super_game_boy_models() {
+    for m in ALL {
+        assert_eq!(m.is_sgb(), matches!(m, Model::Sgb | Model::Sgb2), "{m:?}");
+    }
+}
+
 /// Register values straight from the boot_regs-* assertions.
 #[test]
 fn cpu_registers_match_boot_regs_tests() {

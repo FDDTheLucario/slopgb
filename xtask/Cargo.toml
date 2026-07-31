@@ -8,7 +8,9 @@ license.workspace = true
 publish = false
 
 [dependencies]
-# Intentionally empty — std only. Shells out to `cargo` and copies files.
+# Std only otherwise — shells out to `cargo` and copies files. `slopgb-sf2` is
+# std-only/zero-dep itself, so this stays lean (gen-sf2 needs its exporter).
+slopgb-sf2 = { path = "../crates/slopgb-sf2" }
 
 [lints]
 workspace = true

@@ -70,9 +70,11 @@ fn sou_trn_game_driver_still_plays() {
     let dir = [0x10u8, 0x02, 0x10, 0x02];
     let brr = [0x93u8, 0x77, 0x77, 0x77, 0x77, 0x88, 0x88, 0x88, 0x88];
     let mut block = Vec::new();
+    // SBN block header: length first, destination second (SBN2SPC; the SGB
+    // loader at program.rom $00:AC6C).
     let mut push = |dest: u16, data: &[u8]| {
-        block.extend_from_slice(&dest.to_le_bytes());
         block.extend_from_slice(&(data.len() as u16).to_le_bytes());
+        block.extend_from_slice(&dest.to_le_bytes());
         block.extend_from_slice(data);
     };
     push(0x0400, &prog);

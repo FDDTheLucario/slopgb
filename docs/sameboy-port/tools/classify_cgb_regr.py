@@ -1,17 +1,4 @@
-"""CGB gambatte OCR-leg classifier.
-
-Runs SameBoy --cgb on each row, OCRs the BMP, and compares against the
-`cgb04c_out<hex>` want in the filename.
-
-  BUG   sb == want -> SameBoy passes the row; a row we fail is our bug.
-  FLOOR sb != want -> SameBoy misses it too (we are tied, not wrong).
-  UNK   no want regex / ROM missing / unreadable glyphs.
-
-Usage: python3 classify_cgb_regr.py rowlist.txt outprefix
-  rowlist lines: gambatte/<rel>.gbc (trailing ` [Cgb]`/want= columns ignored)
-Writes <outprefix>_bug.txt / <outprefix>_floor.txt / <outprefix>_unk.txt.
-"""
-import struct, subprocess, os, re, shutil, sys, tempfile
+import struct, subprocess, os, re, shutil, sys
 RAW = {'0':[0x7F,0x41,0x41,0x41,0x41,0x41,0x7F],'1':[0x08,0x08,0x08,0x08,0x08,0x08,0x08],
  '2':[0x7F,0x01,0x01,0x7F,0x40,0x40,0x7F],'3':[0x7F,0x01,0x01,0x3F,0x01,0x01,0x7F],
  '4':[0x41,0x41,0x41,0x7F,0x01,0x01,0x01],'5':[0x7F,0x40,0x40,0x7E,0x01,0x01,0x7E],
@@ -48,10 +35,6 @@ SBT=_sbt()
 if not os.path.exists(SBT):
     sys.exit(f"sameboy_tester not found at {SBT} — run build_sameboy_tracers.sh or set SBT=. "
              "Classifying with a missing tester is a vacuous result, not a bar.")
-# Default to the collection in this checkout (this script lives in
-# docs/sameboy-port/tools/), overridable for a worktree. A default pointing at
-# a throwaway worktree silently classifies every row UNK once that worktree is
-# pruned, which reads as a clean bar rather than a measurement that never ran.
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 ROOT = os.environ.get(
@@ -61,30 +44,23 @@ ROOT = os.environ.get(
 if not os.path.isdir(ROOT):
     sys.exit(f"ROM collection not found at {ROOT} — set SLOPGB_GBTR_ROOT. "
              "Classifying zero rows is a vacuous result, not a bar.")
-
-rows=[l.split()[0] for l in open(sys.argv[1]) if l.strip() and not l.startswith('#')]
-pref=sys.argv[2]
-tmp=tempfile.mkdtemp(prefix='clscgb_')
+# Scratch dir for the per-ROM copy + the tester's BMP; the writes below assume it.
+os.makedirs('/tmp/s7', exist_ok=True)
+rows=[l.strip() for l in open(sys.argv[1]) if l.strip()]
 bug=[];floor=[];unk=[]
 for rel in rows:
     m=re.search(r'cgb04c_out([0-9A-Fa-f]+)\.gb',rel)
-    if not m: unk.append((rel,'noregex','')); continue
+    if not m: unk.append(rel); continue
     want=m.group(1).upper()
     src=os.path.join(ROOT,rel)
-    if not os.path.exists(src): unk.append((rel,'missing',want)); continue
-    dst=os.path.join(tmp,'cls.'+rel.rsplit('.',1)[1])
-    bmp=os.path.join(tmp,'cls.bmp')
-    # A run that emits no BMP must not OCR the previous row's screen.
-    if os.path.exists(bmp): os.remove(bmp)
-    shutil.copy(src,dst)
-    subprocess.run([SBT,'--cgb','--length','4',dst],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    if not os.path.exists(bmp): unk.append((rel,'nobmp',want)); continue
-    sb=ocr(bmp,len(want))
+    if not os.path.exists(src): unk.append(rel); continue
+    shutil.copy(src,'/tmp/s7/cls.gbc')
+    subprocess.run([SBT,'--cgb','--length','4','/tmp/s7/cls.gbc'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    if not os.path.exists('/tmp/s7/cls.bmp'): unk.append(rel); continue
+    sb=ocr('/tmp/s7/cls.bmp',len(want))
     if '?' in sb: unk.append((rel,sb,want)); continue
     if sb==want: bug.append(rel)
     else: floor.append((rel,sb,want))
 print(f"BUG(sb==want, must FIX)={len(bug)}  FLOOR/DIFF(sb!=want, baseline at flip)={len(floor)}  UNK={len(unk)}")
-open(pref+'_bug.txt','w').write('\n'.join(bug)+'\n')
-open(pref+'_floor.txt','w').write('\n'.join(f"{r}\tsb={s}\twant={w}" for r,s,w in floor)+'\n')
-open(pref+'_unk.txt','w').write('\n'.join(f"{r}\tsb={s}\twant={w}" for r,s,w in unk)+'\n')
-shutil.rmtree(tmp)
+open('/tmp/s7/buglist.txt','w').write('\n'.join(bug))
+open('/tmp/s7/floorlist.txt','w').write('\n'.join(f"{r}\tsb={s}\twant={w}" for r,s,w in floor))

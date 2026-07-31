@@ -105,6 +105,51 @@ fn hw_line_span_renders_like_single_lines() {
     assert_eq!(tail.len(), 4, "bottom row rendered, nothing wrapped");
 }
 
+/// The zero-copy framebuffer handoff must be byte-identical to the generic
+/// [`Coprocessor::read_ram`] path it bypasses: wherever [`fb_words`] claims a
+/// request, the little-endian image of those words is exactly the byte stream
+/// `read_ram` would have built. Anything it declines still has to reach
+/// `read_ram`, so this also pins which requests it declines.
+#[test]
+fn fb_word_range_is_byte_identical_to_read_ram() {
+    let mut cop = SnesPpuCop::new();
+    // A frame with distinct content per row + a non-symmetric backdrop, so a
+    // wrong offset, length, or byte order cannot compare equal by accident.
+    cop.port_write(0x00, 0x0F);
+    for y in 0..FB_HEIGHT as u16 {
+        cop.port_write(0x21, 0x00);
+        cop.port_write(0x22, y as u8);
+        cop.port_write(0x22, (0x2A ^ y >> 3) as u8);
+        cop.write_ram(HW_LINE, &y.to_le_bytes());
+    }
+
+    let cases: &[(u32, usize)] = &[
+        (HW_FB, FB_BYTES),            // the whole frame — the per-frame handoff
+        (HW_FB, 0),                   // empty
+        (HW_FB, 2),                   // one pixel
+        (HW_FB + 5 * 512, 4),         // mid-frame, row-aligned
+        (HW_FB + 512 * 223, 512),     // the last row
+        (HW_FB + FB_BYTES as u32, 0), // exactly at the end
+        (HW_FB + 1, 2),               // odd start: generic path
+        (HW_FB, 3),                   // odd length: generic path
+        (HW_FB, FB_BYTES + 2),        // past the end: generic path (zero-padded)
+        (HW_FB + FB_BYTES as u32, 2), // wholly past the end
+        (HW_FB - 2, 4),               // straddles the window base
+        (0, 4),                       // outside the host window entirely
+    ];
+    assert!(
+        fb_words(HW_FB, FB_BYTES).is_some(),
+        "the once-per-vblank whole-frame pull must take the fast path"
+    );
+    for &(addr, len) in cases {
+        let want = cop.read_ram(addr, len);
+        if let Some(r) = fb_words(addr, len) {
+            let got: Vec<u8> = cop.fb[r].iter().flat_map(|w| w.to_le_bytes()).collect();
+            assert_eq!(got, want, "fast path differs at {addr:#X} len {len}");
+        }
+    }
+}
+
 /// The HW_PORTS window applies `(port, val)` pairs in order — one host
 /// call standing in for a run of B-bus writes (a DMA's worth).
 #[test]

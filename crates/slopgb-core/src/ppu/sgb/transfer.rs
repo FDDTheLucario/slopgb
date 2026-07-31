@@ -2,8 +2,11 @@
 //! screen (never VRAM) and read its 2-bit shades as packed 4bpp data — 4096
 //! bytes per full-screen capture (Pan Docs "SGB Functions — VRAM Transfer";
 //! SameBoy `GB_sgb_render`'s `pixel_to_bits` packing). A command latches a
-//! destination; the capture + route happen at the next frame boundary, when the
-//! just-rendered [`SgbView::shade_buf`] is complete.
+//! destination and opens a [`TRN_CAPTURE_DELAY`] window; the capture + route
+//! happen when that machine-clocked window expires (`tick_trn`), one GB frame
+//! later, by which point [`SgbView::shade_buf`] holds the screen the SNES would
+//! have seen. Deliberately *not* the LCD frame boundary — an LCD-off stretch
+//! would skip it and silently lose a latched screen.
 
 use super::*;
 
@@ -65,8 +68,9 @@ impl SgbView {
     }
 
     /// Consume a pending `*_TRN`: decode the just-rendered screen and route the
-    /// 4096 bytes (2176 for PCT_TRN) into the destination buffer. Called once
-    /// per frame boundary; a no-op when nothing is pending.
+    /// 4096 bytes (2176 for PCT_TRN) into the destination buffer. Called when the
+    /// capture window expires (`tick_trn`), or when a fresh latch supersedes an
+    /// unexpired one; a no-op when nothing is pending.
     pub(super) fn run_pending_transfer(&mut self) {
         let Some(dest) = self.pending_transfer.take() else {
             return;

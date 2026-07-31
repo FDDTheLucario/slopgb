@@ -65,10 +65,11 @@ pub fn render_menubar(c: &mut Canvas, bar: Rect, open: Option<usize>, theme: &Th
 }
 
 /// Build the dropdown for menu-bar label `idx`, hung under its label. Items are
-/// transcribed from menubar-{file,search,run,debug,window,profiler}.png; the few
-/// already-supported ones (Debug → Toggle breakpoint, Run → Run to Cursor) are
-/// enabled, the rest greyed pending MB2–MB5. The cursor address (or PC) is what
-/// the enabled execution items act on.
+/// transcribed from menubar-{file,search,run,debug,window,profiler}.png, so every
+/// bgb row is present; the implemented ones are enabled (`en_sc`/`en_act`) and
+/// the rest are greyed placeholders (`dis_sc`) keeping bgb's layout. Debug and
+/// Profiler are fully enabled; File, Run and Window are mixed. The cursor address
+/// (or PC) is what the enabled execution items act on.
 #[must_use]
 pub fn menubar_menu(idx: usize, bar: Rect, st: &DebuggerState, pc: u16) -> OpenMenu {
     let cursor = st.cursor.unwrap_or(pc);

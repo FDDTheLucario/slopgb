@@ -804,7 +804,7 @@ gambatte/oam_access/prewrite_lcdoffset1_1_cgb04c_out1.gbc [Cgb]
 # The gambatte mstat_irq.h / lyc_irq.cpp predicate port (per-source
 # events with delayed FF41/FF45 copies, the DMG STAT-write glitch and
 # CGB write-trigger branch tables, the line-start pulse write-reach —
-# see Ppu::stat_events_tick) flipped 78 rows of this suite to PASS
+# see Ppu::stat_update_tick) flipped 78 rows of this suite to PASS
 # (m1, m0enable, lycEnable, miscmstatirq, m2enable, lcdirq_precedence)
 # plus gbmicrotest oam_int_if_level_c-consistency and scribbltests
 # scxly [Dmg]. The 10 rows below are the flip side: every one is a

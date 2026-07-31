@@ -8,39 +8,48 @@ Cycle-accurate Game Boy / Game Boy Color emulator in Rust.
 |---|---|
 | ![Pokémon Crystal running in slopgb](docs/screenshots/crystal-cgb.png) | ![Space Invaders in SGB mode with border](docs/screenshots/space-invaders-sgb.png) |
 
-The Super Game Boy shot is the SNES side running for real: the SGB border and
-audio come from clean-room SPC700 + 65C816 + SNES-PPU chip cores compiled to
-wasm coprocessor plugins, driven by the running Game Boy.
+In the Super Game Boy shot the border, palettes and screen composite are the
+core's own SGB emulation; the SNES *chips* are separate — SGB music comes from
+clean-room SPC700 + 65C816 cores compiled to wasm coprocessor plugins, driven by
+the running Game Boy.
 
-- `crates/slopgb-core` — emulator core: zero dependencies, no unsafe,
-  deterministic. Emulates DMG0/DMG/MGB/SGB/SGB2/CGB/AGB models.
+- `crates/slopgb-core` — emulator core: no external dependencies (std only), no
+  unsafe, deterministic. Emulates DMG0/DMG/MGB/SGB/SGB2/CGB/AGB models. It
+  emulates no SNES chip of its own: the SGB border, palettes and command-packet
+  handling are core-side, every SNES chip is a plugin.
 - `crates/slopgb` — cross-platform desktop frontend (winit + softbuffer +
   cpal + gilrs) with a bgb-style debugger UI.
 - A Rust→wasm plugin system (`slopgb-plugin-api` guest SDK +
   `slopgb-plugin-host` wasmi runtime) with three capability tiers:
   per-frame introspection, MCP tools, and coprocessor subsystems. Super
-  Game Boy support runs its SNES side as clean-room chip cores compiled to
+  Game Boy sound runs its SNES side as clean-room chip cores compiled to
   wasm coprocessor plugins — SPC700 + S-DSP audio (`slopgb-snes-apu`),
-  65C816 (`slopgb-w65c816`), SNES PPU (`slopgb-snes-ppu`) — plus MSU-1
-  streaming audio (`--msu1`). Build them with `cargo xtask stage-plugins`.
+  65C816 (`slopgb-w65c816`), and optionally the SNES PPU
+  (`slopgb-snes-ppu`) for titles that take the SNES over entirely — plus MSU-1
+  streaming audio (`--msu1`) and a SoundFont-2 importer that replaces an SGB
+  game's own instrument samples (`slopgb-sf2`, `--sf2`). Build the plugins with
+  `cargo xtask stage-plugins <dir>` and point the emulator at that directory with
+  `--plugins <dir>`. Without them the coprocessor slot stays empty and
+  an SGB game plays no SGB music; the border and palettes are unaffected.
 
 Accuracy is validated against the
 [mooneye-test-suite](https://github.com/Gekkio/mooneye-test-suite)
 (439/439 rom×model cases pass) and the
 [game-boy-test-roms](https://github.com/c-sp/game-boy-test-roms) v7.0
 collection (gambatte, blargg, mealybug-tearoom, SameSuite, age,
-gbmicrotest, the acid tests and more — 7047 rom×model cases run, every
-residual failure pinned in a documented known-failure baseline), achieved
-by emulating documented hardware behavior — never by special-casing test
-ROMs (see `docs/ARCHITECTURE.md`).
+gbmicrotest, the acid tests and more — run in full across every applicable
+hardware model, with all 215 suite tests green and every residual failure
+pinned in a documented known-failure baseline of 654 rom×model cases),
+achieved by emulating documented hardware behavior — never by special-casing
+test ROMs (see `docs/ARCHITECTURE.md`).
 
 ## Building
 
 Needs **Rust 1.97+** (the pinned toolchain in `rust-toolchain.toml`; the workspace
 is edition 2024); install via [rustup](https://rustup.rs).
 
-The **core** (`slopgb-core`) is pure `std` — it builds anywhere with no system
-libraries. The **frontend** (`slopgb`) draws with winit + softbuffer, plays
+The **core** (`slopgb-core`) is pure `std` with no external crates — it builds
+anywhere with no system libraries. The **frontend** (`slopgb`) draws with winit + softbuffer, plays
 audio with cpal and reads game controllers with gilrs, so on Linux it needs
 the usual desktop dev libraries (libudev is gilrs's controller-hotplug
 backend):
@@ -74,8 +83,9 @@ cargo test --workspace       # unit tests + mooneye + game-boy-test-roms harness
 Beyond accuracy, the suite pins robustness the way a shipping app needs it:
 the untrusted parsers a user actually feeds — the ROM image, the `.sav`, the
 savestate blob, the CDL file — are fuzzed with hundreds of thousands of random
-and mutated inputs and must never panic (`tests/fuzz.rs`); every model runs
-faster than real time (`tests/realtime_perf.rs`, ~9× headless); and audio +
+and mutated inputs and must never panic (`tests/fuzz.rs`); every model emulates a
+frame well inside the 16.7 ms real-time budget headless
+(`tests/realtime_perf.rs`); and audio +
 joypad carry signal end to end (`tests/audio_input_smoke.rs`). All of it, plus
 `cargo fmt`/`clippy -D warnings`, runs in CI on Linux, Windows, and macOS.
 
@@ -88,6 +98,12 @@ cargo run --release                      # no ROM → blank LCD; load via drag-d
 
 Optional boot ROM (Nintendo logo + chime): `--boot path/to/dmg_boot.bin` or the
 `SLOPGB_BOOT` env var (boot ROMs are copyrighted and never bundled).
+
+Other flags: `--model`, `--scale`, `--mute`, `--ram-init`, `--sgb-bios`,
+`--plugins <dir>` (load the wasm plugins staged above; also `SLOPGB_PLUGINS_DIR`)
+and `--mcp-port <n>` (expose the debugger to an LLM agent over MCP). Flags a
+plugin contributes are only accepted while that plugin is in the plugins dir, so
+`--msu1` and `--sf2` appear in `--help` exactly when their `.wasm` is present.
 
 ## Credits & references
 

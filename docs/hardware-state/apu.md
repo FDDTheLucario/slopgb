@@ -21,7 +21,7 @@ Same-suite apu is green except for these known-exempt rows — read the baseline
 
 | Row(s) | Reason exempt |
 |---|---|
-| `freq_change_timing` revision variants | revision-dependent |
+| `channel_1_freq_change_timing-cgb0BC` | revision-dependent (the model-specific APU 2 MHz write phase) |
 | ch4 `align` / `freq_change` (NR43 corruption tables) | upstream-documented non-deterministic |
 
 ## Ch1 sweep (`pulse.rs`)

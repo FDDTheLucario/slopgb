@@ -1,0 +1,15 @@
+[package]
+name = "slopgb-sf2"
+description = "SoundFont-2 (SF2) importer/exporter + SNES BRR codec for the SGB N-SPC music engine. Std-only, no unsafe, no external deps (hand-rolled RIFF)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Intentionally empty: hand-rolled RIFF/SF2 reader+writer and BRR codec, std
+# only, no external SF2/RIFF/audio crates.
+
+[lints]
+workspace = true

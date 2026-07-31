@@ -129,6 +129,42 @@ fn plugins_dir_browse_routes_the_outcome_without_mutating() {
     assert_eq!(st.working, before, "browse doesn't mutate settings");
 }
 
+/// A tier-3 SUBSYSTEM plugin (spc700 / w65c816 / snes-ppu / msu1) gets the same
+/// live enable checkbox as a per-frame one, plus a note that the change lands at
+/// the next reset — disabling one leaves its slot empty, there is no fallback.
+#[test]
+fn plugins_tab_toggles_subsystem_plugins_and_says_when_it_applies() {
+    let mut s = settings_with_plugins();
+    s.plugins.entries.push(PluginEntry {
+        name: "spc700".into(),
+        capabilities: "subsystem".into(),
+        enabled: true,
+    });
+    let idx = s.plugins.entries.len() - 1;
+    let content = OptionsState::content_rect(dialog());
+    let ctrls = controls(OptionsTab::Plugins, &s, content);
+    let ctrl = ctrls
+        .iter()
+        .find(|c| c.field == Some(Field::PluginEnable(idx)))
+        .expect("a subsystem plugin needs a live enable checkbox");
+    assert!(matches!(ctrl.kind, Kind::Check { checked: true, .. }));
+    assert!(
+        ctrls.iter().any(|c| matches!(&c.kind,
+            Kind::Label { text } if text.contains("applies on the next reset"))),
+        "the list must say a subsystem toggle applies on reset"
+    );
+
+    let mut st = OptionsState::new(s);
+    st.active = OptionsTab::Plugins;
+    click_field(&mut st, Field::PluginEnable(idx));
+    assert!(!st.working.plugins.entries[idx].enabled);
+    // Tier-3 disables persist under their OWN key, never mixed into the tier-1
+    // list — a stale tier-1 list from an older build must not silently kill the
+    // SNES side.
+    assert_eq!(st.working.plugins.disabled_joined(), "tracer");
+    assert_eq!(st.working.plugins.disabled_subsystems_joined(), "spc700");
+}
+
 #[test]
 fn plugins_tab_enable_checkbox_toggles_entry() {
     let mut st = OptionsState::new(settings_with_plugins());

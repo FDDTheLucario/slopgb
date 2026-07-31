@@ -14,6 +14,20 @@ pushes it at startup + each (re)load) so a fresh slopgb matches bgb; the core
 power-on default stays grayscale. Title is bare `"slopgb"` with no ROM
 (`window_title`).
 
+## Plugin-contributed CLI flags (startup ordering)
+
+`main` resolves the plugins dir (`--plugins` / `SLOPGB_PLUGINS_DIR` / persisted
+`settings.plugins.dir`, via `app_boot::prescan_plugins_dir`) — reusing the one
+`settings_file::load()` call already needed for `Options` — and scans it into a
+`PluginRegistry` (`app_boot::build_registry`) **before** the real `cli::Options::parse`,
+because that parse needs the very declared-flag table (`sf2`, `msu1`, ...) this
+directory's manifests contribute; a flag exists only while its plugin is present
+(`unknown option '--sf2'` otherwise, never a soft warning; `--help` mirrors the rule too).
+Full contract — the generic `SLOPGB_<FLAG>` env fallback, deferred (ROM-load-time, never
+startup-fatal) validation, and the duplicate-role fatal-at-startup/non-fatal-at-Options-
+change split — lives in
+[`docs/ui-state/plugin-api.md`](plugin-api.md#cli-flags-from-manifests-pluginregistry-present-iff).
+
 ## Opt-in boot-ROM execution
 
 Core foundation done. `GameBoy::new_with_boot(model, rom, boot_rom)` runs a real boot

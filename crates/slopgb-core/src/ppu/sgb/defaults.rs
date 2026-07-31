@@ -2,8 +2,8 @@
 //! frame drawn around the Game Boy inset.
 //!
 //! On real hardware the default border lives in the SGB's SNES-side firmware
-//! (the "BIOS"), uploaded by SNES code. slopgb is a *high-level* emulation — it
-//! never runs the SNES CPU — so that firmware is not executed and would show no
+//! (the "BIOS"), uploaded by SNES code. Core is a *high-level* emulation — it
+//! runs no SNES CPU — so that firmware is not executed and would show no
 //! border at all. [`SgbView::default_composite`] instead draws an **original**
 //! neutral bezel (no Nintendo artwork embedded), shown from power-on and until
 //! a ROM sends its own `CHR_TRN`+`PCT_TRN`. A user-supplied BIOS's real border

@@ -14,8 +14,8 @@
 //! ## Clocking
 //!
 //! `run_until(target)` advances the SPC700 in its own 1.024 MHz cycle domain and
-//! drives one S-DSP sample every 32 SPC cycles (→ 32 kHz), mirroring the
-//! built-in `SgbApu` wiring exactly (the DSP shares the SPC700's APU RAM). The
+//! drives one S-DSP sample every 32 SPC cycles (→ 32 kHz), the hardware ratio
+//! (the DSP shares the SPC700's APU RAM). The
 //! synthesized stereo PCM is buffered and drained to the host over the tier-3
 //! `drain_pcm` path; ports `4-5` keep surfacing the running sample count for
 //! quick observability.
@@ -83,6 +83,16 @@ impl Spc700Cop {
 }
 
 impl Coprocessor for Spc700Cop {
+    // No `menu` record: "Export SPC" is declared by the native SGB coprocessor
+    // mediator, not here — its from-start snapshot (`song_start_spc`) is
+    // captured there, while this plugin's `dump_spc` is live-only. Declaring
+    // the export here would silently downgrade it to a mid-song dump.
+    const MANIFEST: &'static str = concat!(
+        "id\tspc700\n",
+        "name\tSPC700 + S-DSP\n",
+        "provides\taudio-coprocessor\n"
+    );
+
     fn new() -> Self {
         Self::power_on()
     }
@@ -158,6 +168,10 @@ impl Coprocessor for Spc700Cop {
         w.u32(self.dsp_div);
         w.u64(self.samples);
         w.into_vec()
+    }
+
+    fn dump_spc(&self) -> Vec<u8> {
+        slopgb_snes_apu::build_spc_file(&self.spc, &self.dsp.borrow())
     }
 
     fn load_state(&mut self, bytes: &[u8]) {

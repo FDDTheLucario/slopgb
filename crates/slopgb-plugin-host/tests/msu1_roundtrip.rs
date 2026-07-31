@@ -75,12 +75,14 @@ fn manifest_self_describes_the_chip_and_its_flag() {
     let m = cop.manifest().expect("msu1 declares a manifest");
     assert_eq!(m.id, "msu1");
     assert_eq!(m.name, "MSU-1 Streaming Audio");
+    assert_eq!(m.provides, ["streaming-audio"]);
     assert_eq!(
         m.flags,
         [FlagContribution {
             name: "msu1".into(),
             arg: "dir".into(),
             help: "Load an MSU-1 streaming-audio pack from DIR".into(),
+            default: "$rom_dir".into(),
         }]
     );
 }
