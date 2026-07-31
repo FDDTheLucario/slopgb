@@ -289,37 +289,15 @@ gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte
 gambatte/scx_during_m3/scx_attrib_during_m3_spx2_ds.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	16px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_during_m3_spx2.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scx_during_m3/scx_during_m3_spx2_ds.gbc [Cgb]	gambatte	gambatte/scx_during_m3	Cgb	16px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scx3/scy_during_m3_2.gbc [Cgb]	gambatte	gambatte/scy	Cgb	1013px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scx3/scy_during_m3_2.gbc [Dmg]	gambatte	gambatte/scy	Dmg	5px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scx3/scy_during_m3_3.gbc [Cgb]	gambatte	gambatte/scy	Cgb	715px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scx3/scy_during_m3_3.gbc [Dmg]	gambatte	gambatte/scy	Dmg	715px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scx3/scy_during_m3_4.gbc [Cgb]	gambatte	gambatte/scy	Cgb	1008px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scx3/scy_during_m3_6.gbc [Cgb]	gambatte	gambatte/scy	Cgb	1008px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scy_during_m3_2.gbc [Cgb]	gambatte	gambatte/scy	Cgb	1016px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scy_during_m3_2.gbc [Dmg]	gambatte	gambatte/scy	Dmg	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scy_during_m3_3.gbc [Cgb]	gambatte	gambatte/scy	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scy_during_m3_3.gbc [Dmg]	gambatte	gambatte/scy	Dmg	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scy_during_m3_4.gbc [Cgb]	gambatte	gambatte/scy	Cgb	1008px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scy_during_m3_6.gbc [Cgb]	gambatte	gambatte/scy	Cgb	1008px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scy/scy_during_m3_ds_3.gbc [Cgb]	gambatte	gambatte/scy	Cgb	1144px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scy/scy_during_m3_ds_5.gbc [Cgb]	gambatte	gambatte/scy	Cgb	8px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/scy/scy_during_m3_ds_6.gbc [Cgb]	gambatte	gambatte/scy	Cgb	8px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scy/scy_during_m3_spx08_1.gbc [Cgb]	gambatte	gambatte/scy	Cgb	896px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scy_during_m3_spx08_3.gbc [Cgb]	gambatte	gambatte/scy	Cgb	896px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scy/scy_during_m3_spx08_ds_3.gbc [Cgb]	gambatte	gambatte/scy	Cgb	8px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/scy/scy_during_m3_spx08_ds_4.gbc [Cgb]	gambatte	gambatte/scy	Cgb	8px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scy/scy_during_m3_spx09_1.gbc [Cgb]	gambatte	gambatte/scy	Cgb	912px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scy/scy_during_m3_spx09_2.gbc [Cgb]	gambatte	gambatte/scy	Cgb	240px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scy_during_m3_spx09_3.gbc [Cgb]	gambatte	gambatte/scy	Cgb	912px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scy/scy_during_m3_spx09_4.gbc [Cgb]	gambatte	gambatte/scy	Cgb	240px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/scy/scy_during_m3_spx09_ds_1.gbc [Cgb]	gambatte	gambatte/scy	Cgb	232px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/scy/scy_during_m3_spx09_ds_2.gbc [Cgb]	gambatte	gambatte/scy	Cgb	8px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/scy/scy_during_m3_spx09_ds_3.gbc [Cgb]	gambatte	gambatte/scy	Cgb	16px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/scy/scy_during_m3_spx09_ds_4.gbc [Cgb]	gambatte	gambatte/scy	Cgb	128px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scy/scy_during_m3_spx0A_1.gbc [Cgb]	gambatte	gambatte/scy	Cgb	896px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scy/scy_during_m3_spx0A_3.gbc [Cgb]	gambatte	gambatte/scy	Cgb	896px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/scy/scy_during_m3_spx0B_1.gbc [Cgb]	gambatte	gambatte/scy	Cgb	1008px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/scy/scy_during_m3_spx0B_3.gbc [Cgb]	gambatte	gambatte/scy	Cgb	1008px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/sound/ch1_duty0_pos6_to_pos7_timing_ds_6_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/sound	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/sound/ch1_init_pos_1_dmg08_outaudio0_cgb04c_outaudio1.gbc [Dmg]	gambatte	gambatte/sound	Dmg	varying-output	silence	unknown	hw-capture:dmg08	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/sound/ch1_init_pos_4_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb]	gambatte	gambatte/sound	Cgb	varying-output	silence	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
@@ -484,9 +462,7 @@ mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Dmg]	mealybug	m
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	60px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change2.gb [Cgb]	mealybug	mealybug/ppu	Cgb	70px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	32px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
-mealybug-tearoom-tests/ppu/m3_scy_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	4673px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
-mealybug-tearoom-tests/ppu/m3_scy_change.gb [Dmg]	mealybug	mealybug/ppu	Dmg	29px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
-mealybug-tearoom-tests/ppu/m3_scy_change2.gb [Cgb]	mealybug	mealybug/ppu	Cgb	108px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
+mealybug-tearoom-tests/ppu/m3_scy_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	493px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
 mooneye-test-suite/madness/mgb_oam_dma_halt_sprites.gb [Mgb]	mooneye2022	mooneye2022/madness	Mgb	11523px-diff	reference-png	unknown	hw-mooneye	BUG	hardware-captured want; SameBoy verdict unmeasured
 same-suite/apu/channel_1/channel_1_freq_change_timing-cgb0BC.gb [Cgb]	same-suite	same-suite/apu	Cgb	B=42,C=42,D=42,E=42,H=42,L=42	fib:03/05/08/0D/15/22	unknown	upstream:same-suite	CONFLICT	upstream-documented revision/unit-specific behavior
 same-suite/apu/channel_4/channel_4_align.gb [Cgb]	same-suite	same-suite/apu	Cgb	B=42,C=42,D=42,E=42,H=42,L=42	fib:03/05/08/0D/15/22	unknown	upstream:same-suite	CONFLICT	upstream-documented revision/unit-specific behavior

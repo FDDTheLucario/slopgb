@@ -415,3 +415,58 @@ fn eager_scx_during_m3_map_column_passes() {
             .unwrap_or_else(|e| panic!("{rel} [{model:?}]: {e}"));
     }
 }
+
+/// The mid-mode-3 SCY read frame (`map_scy_formed`): the CGB fetch forms the
+/// map row two fetcher steps early (one on a sprite-selected line), the DMG
+/// samples live, and the line's first visible tile takes two further steps on
+/// both models (our discarded-then-re-fetched first tile).
+///
+/// Each row pins one arm from the side that breaks without it:
+/// `scy_during_m3_3` on both models pins the first-tile lead — its line-start
+/// write commits between the discarded fetch and the re-fetch, and without the
+/// lead the whole first tile flips to the new scroll on all 143 lines.
+/// `scy_during_m3_2 [Cgb]` pins the CGB lead: its last tile must read the tile
+/// data LO under the old scroll and HI under the new (BG palette colour 1),
+/// which no other lead produces. `scy_during_m3_2 [Dmg]` pins that the same
+/// lead must NOT apply on DMG — there the identical write must land before the
+/// LO read. `spx08_2` pins the sprite-line step: a line that selected an OBJ
+/// forms the row one step early, not two.
+#[test]
+fn eager_scy_during_m3_read_frame_passes() {
+    let Some(root) = common::gbtr_root() else {
+        common::skip_or_fail_gbtr(
+            "eager_scy_during_m3_read_frame",
+            "game-boy-test-roms collection not present",
+        );
+        return;
+    };
+    let rows = [
+        ("gambatte/scy/scy_during_m3_3.gbc", "_dmg08", Model::Dmg),
+        ("gambatte/scy/scy_during_m3_3.gbc", "_cgb04c", Model::Cgb),
+        ("gambatte/scy/scy_during_m3_2.gbc", "_dmg08", Model::Dmg),
+        ("gambatte/scy/scy_during_m3_2.gbc", "_cgb04c", Model::Cgb),
+        (
+            "gambatte/scy/scy_during_m3_spx08_2.gbc",
+            "_cgb04c",
+            Model::Cgb,
+        ),
+    ];
+    for (rel, suffix, model) in rows {
+        let path = root.join(rel);
+        let rom = std::fs::read(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        let mut gb = harness::boot(&rom, model);
+        run_to_dot(&mut gb, RUN_DOTS + u64::from(CYCLES_PER_FRAME));
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+        let png = path
+            .parent()
+            .unwrap_or(Path::new(""))
+            .join(format!("{stem}{suffix}.png"));
+        let map = if model.is_cgb() {
+            CgbColorMap::Gambatte
+        } else {
+            CgbColorMap::Identity
+        };
+        harness::expect_frame_png(&gb, &png, map)
+            .unwrap_or_else(|e| panic!("{rel} [{model:?}]: {e}"));
+    }
+}

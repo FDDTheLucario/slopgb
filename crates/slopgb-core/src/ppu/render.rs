@@ -259,6 +259,9 @@ pub(super) struct Render {
     /// `scx_ring_i`.
     pub(super) scx_ring: [u8; 8],
     pub(super) scx_ring_i: u8,
+    /// History of `eff.scy` over the same advances, read at its own lead
+    /// (`map_scy_formed`); shares `scx_ring_i`.
+    pub(super) scy_ring: [u8; 8],
     /// WX comparator output on the previous dot: activations and
     /// reactivations fire on the rising edge only (the match holds while
     /// lx is frozen during the start stall and must not re-fire).
@@ -327,6 +330,7 @@ impl Render {
             hunt_fine: 0,
             scx_ring: [0; 8],
             scx_ring_i: 0,
+            scy_ring: [0; 8],
             win_match_prev: false,
             prefill_pos: 0,
             wx_match_dot: 0,
@@ -392,6 +396,7 @@ impl Ppu {
         r.hunt_fine = self.eff.scx & 7;
         r.scx_ring = [self.eff.scx; 8];
         r.scx_ring_i = 0;
+        r.scy_ring = [self.eff.scy; 8];
         r.win_match_prev = false;
         r.prefill_pos = 0;
         r.wx_match_dot = 0;

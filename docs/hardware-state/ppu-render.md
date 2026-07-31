@@ -46,7 +46,7 @@ Parked: chasing the residual late_sp `_ds` out3 rows (half-dot, cc-granular race
 
 `ppu/render/mode0.rs` `fetcher_step`.
 
-- Every fetch VRAM access samples `eff` clean at its read dot on **both** families.
+- Every fetch VRAM access samples `eff` clean at its read dot on **both** families, except the two scroll registers, which are read from per-dot rings at a lead (`map_scx_formed` for the column, `map_scy_formed` for the row — see "Mid-mode-3 SCY" below).
 - LCDC.1 gates sprite pixels at the mix as well as the fetch (m3_lcdc_obj_en_change).
 - Sprites with OAM X 0-7 fetch during the pause-aware prefill walk (`prefill_pos`), freezing the SCX hunt (gambatte spx0/spx1); penalty math unchanged (mooneye tables frozen).
 - The BG fetcher free-runs through every sprite stall (prefill included), with the line's first push waiting for the pause-aware startup walk (`push_allowed`), keeping pixel 0 on its stall-shifted dot.
@@ -64,8 +64,8 @@ Status of the `m3_*` ppu_state tests:
 | Pixel-perfect [Dmg] legs | m3_lcdc_tile_sel_change, m3_lcdc_tile_sel_win_change, m3_lcdc_bg_map_change, m3_lcdc_win_map_change, m3_scx_high_5_bits, m3_bgp_change_sprites, m3_obp0_change |
 
 Remaining (not yet pixel-perfect) legs are mostly:
-- [Cgb] fetch-law residue — see the parked rising-late CGB LCDC fetch view above and the baseline comments (`_cgb_c` photo columns vs hardware-captured gambatte bgtiledata spx0B rows).
-- Small [Dmg] scy / bg_en / obj_en single-pixel residue.
+- [Cgb] fetch-law residue — see the parked rising-late CGB LCDC fetch view above and the baseline comments (`_cgb_c` photo columns vs hardware-captured gambatte bgtiledata spx0B rows). `m3_scy_change` [Cgb] is down to 493 px on the SCY read frame below (`m3_scy_change` [Dmg] and `m3_scy_change2` [Cgb] now pass).
+- Small [Dmg] bg_en / obj_en single-pixel residue.
 - The obj_size pair.
 - Sub-dot LCDC-write races: m3_lcdc_win_en_change_multiple_wx [Dmg] (m2_win_en_toggle now passes on both legs).
 
@@ -90,6 +90,85 @@ Remaining (not yet pixel-perfect) legs are mostly:
 
 - The PPU raises STAT/VBlank IRQs via `Ppu::write`'s return value (single drain).
 - When adding a PPU register path, OR the returned IF bits into `intf` like the existing interconnect call sites.
+
+## Mid-mode-3 SCY and the BG map row (single speed CLOSED 2026-07-31)
+
+`map_scy_formed` (`ppu/render/mode0.rs`). The row half of the same law
+`map_scx_formed` carries for the column: the fetch reads SCY from a per-dot ring
+(`Render::scy_ring`, sharing `scx_ring_i`) at a lead, not live at the access.
+
+| leg | lead | plus the line's first visible tile |
+|---|---|---|
+| CGB single speed, no sprite on the line | 2 | +2 |
+| CGB single speed, line selected a sprite | 1 | +2 |
+| DMG single speed | 0 | +2 |
+| double speed (either model) | 0 | 0 |
+
+**+22 gambatte rows and +2 mealybug rows, zero regressions** over the whole
+5268-row gambatte corpus: every single-speed row of `gambatte/scy/` now passes
+(both `scy/` and `scy/scx3/`, `spx08`/`spx09`/`spx0A`/`spx0B` included), plus
+`m3_scy_change` [Dmg] and `m3_scy_change2` [Cgb]. Golden drift is confined to
+SCY-named ROMs. Pinned per arm by
+`gambatte::misc::eager_scy_during_m3_read_frame_passes`.
+
+### What the kernel measures, and how the references were read
+
+`scy/scy_during_m3_*` is a STAT handler (`$0048` = `ei; jp $1000`) that writes
+`SCY = 144 - LY` early in mode 3 and `SCY = 0` late, stepping the two writes in
+opposite directions per rung. The map holds tile 1 on row 18 and tile 0
+everywhere else, and tile 1's data is `FF FF` on row 0 and zero on rows 1-7. So
+
+* SCY = `144 - LY` at a fetch → map row 18, fine row 0 → **black**;
+* SCY = 0 → map row `LY >> 3` → tile 0 → **white**;
+* the tile number read under one value and the data reads under the other are
+  the mealybug `m3_scy_change` mixed fetch, and on CGB they render a *distinct*
+  colour — LO under the old scroll (`FF`) with HI under the new (`00`) is BG
+  palette 0 **colour 1**, raw `$2AAA`, which is what the `_2`/`_4`/`_6`
+  references demand at the line's last tiles. That colour is what pins the CGB
+  lead exactly; the DMG reference at the same pixels is colour 0, which rules
+  the mixed fetch *out* there.
+
+Our tile-number reads sit at dots 86 (the discarded fetch), 92 (`fetch_x` 0)
+then `90 + 8k`; LO is +2 and HI +4 from each. The FF42 commit lands at the raw
+write dot + 2, and a read at dot `d` sees a commit at `d` as the old value.
+Solving the six rungs of the plain directory against those dots gives a lead of
+2 for the CGB body and 4 for its first tile, 0 and 2 for the DMG — which is
+exactly the swept optimum.
+
+### The first tile's extra two steps
+
+Hardware fetches the line's first visible tile once; we throw the first fetch
+away and re-run it six dots later (`first_discard`, the same artefact that makes
+`bg_map_col`'s anchor 6/7 instead of 8), so that tile's reads sit late on our
+grid. `_3` is the discriminating rung on both models: its line-start write
+commits between the discarded fetch and the re-fetch, and without the extra lead
+the whole first tile flips to the new scroll on all 143 lines (1144 px [Dmg] and
+[Cgb] alike, 715 px in `scx3/`). Two steps is the measured value; 3 ties it, 0/1
+and 4 lose rows.
+
+### Swept, on the full 5268-row gambatte corpus
+
+| knob | 0 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|
+| CGB lead | 4646 | 4646 | **4660** | 4660 | 4632 |
+| CGB sprite-line lead | 4654 | **4660** | 4654 | 4648 | — |
+| first-tile lead | 4656 | 4656 | **4660** | 4660 | 4656 |
+| DMG lead | **4660** | 4656 | 4643 | — | — |
+| double-speed lead | **4660** | 4655 | 4655 | — | — |
+
+The sprite-line step is a *unique* optimum, which is why it is not simply the
+`n_sprites > 0` exemption `map_scx_formed` uses for the column (that would be
+lead 0 and costs `spx08_1`/`_3`).
+
+### Measured dead ends (do not re-chase)
+
+* A double-speed lead: pure loss — it drops `scy_during_m3_ds_{1,4,7}` and
+  `spx08_ds_{1,2}` and recovers nothing.
+* Giving the first-tile lead to double speed: it recovers `scy_during_m3_ds_3`
+  and loses `scy_during_m3_ds_1`, a green row, at the same corpus total.
+* Moving the FF42 commit instead of the read frame: `eff.scy` has no consumer
+  outside the fetch, so the two are arithmetically identical — the sweep above
+  was run in the commit form first and gives the same optima.
 
 ## Mid-mode-3 SCX and the BG map column (single speed CLOSED 2026-07-30)
 
@@ -552,6 +631,10 @@ interrupt: term 3 above.
 | `old/offset_3/_ds_3` | 2723 px | EXCEED — SameBoy misses it too |
 
 #### OPEN: the SCY line-0 rungs are a sub-dot separation (derived, 2026-07-31)
+
+Double speed only — the single-speed half of this cluster is closed by the SCY
+read frame above, which leaves the double-speed lead at 0 and so does not touch
+the derivation below.
 
 `scy/scy_during_m3_ds_*` writes FF42 twice per line 0, at dots 86, 88, … 96
 (rungs 1-6) and 248, 246, … 238. Sweeping the line-0 FF42 commit debt 0..3 and

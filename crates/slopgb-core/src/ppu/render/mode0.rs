@@ -292,7 +292,9 @@ impl Ppu {
         // deferred render dot. OBJ-enable / mode-3-length reads keep the live
         // `eff.lcdc` (they must not move the length).
         let lcdc = self.eff.render_lcdc;
-        let (scy, scx) = (self.eff.scy, self.eff.scx);
+        self.render.scy_ring[ri] = self.eff.scy;
+        let scy = map_scy_formed(&self.render, self.model.is_cgb(), self.ds);
+        let scx = self.eff.scx;
         match self.render.phase {
             FetchPhase::TileNoWait => self.render.phase = FetchPhase::TileNo,
             FetchPhase::TileNo => {
@@ -480,4 +482,36 @@ fn map_scx_formed(r: &Render, cgb: bool) -> u8 {
         2
     };
     r.scx_ring[(usize::from(r.scx_ring_i) + 8 - d) & 7]
+}
+
+/// The SCY a BG fetch reads, taken from a per-dot ring at a lead — the row half
+/// of the same "the address is formed before the access" law
+/// [`map_scx_formed`] carries for the column (gambatte `scy/scy_during_m3*`).
+///
+/// The CGB forms the map row two fetcher steps ahead of the VRAM access, one
+/// step on a line that selected sprites (an OBJ fetch stalls the BG fetcher and
+/// carries the address formation with it). The DMG and double speed sample
+/// live: their FF42 commit already lands in the fetch's own frame
+/// (`stage_write_dots`).
+///
+/// The line's first visible tile takes two further steps at single speed on
+/// both models: hardware fetches that tile once, where we throw the first fetch
+/// away and re-run it six dots later (`first_discard`), so its reads sit that
+/// much late on our grid. `fetch_x == 0` with the discard already spent is
+/// exactly the re-fetch; a window fetch rows off `win_line` and never reads
+/// this value.
+fn map_scy_formed(r: &Render, cgb: bool, ds: bool) -> u8 {
+    let d = if ds || !cgb {
+        0
+    } else if r.n_sprites > 0 {
+        1
+    } else {
+        2
+    };
+    let d = d + if !ds && r.fetch_x == 0 && !r.first_discard {
+        2
+    } else {
+        0
+    };
+    r.scy_ring[(usize::from(r.scx_ring_i) + 8 - d) & 7]
 }
