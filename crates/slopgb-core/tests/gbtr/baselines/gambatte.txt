@@ -389,11 +389,15 @@ gambatte/oamdma/oamdma_late_speedchange_stat_2_cgb04c_out3.gbc [Cgb]
 gambatte/oamdma/oamdmasrcC000_hdmasrc0000_cgb04c_out0A940C0D.gbc [Cgb]
 # scx_during_m3: the single-speed half of this cluster is CLOSED (the DMG
 # pre-output map lead + the never-matched prefill hunt not advancing the map
-# column; docs/hardware-state/ppu-render.md). The `_ds_*` rows below are class
-# A (the CGB double-speed sub-cycle phase — SameBoy runs its PPU on 8 MHz
-# half-dots, six whole-dot arms measured flat). The two survivors that are NOT
-# double speed is `scx_during_m3_spx2 [Cgb]`, a CGB OBJ-palette VALUE
-# divergence: its reference pixel is raw $4261, ours $1CF2, and the ROM
+# column; docs/hardware-state/ppu-render.md). The `_ds_*` rows below are NOT
+# proven class A — the "sub-cycle phase" reason was measured false 2026-07-30
+# (the rotation legs commit on eight distinct whole dots, all the same half).
+# What IS proven is narrower: the holdback decision is welded on the render
+# FSM for one pair. See ppu-render.md before touching them.
+#
+# The one survivor that is NOT double speed is `scx_during_m3_spx2 [Cgb]`, a
+# CGB OBJ-palette VALUE divergence: its reference pixel is raw $4261, ours
+# $1CF2, and the ROM
 # computes the entry at runtime (never writes FF6A/FF6B in init, and the byte
 # $61 is never written at all) — upstream of the PPU, not a fetch or timing
 # row. `scx_m3_extend_1 [Dmg]` was recovered 2026-07-30.

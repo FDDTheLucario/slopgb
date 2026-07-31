@@ -356,7 +356,66 @@ Six arms measured on the double-speed half, all capped at 20/48: lead, anchor,
 rotation result stands (the two groups are real and complementary) but no state
 term yet separates them.
 
-#### CLOSED: the DS residual is the whole-dot contract, not a missing term
+#### RE-OPENED 2026-07-30: the class-A *reason* above is wrong
+
+The section below concludes the DS rows are separated only by "which half of
+that dot the write took effect in". Measured, that is false. The
+`scx_0060c0` rotation group's eight legs commit their `$60 -> $c0` write at
+eight **distinct whole dots**, every one on the **same** half:
+
+```
+ds_1 dot=243 dh=1   ds_3 dot=239 dh=1   ds_5 dot=235 dh=1   ds_7 dot=231 dh=1
+ds_2 dot=241 dh=1   ds_4 dot=237 dh=1   ds_6 dot=233 dh=1   ds_8 dot=229 dh=1
+```
+
+There is no half-dot distinction to represent — the legs are already separated
+on the whole-dot grid, which is what the section's own `(read - write) mod 8`
+= {5,7} vs {1,3} table says. The first writes (86, 88, 90, 92, **93**, 95, 97,
+99) are not even uniformly spaced, so parity arguments fail too. And a
+whole-dot render-FSM law *does* move DS rows: extending the never-matched-hunt
+column holdback (below) to double speed recovers `scx_0360c0/_ds_3` and
+`scx_0761c0/_ds_3` — the section claims no whole-dot term separates the groups.
+
+Every one of the six arms that produced the class-A verdict is a
+lead/anchor/phase **scalar**. None was a render-FSM state term. That is the
+same uniform-lever error that made the single-speed half look welded until it
+fell to two non-scalar terms.
+
+**So "these rows need a half-dot PPU clock" is not established.** What IS
+established is narrower, and proven below.
+
+#### PROVEN: the holdback decision itself is welded on the render FSM
+
+Do not re-chase a render-state discriminator for the DS holdback.
+`old/offset_3/_ds_1` (its ly 0) and `scx_0360c0/_ds_3` (its ly 1) are
+**bit-identical** everywhere we can observe:
+
+| | ds_1 ly0 | 0360c0/ds_3 ly1 |
+|---|---|---|
+| hunt trace (dots 89-96) | `idx 0..7`, fine 3→0 at dot 91 | identical |
+| SCX commit | dot 90, dhalf 1 | dot 90, dhalf 1 |
+| first output pixel | dot 105, dropped 8, `fetch_x` 2, `hunt_fine` 0 | identical |
+
+and they want **opposite** answers: `0360c0/_ds_3` needs the hold globally (its
+map alternates every tile, so a ±1 column shift breaks every row);
+`old/offset_3/_ds_1` must not have it.
+
+Nor can a downstream law rescue `_ds_1` under the hold: held, its last visible
+tile is index 19 — odd — so its column is odd under *any* coarse SCX, and
+`old/offset_3`'s map has tile `01` at every odd column while the reference
+wants `00`. That is a proof, not a sweep.
+
+A gate of `ly >= 1 || SCX&7 != 0` scores **+2 rows, zero regressions on the
+full battery** (each clause is independently clean and recovers a different
+row) — but it is a **coincidence fit** on which line each ROM happens to
+exhaust its hunt, and it was NOT landed for that reason. Do not resurrect it as
+written.
+
+The live lever is elsewhere: `_ds_1`'s error under the hold is at the line END
+(the late `$c0` write's column), a different mechanism from `_ds_3`'s global
+shift. Attack that, not the hold.
+
+#### SUPERSEDED: the DS residual as "the whole-dot contract" (kept for its measurements)
 
 Reading SameBoy's clock settles it. Its PPU is driven at **8 MHz — half-dots**,
 not dots:
@@ -382,10 +441,11 @@ took effect in*. That is unrepresentable on a whole-dot clock, which is exactly
 what `baselines/gambatte.txt` class A calls the "CGB double-speed sub-cycle
 phase" floor with the stated lift condition of re-clocking to a half-dot grid.
 
-**Therefore the 39 CGB double-speed rows are class A, not an undiscovered
-discriminator.** They are blocked on the half-dot PPU clock, the same
-architectural change class A has always named. Stop sweeping them; the six
-measured arms above are the proof that no whole-dot term separates the groups.
+~~**Therefore the 39 CGB double-speed rows are class A.**~~ **The conclusion of
+this section is withdrawn — see "RE-OPENED" above.** The six measured arms are
+real and still worth not re-running, but they are all lead/anchor/phase
+scalars, so they do not prove what the paragraph claimed. The half-dot reading
+of the write commit is contradicted by the measured commit dots.
 
 The single-speed rows are *not* covered by this argument; they were closed on
 their own merits (below).
