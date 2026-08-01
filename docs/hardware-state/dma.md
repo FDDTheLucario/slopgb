@@ -50,7 +50,38 @@ A gambatte-shaped request engine (`Interconnect::vram_dma_req`):
 
 ### Parked / disproven
 
-- **Disproven: a longer VRAM-DMA service.** The `{g,h}dma_cycles*_2` rows read `STAT & 3` one M-cycle after their `_1` siblings and want mode 0 where we still read mode 3, and the SameBoy trace puts its FF41 read 4 dots later than ours on the same line — but padding the service with extra teardown M-cycles is monotonically worse over `gambatte/dma/` (72 → 82 → 88 → 92 failures for +0..+3 M-cycles): it recovers the plain `long`/`hdma` rows and breaks the `_scx{2,3,5}` siblings plus the `hdma_late_*` family. The residual is the service's *placement* against the CPU's own fetch, not its length.
+- **Disproven: a longer VRAM-DMA service.** Padding the service with extra teardown M-cycles is monotonically worse over `gambatte/dma/` (72 → 82 → 88 → 92 failures for +0..+3 M-cycles). Direct measurement then settled it: our GDMA spans exactly 36 dots for 16 bytes (`gdma_cycles_short`, ly 153 dot 68 → 104) and 4100 dots for 2048 (`gdma_cycles_long`, ly 144 dot 64 → ly 153 dot 60), matching SameBoy's `2 + 2N + 2` cc to the dot. The service length is CORRECT; the `_cycles` residual is not in it.
+
+#### What the `{g,h}dma_cycles*_2` rows actually constrain (2026-07-31)
+
+Disassembled: the three variants are **not one ladder** — they anchor on three
+different LYC lines (`gdma_cycles_short` LYC=$99, `gdma_cycles_long` LYC=$90,
+`hdma_cycles` LYC=$01), and only `hdma_cycles` uses the HBlank path at all. Each
+ISR arms its transfer, runs a per-variant NOP sled and reads `STAT & 3` once
+(`n = 1` FF41 read per run; the second `vis_mode_read` evaluation per read is the
+leading-edge/trailing pair of the same access, and the leading one wins).
+
+SameBoy lands **every** variant's read at the same place — `cfl` 256 (mode 3) for
+`_1` and 261 (mode 0) for `_2`. Ours splits by anchor line: `gdma_cycles_short`
+(LYC 153) reads at dot 248/252 and passes both rungs, while `gdma_cycles_long`
+(LYC 144) reads at 244/248 — four dots earlier — and fails `_2`. Since the two
+transfers' durations are exact, that four dots is the **LYC=144 versus LYC=153
+STAT dispatch dot**, not anything in the DMA.
+
+`gdma_cycles_long_2` and `gdma_cycles_short_1` are bit-identical in every tracked
+render quantity at their read — ly 0, dot 248, native mode 3, `render.active`,
+`!line_render_done`, both resolving through the native-mode path because
+`vis_exit_hd` returns `None` on line 0 — and they want OPPOSITE answers. The
+discriminator is therefore outside the render FSM, and it is the anchor line.
+
+The two halves also take different code paths, so no single exit constant covers
+them: the `gdma_cycles` rows are decided by the native `vis_mode()`, the
+`hdma_cycles` rows by the `read_pos_hd() < vis_exit_hd()` comparison. For the
+`hdma_cycles` half alone the four SCX rungs pin the boundary uniquely — reads at
+244/248 (SCX 0, 2, 3) and 248/252 (SCX 5) with `exit = 510 + 2·SCX` half-dots
+force the demanded read boundary to `B(SCX) = 245 + SCX`, against our 251 + SCX,
+i.e. our CPU-visible exit is 6 dots late *for this anchor*.
+
 #### What the `hdma_start` / `hdma_late_disable` rows actually constrain (2026-07-31)
 
 Disassembled rather than swept. Both families share ONE kernel: the LYC=1 STAT
