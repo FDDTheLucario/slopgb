@@ -47,16 +47,16 @@ gambatte/cgbpal_m3/cgbpal_read_m3start_ds_1_cgb04c_out00.gbc [Cgb]	gambatte	gamb
 gambatte/cgbpal_m3/cgbpal_write_m3start_ds_1_cgb04c_out01.gbc [Cgb]	gambatte	gambatte/cgbpal_m3	Cgb	00	01	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/display_startstate/stat_scx2_2_cgb04c_out84.gbc [Cgb]	gambatte	gambatte/display_startstate	Cgb	87	84	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/display_startstate/stat_scx3_2_cgb04c_out84.gbc [Cgb]	gambatte	gambatte/display_startstate	Cgb	87	84	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/dma/gdma_cycles_long_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/gdma_cycles_long_scx2_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/gdma_cycles_long_scx3_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/gdma_cycles_long_scx5_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/gdma_cycles_short_scx2_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/gdma_cycles_short_scx3_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/hdma_cycles_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/hdma_cycles_scx2_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/hdma_cycles_scx3_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/hdma_cycles_scx5_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
+gambatte/dma/gdma_cycles_long_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not; derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — see dma.md
+gambatte/dma/gdma_cycles_long_scx2_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not; derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — see dma.md
+gambatte/dma/gdma_cycles_long_scx3_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not; derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — see dma.md
+gambatte/dma/gdma_cycles_long_scx5_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not; derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — see dma.md
+gambatte/dma/gdma_cycles_short_scx2_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not; derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — see dma.md
+gambatte/dma/gdma_cycles_short_scx3_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not; derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — see dma.md
+gambatte/dma/hdma_cycles_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not; derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — see dma.md
+gambatte/dma/hdma_cycles_scx2_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not; derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — see dma.md
+gambatte/dma/hdma_cycles_scx3_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not; derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — see dma.md
+gambatte/dma/hdma_cycles_scx5_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not; derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — see dma.md
 gambatte/dma/hdma_disable_display_1_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/dma	Cgb	0	1	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_late_disable_2_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/dma	Cgb	0	1	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_late_disable_scx2_2_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/dma	Cgb	0	1	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
@@ -96,10 +96,10 @@ gambatte/dma/hdma_late_speedchange_inc_scx1_ds_2_cgb04c_out02.gbc [Cgb]	gambatte
 gambatte/dma/hdma_m0speedchange_late_m3wakeup_scx1_2_cgb04c_out00.gbc [Cgb]	gambatte	gambatte/dma	Cgb	FF	00	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_m0speedchange_late_m3wakeup_scx2_2_cgb04c_out00.gbc [Cgb]	gambatte	gambatte/dma	Cgb	FF	00	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_pc_7ffe_cgb04c_out02.gbc [Cgb]	gambatte	gambatte/dma	Cgb	80	02	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/hdma_start_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	7	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
+gambatte/dma/hdma_start_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	7	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not; derived: ours 7 is $FF & 7, a BLOCKED VRAM read — this is the mode-3 VRAM release, not the DMA — see dma.md
 gambatte/dma/hdma_start_ds_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	1	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_start_ly0_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	1	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/hdma_start_scx5_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	7	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
+gambatte/dma/hdma_start_scx5_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	7	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not; derived: ours 7 is $FF & 7, a BLOCKED VRAM read — this is the mode-3 VRAM release, not the DMA — see dma.md
 gambatte/dma/hdma_start_scx5_ds_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	1	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_transition_7fffhalt_inc_m3unhalt_cgb04c_out01.gbc [Cgb]	gambatte	gambatte/dma	Cgb	00	01	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_transition_ei_halt_late_unhalt_ldaaimm_hdma_scx1_1_cgb04c_out00.gbc [Cgb]	gambatte	gambatte/dma	Cgb	84	00	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses

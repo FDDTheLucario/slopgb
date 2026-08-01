@@ -15,9 +15,10 @@ Output: `docs/hardware-state/floor-census.tsv`, one row per FAILING case:
 
 `sameboy` comes from the existing classifiers, which run SameBoy 1.0.2 and OCR
 its framebuffer; rows no classifier covers stay `unknown`. `bucket` and
-`evidence` are left blank here — adjudication is a human/Pan-Docs step, and a
-machine-guessed verdict in those columns would be indistinguishable from a
-cited one.
+`evidence` come from `adjudicate`, which decides on provenance and the SameBoy
+verdict alone — it never guesses a mechanism. A mechanism that HAS been derived
+is carried by the curated `DERIVED` table, which also overrides the
+directory-shaped `cluster` so triage points at the right subsystem.
 
 Usage: python3 census.py <dump.tsv> [-o docs/hardware-state/floor-census.tsv]
 """
@@ -234,6 +235,52 @@ CONFLICT_MARKS = (
 )
 
 
+# --- derived mechanism ------------------------------------------------------
+#
+# `cluster` is computed from the ROM's directory, so a row whose failing
+# mechanism has been derived to live in a different subsystem sends the next
+# triage pass at the wrong target. These rows carry the derived classification
+# instead. Keyed on the exact collection-relative path: only rows actually
+# measured (disassembly + a SameBoy SB_TRACE run) appear here.
+
+# The {g,h}dma_cycles `_2` rows read STAT&3 after a transfer whose span is
+# exact (measured 36 dots for 16 bytes, 4100 for 2048, both matching SameBoy).
+# The three variants anchor on three different LYC lines ($99 / $90 / $01) and
+# SameBoy lands every variant's read at the same cfl while ours splits by
+# anchor line, so the residual is that anchor's dispatch dot, not the DMA.
+_LYC_ANCHOR = (
+    'gambatte/dma/gdma_cycles_long_2_cgb04c_out0.gbc',
+    'gambatte/dma/gdma_cycles_long_scx2_2_cgb04c_out0.gbc',
+    'gambatte/dma/gdma_cycles_long_scx3_2_cgb04c_out0.gbc',
+    'gambatte/dma/gdma_cycles_long_scx5_2_cgb04c_out0.gbc',
+    'gambatte/dma/gdma_cycles_short_scx2_2_cgb04c_out0.gbc',
+    'gambatte/dma/gdma_cycles_short_scx3_2_cgb04c_out0.gbc',
+    'gambatte/dma/hdma_cycles_2_cgb04c_out0.gbc',
+    'gambatte/dma/hdma_cycles_scx2_2_cgb04c_out0.gbc',
+    'gambatte/dma/hdma_cycles_scx3_2_cgb04c_out0.gbc',
+    'gambatte/dma/hdma_cycles_scx5_2_cgb04c_out0.gbc',
+)
+
+# `ours = 7` is `$FF & 7`: these read VRAM $8000 through `and 7`, so a 7 is a
+# BLOCKED read, not a transferred byte. They fail on the mode-3 VRAM release,
+# not on the DMA seam. Left in the dma cluster — the arming is what puts the
+# read at that dot — but the value needs saying, or the row reads as nonsense.
+_BLOCKED_VRAM = (
+    'gambatte/dma/hdma_start_1_cgb04c_out0.gbc',
+    'gambatte/dma/hdma_start_scx5_1_cgb04c_out0.gbc',
+)
+
+DERIVED = {}
+for _rel in _LYC_ANCHOR:
+    DERIVED[_rel] = ('gambatte/lyc-anchor',
+                     'derived: the LYC anchor dispatch dot, not the DMA '
+                     '(the transfer span is exact) — see dma.md')
+for _rel in _BLOCKED_VRAM:
+    DERIVED[_rel] = (None,
+                     'derived: ours 7 is $FF & 7, a BLOCKED VRAM read — this '
+                     'is the mode-3 VRAM release, not the DMA — see dma.md')
+
+
 def adjudicate(rel, prov, sb):
     """(bucket, evidence) for one row.
 
@@ -320,6 +367,13 @@ def main():
         verdict = sb.get((rel, model), 'unknown')
         prov = provenance(rel, model, detail)
         bucket, evidence = adjudicate(rel, prov, verdict)
+        # A derived mechanism overrides the directory-shaped cluster and
+        # appends its finding to the evidence (see DERIVED).
+        mech_cluster, mech_note = DERIVED.get(rel, (None, None))
+        if mech_cluster:
+            cluster = mech_cluster
+        if mech_note:
+            evidence = f'{evidence}; {mech_note}'
         lines.append('\t'.join([
             f"{rel} [{model}]", suite, cluster, model, ours, want,
             verdict, prov, bucket, evidence,
