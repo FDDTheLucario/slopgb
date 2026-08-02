@@ -467,7 +467,6 @@ gambatte/sprites/late_disable_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange2_sp00_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange2_sp01_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/late_sizechange2_sp39_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/late_sizechange_2_dmg08_out0_cgb04c_out3.gbc [Cgb]
 # late_sizechange_ds_1: adjacent-cycle sibling traded for the previously
 # red late_sizechange_ds_2 by the dot-serial scan's per-entry LCDC.2
 # sample (2026-06): the ds pair brackets the slot's latch at gambatte's
@@ -477,7 +476,6 @@ gambatte/sprites/late_sizechange_ds_1_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp00_ds_1_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp01_ds_1_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp39_ds_1_cgb04c_out0.gbc [Cgb]
-gambatte/sprites/late_sizechange_sp01_2_dmg08_out0_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/space/10spritesPrLine_late_scx4_ds_2_cgb04c_out3.gbc [Cgb]
 gambatte/sprites/space/10spritesPrLine_wx0_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/space/10spritesPrLine_wx1_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
@@ -530,7 +528,6 @@ gambatte/window/on_screen/wxA6_wy01_weoff_ly02_weon_ly60.gbc [Dmg]
 # scx_during_m3 spx0-2, scy spx08/0A [Dmg], sprites/space wx7_ds,
 # window/late_disable_spx10). What remains is sub-dot residue of those
 # models; documented as swaps rather than reverted.
-gambatte/sprites/late_sizechange_sp39_2_dmg08_out0_cgb04c_out3.gbc [Cgb]
 
 # Speed-switch / HDMA rework residuals (documented strictly-more-accurate
 # swaps): the STOP pause (gambatte cc+0x20000+4), the gambatte-shaped

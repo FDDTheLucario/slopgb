@@ -157,10 +157,17 @@ fn oam_scan_obj_size_sample_lags_the_commit_on_dmg() {
         1,
         "dmg, on the latch dot"
     );
+    // CGB reads the OR of the two views, so the commit dot resolves tall in
+    // both directions: shrinking keeps the sprite, growing gains it.
     assert_eq!(
         selected_on_line_8(cgb_on(0x97), 7),
+        1,
+        "cgb, shrink on the latch dot"
+    );
+    assert_eq!(
+        selected_on_line_8(cgb_on(0x97), 6),
         0,
-        "cgb, on the latch dot"
+        "cgb, shrink a dot early"
     );
 }
 

@@ -329,12 +329,9 @@ gambatte/sprites/late_disable_ds_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/sprit
 gambatte/sprites/late_sizechange2_sp00_ds_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	0	3	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/sprites/late_sizechange2_sp01_ds_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	0	3	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/sprites/late_sizechange2_sp39_ds_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	0	3	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/sprites/late_sizechange_2_dmg08_out0_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/sprites/late_sizechange_ds_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/sprites/late_sizechange_sp00_ds_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/sprites/late_sizechange_sp01_2_dmg08_out0_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/sprites/late_sizechange_sp01_ds_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/sprites/late_sizechange_sp39_2_dmg08_out0_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/sprites/late_sizechange_sp39_ds_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/sprites/space/10spritesPrLine_late_scx4_ds_2_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/sprites/space/10spritesPrLine_wx0_m3stat_ds_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not

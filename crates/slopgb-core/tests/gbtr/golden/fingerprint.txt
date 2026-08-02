@@ -5774,7 +5774,7 @@ gambatte/sprites/late_sizechange2_sp39_ds_2_cgb04c_out0.gbc [Cgb] | 28ceffd1b217
 gambatte/sprites/late_sizechange2_sp39_ds_2_cgb04c_out0.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_1_dmg08_cgb04c_out0.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_1_dmg08_cgb04c_out0.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
-gambatte/sprites/late_sizechange_2_dmg08_out0_cgb04c_out3.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
+gambatte/sprites/late_sizechange_2_dmg08_out0_cgb04c_out3.gbc [Cgb] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_2_dmg08_out0_cgb04c_out3.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_3_dmg08_cgb04c_out3.gbc [Cgb] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_3_dmg08_cgb04c_out3.gbc [Dmg] | 436064c86b6618d5 | b6b0632d997517d6
@@ -5796,7 +5796,7 @@ gambatte/sprites/late_sizechange_sp00_ds_2_cgb04c_out3.gbc [Cgb] | 436064c86b661
 gambatte/sprites/late_sizechange_sp00_ds_2_cgb04c_out3.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_sp01_1_dmg08_cgb04c_out0.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_sp01_1_dmg08_cgb04c_out0.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
-gambatte/sprites/late_sizechange_sp01_2_dmg08_out0_cgb04c_out3.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
+gambatte/sprites/late_sizechange_sp01_2_dmg08_out0_cgb04c_out3.gbc [Cgb] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_sp01_2_dmg08_out0_cgb04c_out3.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_sp01_3_dmg08_cgb04c_out3.gbc [Cgb] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_sp01_3_dmg08_cgb04c_out3.gbc [Dmg] | 436064c86b6618d5 | b6b0632d997517d6
@@ -5810,7 +5810,7 @@ gambatte/sprites/late_sizechange_sp02_2_dmg08_cgb04c_out3.gbc [Cgb] | 436064c86b
 gambatte/sprites/late_sizechange_sp02_2_dmg08_cgb04c_out3.gbc [Dmg] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_sp39_1_dmg08_cgb04c_out0.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_sp39_1_dmg08_cgb04c_out0.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
-gambatte/sprites/late_sizechange_sp39_2_dmg08_out0_cgb04c_out3.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
+gambatte/sprites/late_sizechange_sp39_2_dmg08_out0_cgb04c_out3.gbc [Cgb] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_sp39_2_dmg08_out0_cgb04c_out3.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_sp39_3_dmg08_cgb04c_out3.gbc [Cgb] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/sprites/late_sizechange_sp39_3_dmg08_cgb04c_out3.gbc [Dmg] | 436064c86b6618d5 | b6b0632d997517d6

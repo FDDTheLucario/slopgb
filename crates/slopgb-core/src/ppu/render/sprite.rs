@@ -76,9 +76,16 @@ impl Ppu {
         // LCDC.2 reaches the scan's height comparator at a fixed phase after the
         // write, but our FF40 `eff` commit lands two dots earlier on the DMG
         // family than on CGB, so the DMG side reads the one-dot-old snapshot to
-        // sit on the same phase (gambatte late_sizechange*, per slot).
+        // sit on the same phase (gambatte late_sizechange*, per slot). CGB takes
+        // the two views' OR, which only differs from the live bit on the dot the
+        // commit lands: a write on an entry's own latch dot then resolves TALL
+        // whichever way the bit moved. The four boundary rungs pin that —
+        // late_sizechange_{sp01,sp39}_2 shrink and late_sizechange2_{sp01,sp39}_1
+        // grow at the same write and latch dots (the ROMs differ only in their
+        // two swapped LCDC constants) and all four select the sprite.
+        let live = self.eff.lcdc & LCDC_OBJ_SIZE != 0;
         let tall = if self.model.is_cgb() {
-            self.eff.lcdc & LCDC_OBJ_SIZE != 0
+            live || self.scan_obj_size
         } else {
             self.scan_obj_size
         };

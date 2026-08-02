@@ -5,22 +5,23 @@
 `ppu/mod.rs` §Dot-serial OAM scan.
 
 - Entry `i` is latched + evaluated at dot `2i+3` (gbctr; gambatte OamReader — `scan_latch_dot` anchoring pinned by gambatte oamdma/late_sp* + sprites/late_sizechange* per-slot races).
-- Per-entry LCDC.2 sampling, and the sample sits **one dot behind the `eff`
-  commit on the DMG family, on it for CGB** (`Ppu::scan_obj_size`, snapshotted
-  at the end of each dot in `Ppu::tick`): our FF40 commit lands two dots earlier
-  on DMG than on CGB, so the lag puts both models' scan sample at the same phase
-  relative to the write. A write on an entry's own latch dot therefore loses the
-  race on DMG and wins it on CGB. Pinned by the gambatte `late_sizechange*` /
-  `late_sizechange2*` per-slot ladders (sp00/sp01/sp02/sp39 = latch dots
-  3/5/7/81, write dot stepped 4 per rung, both write directions): all 20 DMG
-  rungs, and 18 of 20 CGB. Unit test:
+- Per-entry LCDC.2 sampling, off a one-dot-old snapshot (`Ppu::scan_obj_size`,
+  taken at the end of each dot in `Ppu::tick`) rather than the live `eff` bit.
+  **DMG reads the snapshot alone; CGB reads it OR'd with the live bit.** Our FF40
+  commit lands two dots earlier on DMG than on CGB, so the snapshot puts the DMG
+  scan sample on the same phase relative to the write that CGB's live read
+  already sits on — a write on an entry's own latch dot loses the race on DMG.
+  On CGB the OR only differs from the live bit on the dot the commit lands, and
+  there it resolves TALL whichever way the bit moved. Pinned by the gambatte
+  `late_sizechange*` / `late_sizechange2*` per-slot ladders (sp00/sp01/sp02/sp39
+  = latch dots 3/5/7/81, write dot stepped 4 per rung, both write directions);
+  the four boundary rungs `late_sizechange_{sp01,sp39}_2` (shrink) and
+  `late_sizechange2_{sp01,sp39}_1` (grow) sit at the same write and latch dots —
+  their ROMs differ only in the two swapped LCDC constants — and all four select
+  the sprite, which is what forces the OR rather than a second sample dot. Whole
+  family green: 20/20 DMG, 20/20 CGB. Unit test:
   `oam_scan_obj_size_sample_lags_the_commit_on_dmg`.
-  Residual: `late_sizechange_{sp01,sp39}_2 [Cgb]` want the pre-write height at
-  the same (latch, write) dots where `late_sizechange2_{sp01,sp39}_1 [Cgb]` want
-  the post-write one — a same-dot pair that differs only in the write's
-  direction, so no single CGB sample dot covers both. `late_sizechange_2 [Cgb]`
-  (the 10-sprite variant) is open.
-  The *fetch*-time LCDC.2 re-read (`fetch_sprite`) stays live on both models.
+- The *fetch*-time LCDC.2 re-read (`fetch_sprite`) stays live on both models.
 - While OAM DMA owns OAM (running, or halt/stop-frozen) the scan latches `$FF` — a disabled sprite (`Ppu::oam_dma_active`, edges = gambatte startOamDma/endOamDma: the first byte's cycle still latches real OAM; the disconnect outlives the last copy by one M-cycle).
 
 Parked: chasing the residual late_sp `_ds` out3 rows (half-dot, cc-granular races compounded with the frozen-ds mode-0 flip lead) or strikethrough's 7-px residue (an undocumented glitch-sprite, see `smallsuites.rs`) with **whole-dot** timing — don't chase either; whole-dot granularity can't resolve them.
