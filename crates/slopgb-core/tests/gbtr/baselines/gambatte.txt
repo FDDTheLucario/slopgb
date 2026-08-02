@@ -489,7 +489,6 @@ gambatte/vram_m3/preread_lcdoffset2_1_cgb04c_out0.gbc [Cgb]
 gambatte/vram_m3/prewrite_lcdoffset2_1_cgb04c_out1.gbc [Cgb]
 gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx20_2_dmg08_out3_cgb04c_out0.gbc [Cgb]
 gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx20_3_dmg08_cgb04c_out0.gbc [Dmg]
-gambatte/window/arg/late_wy_FFto2_ly2_scx5_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/window/late_disable_scx5_ds_2_cgb04c_out3.gbc [Cgb]
 gambatte/window/late_enable_afterVblank_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/window/late_enable_afterVblank_ds_lcdoffset1_1_cgb04c_out3.gbc [Cgb]
@@ -652,8 +651,6 @@ gambatte/lcd_offset/offset2_lyc99int_m0stat_count_scx2_1_cgb04c_out90.gbc [Cgb]
 gambatte/m0enable/enable_wxA6_2x_spxA7_ds_4_cgb04c_out2.gbc [Cgb]
 gambatte/m0int_m0stat/m0int_m0stat_scx5_ds_2_cgb04c_out2.gbc [Cgb]
 gambatte/speedchange/speedchange2_nop_m2int_m3stat_scx1_1_cgb04c_out3.gbc [Cgb]
-gambatte/window/arg/late_wy_FFto2_ly2_scx5_1_dmg08_cgb04c_out3.gbc [Cgb]
-gambatte/window/arg/late_wy_FFto2_ly2_scx5_2_dmg08_out3_cgb04c_out0.gbc [Dmg]
 
 # --- CGB-C LY/STAT timeline documented swaps (2026-06) ---
 # The CGB line-timeline derivation (ppu/mod.rs: CGB readable-LYC holds,

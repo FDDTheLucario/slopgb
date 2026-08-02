@@ -57,6 +57,20 @@ Parked: chasing the residual late_sp `_ds` out3 rows (half-dot, cc-granular race
   | ds (double-speed) | 5 dots |
 
 - WX commits to the pipeline 1 dot later than the palette strobe (`stage_write` FF4B dots+1, pinned by m3_wx_4/5/6_change).
+- The shadow WY trigger's extend deadline (`Ppu::win_extend_deadline`, consumed
+  by `win_extends_sb`) is `wx_match_dot + discard + phase`. The discard is the
+  fine scroll the window's own fetch waits out — `hunt_fine`, the value the
+  comparator locked in, so a late SCX rewrite that missed the hunt does not
+  count — and it applies only to a **WX >= 7** window; a low-WX window is already
+  fetching through the prefill. Phase: +1 CGB single speed, +2 CGB double speed,
+  −3 on the DMG family (whose shared LYC=153 ISR fires one M-cycle earlier off
+  the dot-4 emission decouple). Pinned by the gambatte
+  `arg/late_wy_FFto2_ly2{,_scx2,_scx3,_scx5}{,_ds}` sweep — the WX match sits at
+  dot 97 on every rung, the rungs step the WY write 4 dots apart, and the split
+  moves one whole rung later at SCX 5 while SCX 0/2/3 share theirs — plus
+  `arg/late_scx_late_wy_FFto4_ly4_wx00`, which writes SCX 4 under a WX 0 window
+  and keeps the SCX-0 split. Unit test:
+  `window_extend_deadline_tracks_the_fine_scroll_only_above_wx7`.
 
 ## Mode-3 fetch grid
 

@@ -753,36 +753,56 @@ impl Ppu {
     /// `!win_active` cross-line latch means the window was aborted / its WX or
     /// LCDC.5 toggled late (`late_wx`/`late_reenable`/`late_enable`) — SameBoy
     /// renders THOSE bare (`cfl 257`), so extending them is wrong.
+    /// The dot the shadow WY trigger must beat for the window to extend mode 3
+    /// (see [`Self::win_extends_sb`]): the WX comparator match, plus the
+    /// fine-scroll discard the window's own fetch waits out, plus a fixed
+    /// per-model phase.
+    pub(in crate::ppu) fn win_extend_deadline(&self) -> i32 {
+        // Only a WX >= 7 window fetches after the discard; a low-WX window is
+        // already fetching through the prefill, so its deadline does not move
+        // with SCX (`late_scx_late_wy_FFto4_ly4_wx00` writes SCX 4 and keeps the
+        // SCX-0 split). The discard is the one the comparator locked in
+        // (`hunt_fine`), not the read-time SCX, so a late SCX rewrite that
+        // missed the hunt does not count (`..._wx20`).
+        let discard = if self.eff.wx >= 7 {
+            i32::from(self.render.hunt_fine & 7)
+        } else {
+            0
+        };
+        // The phase is the wy2-copy offset: slopgb's `wy2` lags the WY write
+        // (6 dots CGB, 2 DMG) where SameBoy's `wy_check` catches it at
+        // write + ~4. The DMG family's shared LYC=153 ISR fires one M-cycle
+        // earlier off the dot-4 emission decouple (`reclock.rs`), timing every
+        // WY write in this family 4 dots ahead of that.
+        let phase = match (self.model.is_cgb(), self.ds) {
+            (true, false) => 1,
+            (true, true) => 2,
+            (false, _) => -3,
+        };
+        i32::from(self.render.wx_match_dot) + discard + phase
+    }
+
     pub(super) fn win_extends_sb(&self) -> bool {
         self.wy_trig_sb
             && self.eff.lcdc & LCDC_WIN_ENABLE != 0
             && self.wy_trig_sb_line == self.ly
             && self.render.wx_match_dot != 0
-            // The trigger must beat the WX-activation dot. The +2 slack is the
-            // wy2-copy phase difference: slopgb's `wy2` lags the WY write by 6
-            // dots (CGB), SameBoy's `wy_check` catches it at write + ~4, so the
-            // shadow `trigdot` runs 2 dots behind SameBoy's detection — the
-            // late-WY `_1` (extend) vs `_2`/`_3` (miss) split sits exactly on
-            // this 2-dot phase (`_1` trigdot = wxmatch + 1, `_2` = wxmatch + 5).
-            // In DS the slack was +4 (`_1` trigdot 101 / `_2` 103 vs
-            // wxmatch 97). The corrected DS line-153 lyfc table moves
-            // the LYC=153 wake — and with it every ISR-timed WY write in this
-            // family — 2 dots earlier (`_1` 99 / `_2` 101), so the DS slack
-            // re-derives to the SS value (+2); the same shift moves the
-            // `late_wy_ds` wake 2 dots earlier.
+            // The trigger must beat the window's own fetch, which the SCX
+            // fine-scroll pushes back by `SCX & 7` dots: the deadline is the WX
+            // comparator match plus that discard plus a fixed per-model phase.
+            // The phase is the wy2-copy offset — slopgb's `wy2` lags the WY
+            // write (6 dots CGB, 2 DMG) where SameBoy's `wy_check` catches it at
+            // write + ~4 — net +1 on CGB and −3 on the DMG family, whose shared
+            // LYC=153 ISR fires one M-cycle earlier off the dot-4 emission
+            // decouple (`reclock.rs`) and so times every WY write 4 dots ahead.
             //
-            // SS DMG: the LYC=153-wake shift. The dot-4
-            // line-153 LYC STAT emission decouple (`reclock.rs`) fires the
-            // shared LYC=153 ISR one M-cycle (4 dots SS) EARLIER than the stale
-            // dot-6/dot-8 recognition the `+2` slack was tuned against, so every
-            // ISR-timed `late_wy` WY write — and its `wy_trig_sb_dot` — moves 4
-            // dots earlier (`FFto2_ly2_2` trigdot 98→94, `_3` 102→98). The `+2`
-            // deadline (wxmatch 97 → 99) then extends BOTH (`_3` 98 ≤ 99), where
-            // SameBoy renders `_3` bare. Re-derive to `−2` (wxmatch → 95) so
-            // `_2` (94 ≤ 95, extend) and `_3` (98 > 95, bare) re-split — the
-            // exact −4 read-debt of the emission move, the SS twin of the DS
-            // lyfc re-derivation above. DMG only (the CGB emission is unmoved).
-            && i32::from(self.wy_trig_sb_dot)
-                <= i32::from(self.render.wx_match_dot) + if !self.model.is_cgb() { -2 } else { 2 }
+            // The gambatte `arg/late_wy_FFto2_ly2{,_scx2,_scx3,_scx5}` sweep
+            // pins all three terms: the WX match sits at dot 97 on every rung
+            // (WX 7 matches in the prefill), the `_1`/`_2`/`_3` rungs step the
+            // WY write 4 dots apart, and the extend/bare split moves one whole
+            // rung later at SCX 5 while SCX 0, 2 and 3 share theirs. Only
+            // `+ SCX & 7` separates those four, and it fixes each model's phase
+            // to a single dot.
+            && i32::from(self.wy_trig_sb_dot) <= self.win_extend_deadline()
     }
 }

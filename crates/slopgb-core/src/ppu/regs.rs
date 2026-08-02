@@ -30,6 +30,22 @@ impl Ppu {
                 // of the read-law mode; the sole non-probe consumer.
                 let vm = self.vis_mode_read();
                 let vm = self.halt_refetch_read_override(vm).unwrap_or(vm);
+                if std::env::var_os("SLOPGB_SPDBG").is_some() {
+                    eprintln!(
+                        "SPRD ly={} dot={} vm={} wytrig={} wxmatch={} mscx={} hf={} effscx={} wx={} ds={} ext={}",
+                        self.ly,
+                        self.dot,
+                        vm,
+                        self.wy_trig_sb_dot,
+                        self.render.wx_match_dot,
+                        self.render.wx_match_scx,
+                        self.render.hunt_fine,
+                        self.eff.scx,
+                        self.eff.wx,
+                        self.ds,
+                        self.win_extends_sb()
+                    );
+                }
                 0x80 | self.stat_en | (u8::from(self.read_cmp()) << 2) | vm
             }
             0xFF42 => self.scy,

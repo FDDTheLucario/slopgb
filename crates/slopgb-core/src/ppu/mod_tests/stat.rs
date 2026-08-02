@@ -571,3 +571,36 @@ fn vis_hold_extends_visible_mode3_past_the_dispatch() {
         "no hold: dispatch flip reads mode 0 (byte-identical)"
     );
 }
+
+/// The shadow WY trigger has to beat the WX comparator match plus the
+/// fine-scroll discard the window's own fetch waits out — but only a WX >= 7
+/// window fetches after that discard. Pinned by the gambatte
+/// `arg/late_wy_FFto2_ly2{,_scx2,_scx3,_scx5}` sweep (the split moves one rung
+/// later at SCX 5 and stays put at SCX 2 and 3) and by
+/// `arg/late_scx_late_wy_FFto4_ly4_wx00`, which writes SCX 4 under a WX 0
+/// window and keeps the SCX-0 split.
+#[test]
+fn window_extend_deadline_tracks_the_fine_scroll_only_above_wx7() {
+    fn deadline(model: Model, ds: bool, wx: u8, hunt_fine: u8, wx_match_dot: u16) -> i32 {
+        let mut p = Ppu::new(model);
+        p.ds = ds;
+        p.eff.wx = wx;
+        p.render.hunt_fine = hunt_fine;
+        p.render.wx_match_dot = wx_match_dot;
+        p.win_extend_deadline()
+    }
+    // CGB single speed: match + discard + 1.
+    assert_eq!(deadline(Model::Cgb, false, 7, 0, 97), 98);
+    assert_eq!(deadline(Model::Cgb, false, 7, 2, 97), 100);
+    assert_eq!(deadline(Model::Cgb, false, 7, 3, 97), 101);
+    assert_eq!(deadline(Model::Cgb, false, 7, 5, 97), 103);
+    // Double speed carries one dot more.
+    assert_eq!(deadline(Model::Cgb, true, 7, 0, 97), 99);
+    assert_eq!(deadline(Model::Cgb, true, 7, 5, 97), 104);
+    // The DMG family's shared LYC=153 ISR times its WY write 4 dots ahead.
+    assert_eq!(deadline(Model::Dmg, false, 7, 0, 97), 94);
+    assert_eq!(deadline(Model::Dmg, false, 7, 5, 97), 99);
+    // A WX < 7 window is already fetching through the prefill: no discard term.
+    assert_eq!(deadline(Model::Cgb, false, 0, 4, 90), 91);
+    assert_eq!(deadline(Model::Cgb, false, 6, 5, 90), 91);
+}
