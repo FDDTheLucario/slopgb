@@ -147,7 +147,21 @@ That is `Bus::run_dma`, and it scores +24 over the whole corpus while deleting
 the per-access seams, the trigger-phase stamp and the `dma_dispatch_hold`
 special case that approximated it.
 
-Ruled out by build and measurement along the way, do not retry: servicing at the
+Ruled out by build and measurement along the way, do not retry:
+
+- **Refuted: a one-dot-lagged HBlank-window snapshot at the halt entry.** The
+  `hdma_late_m0halt_{1,2}` pair halts at ly 2 dot 0 / dot 4 with identical
+  recorded state, so the dot-0 rung looked like it should inherit the line wrap's
+  still-open window as `HaltHdmaState::High`. Built it (a `hdma_period_prev`
+  shadow OR'd into the halt snapshot) and **no row moved** — the window is
+  already closed at ly 1 dot 455 in our model too, because the block that ran at
+  ly 1 dot 400 was triggered back at the mode-0 entry (~dot 254) and only
+  *serviced* at 400 by the instruction-stream seam. The observation is an FF55
+  read at ly 2 dot 436: `_1` demands one block retired by then and we retire two
+  (ly 1 dot 400 + the ly 2 wake at dot 388). The open question is therefore which
+  of those two blocks the reference does not run, not whether the halt snapshot
+  sees the wrap.
+ servicing at the
 trigger cycle's post-read seam, servicing from the next cycle with a write never
 hosting the steal, non-stacking the dispatch hold with a trigger-cycle wait
 (armed at the service attempt and per M-cycle in `tick_machine` — neither moves a
