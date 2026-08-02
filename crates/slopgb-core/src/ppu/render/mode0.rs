@@ -252,7 +252,7 @@ impl Ppu {
                 if (8..168).contains(&x) && x - 8 >= r.lx {
                     proj += obj_fetch_base(self.model.is_cgb(), fetched);
                     fetched |= 1 << i;
-                    let v = u16::from(x) + u16::from(self.eff.scx);
+                    let v = self.penalty_pos(x);
                     if tiles & (1u64 << (v >> 3)) == 0 {
                         tiles |= 1u64 << (v >> 3);
                         proj += 5u16.saturating_sub(v & 7);

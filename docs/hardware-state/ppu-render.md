@@ -83,6 +83,18 @@ Parked: chasing the residual late_sp `_ds` out3 rows (half-dot, cc-granular race
   with opposite demands — that pair is what fixes the restart cost at 1 dot and
   rules out a full refund. Unit test: `obj_enable_window_straddles_the_sprite_fetch_trigger`.
 - Sprites with OAM X 0-7 fetch during the pause-aware prefill walk (`prefill_pos`), freezing the SCX hunt (gambatte spx0/spx1); penalty math unchanged (mooneye tables frozen).
+- The OBJ **alignment** penalty is measured off whichever tile grid the fetcher
+  is on (`Ppu::penalty_pos`). Normally that is the BG's `x + SCX`; a **WX 0-7**
+  window owns the fetcher from before the first pixel pops, so its own column
+  (origin `WX - 7`) sets the tile phase for the whole line. Pinned by the
+  gambatte `space/10spritesPrLine_wx{0..7}_m3stat_ds` ladder: ten sprites one
+  tile apart shed exactly 10 dots per step of WX (5 dots each at WX 7 down to 0
+  at WX 2, floored), which fixes the origin two-sided. A window starting
+  mid-line keeps the BG phase — `m0enable/enable_wxA6_2x_spxA7` puts a WX 166
+  start at lx 159 with a sprite at OAM X 167 in the window's own first tile and
+  charges no alignment there. Whether a *later* tile of a mid-line window
+  switches phase is unpinned by the corpus, so it does not. Unit test:
+  `obj_alignment_follows_a_left_edge_window_grid`.
 - The BG fetcher free-runs through every sprite stall (prefill included), with the line's first push waiting for the pause-aware startup walk (`push_allowed`), keeping pixel 0 on its stall-shifted dot.
 
 Parked: the rising-late CGB LCDC fetch view — tried and rejected. See the mealybug note below: it fits most `_cgb_c` photo columns but contradicts hardware-captured gambatte bgtiledata spx0B rows. Current law samples `eff` clean at the read dot on both families instead.

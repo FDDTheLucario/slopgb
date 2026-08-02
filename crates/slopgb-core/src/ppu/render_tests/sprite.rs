@@ -171,6 +171,40 @@ fn oam_scan_obj_size_sample_lags_the_commit_on_dmg() {
     );
 }
 
+/// The OBJ alignment penalty is the fetcher finishing its current tile row, so
+/// a WX 0-7 window — which owns the fetcher from before the first pixel pops —
+/// sets the tile phase for the whole line: ten sprites one tile apart shed
+/// 10 dots of penalty per step of WX, until WX 2 clears it entirely. A window
+/// starting mid-line (WX 8 here) keeps the BG phase instead. The gambatte
+/// space/10spritesPrLine_wx{0..7}_m3stat_ds ladder pins the run; the mid-line
+/// side is pinned by m0enable/enable_wxA6_2x_spxA7.
+#[test]
+fn obj_alignment_follows_a_left_edge_window_grid() {
+    // Ten sprites at OAM X 8, 16, ... 80: one per BG tile, each landing on a
+    // tile boundary, so each pays the full 5 dots on the BG grid.
+    fn flip(wx: u8) -> i32 {
+        let mut p = dmg_on(0xB3); // LCD + window + BG + OBJ on, 8x8
+        p.write(0xFF4A, 0); // WY = 0
+        p.write(0xFF4B, wx);
+        for i in 0..10u8 {
+            sprite(&mut p, i, 19, 8 + i * 8, 0, 0);
+        }
+        i32::from(render_line(&mut p, 3))
+    }
+    let full = flip(7); // window origin 0: same phase as the BG grid
+    for wx in 3..=7u8 {
+        assert_eq!(
+            flip(wx) - flip(wx - 1),
+            10,
+            "wx {wx}: one dot of alignment per sprite"
+        );
+    }
+    assert_eq!(flip(2), full - 50, "wx 2 sheds every sprite's alignment");
+    assert_eq!(flip(1), flip(2), "the penalty floors at zero");
+    assert_eq!(flip(0), flip(2));
+    assert_eq!(flip(8), full, "a mid-line window keeps the BG phase");
+}
+
 #[test]
 fn sprite_pixels_palettes_transparency() {
     let mut p = dmg_on(0x93);

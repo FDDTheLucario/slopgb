@@ -148,10 +148,31 @@ impl Ppu {
         Some((y, x, y, x))
     }
 
-    /// First-per-BG-tile sprite alignment penalty (Pan Docs OBJ penalty
+    /// The fetcher-grid position the OBJ alignment penalty is measured from.
+    /// The penalty is the fetcher finishing its current tile row, so it runs off
+    /// whichever grid the fetcher is on: normally the BG's `x + SCX`, but a
+    /// WX 0-7 window owns the fetcher from before the first pixel pops, so its
+    /// own column (origin `WX - 7`) sets the tile phase for the whole line. The
+    /// `+255` keeps that form non-negative without disturbing the low three bits
+    /// or the tile key.
+    ///
+    /// A window starting mid-line keeps the BG phase: the pinned case is a
+    /// WX 166 start at lx 159 with a sprite at OAM X 167 landing in the window's
+    /// own first tile, where the reference charges no alignment at all
+    /// (m0enable/enable_wxA6_2x_spxA7). Whether a *later* tile of a mid-line
+    /// window switches phase is unpinned by the corpus, so it does not.
+    pub(super) fn penalty_pos(&self, x: u8) -> u16 {
+        if self.render.win_mode && self.eff.wx <= 7 {
+            u16::from(x) + 255 - u16::from(self.eff.wx)
+        } else {
+            u16::from(x) + u16::from(self.eff.scx)
+        }
+    }
+
+    /// First-per-tile sprite alignment penalty (Pan Docs OBJ penalty
     /// algorithm; verified against intr_2_mode0_timing_sprites).
     pub(super) fn sprite_penalty(&mut self, x: u8) -> u16 {
-        let v = u16::from(x) + u16::from(self.eff.scx);
+        let v = self.penalty_pos(x);
         let key = v >> 3;
         if self.render.penalty_tiles & (1u64 << key) != 0 {
             0

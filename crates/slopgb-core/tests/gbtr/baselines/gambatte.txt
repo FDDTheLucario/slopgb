@@ -477,12 +477,6 @@ gambatte/sprites/late_sizechange_sp00_ds_1_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp01_ds_1_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/late_sizechange_sp39_ds_1_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/space/10spritesPrLine_late_scx4_ds_2_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_wx0_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_wx1_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_wx2_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_wx3_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_wx4_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
-gambatte/sprites/space/10spritesPrLine_wx5_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/space/1pos8_8pos9_wx08_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
 # (tima/ + div/ + serial/trigger_int8 cleared 2026-06: the late_retrigger
 # DMG/CGB splits are the dispatch-ack source sync-ahead — gambatte
@@ -590,7 +584,6 @@ gambatte/speedchange/speedchange_ch2_nr52_ds_1a_cgb04c_outF2.gbc [Cgb]
 # * sprites/space/10spritesPrLine_wx6_m3stat_ds_2: WX=6 prefill window +
 #   10-sprite pile-up in double speed; round _1 (previously failing)
 #   passes with the prefill walk, round _2 needs the ds sub-dot grid.
-gambatte/sprites/space/10spritesPrLine_wx6_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/window/late_wy_lcdoffset1_1_cgb04c_out0.gbc [Cgb]
 
 # --- documented swaps: STAT mode-2 pulse wave (2026-06) -------------------
