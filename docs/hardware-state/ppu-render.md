@@ -22,6 +22,16 @@
   family green: 20/20 DMG, 20/20 CGB. Unit test:
   `oam_scan_obj_size_sample_lags_the_commit_on_dmg`.
 - The *fetch*-time LCDC.2 re-read (`fetch_sprite`) stays live on both models.
+- Parked, measured: the seven `late_sizechange*_ds_1` rungs. In double speed the
+  `_1` rung writes FF40 one dot after the entry's latch (latch 3, write 4; latch
+  81, write 82) and the reference still latches the NEW height — in BOTH write
+  directions, so it is not the CGB OR. The `_2` rungs (write at latch + 3) want
+  the OLD height and already pass. So the reference has the write visible to the
+  scan from the START of its double-speed M-cycle, where our FF40 `eff` commit
+  lands at the M-cycle END. No lag or OR of past views can reach it: the value
+  the latch needs is in our future. Fixing it means moving the DS FF40 commit a
+  dot earlier, which is a global render/read-law change, not a scan-local one.
+  All seven are bucketed EXCEED — SameBoy misses them too.
 - While OAM DMA owns OAM (running, or halt/stop-frozen) the scan latches `$FF` — a disabled sprite (`Ppu::oam_dma_active`, edges = gambatte startOamDma/endOamDma: the first byte's cycle still latches real OAM; the disconnect outlives the last copy by one M-cycle).
 
 Parked: chasing the residual late_sp `_ds` out3 rows (half-dot, cc-granular races compounded with the frozen-ds mode-0 flip lead) or strikethrough's 7-px residue (an undocumented glitch-sprite, see `smallsuites.rs`) with **whole-dot** timing — don't chase either; whole-dot granularity can't resolve them.
