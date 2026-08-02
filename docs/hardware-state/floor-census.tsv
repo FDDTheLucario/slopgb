@@ -283,7 +283,6 @@ gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_2_cgb04c_outaudi
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/speedchange/speedchange2_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/speedchange/speedchange2_ch2_nr52_ds_1a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/speedchange/speedchange2_ch2_nr52_ds_2a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/speedchange/speedchange2_ly44_m3_stat_4_cgb04c_outC2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	C0	C2	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
@@ -302,7 +301,6 @@ gambatte/speedchange/speedchange3_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_out
 gambatte/speedchange/speedchange3_nop_ch1_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange4_ch1_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange4_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/speedchange/speedchange4_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/speedchange/speedchange5_ch1_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange5_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange5_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
@@ -314,7 +312,6 @@ gambatte/speedchange/speedchange_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outa
 gambatte/speedchange/speedchange_ch1_nr4init_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange_ch2_nr52_ds_1a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/speedchange/speedchange_ly44_m3_stat_2_cgb04c_outC2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	C0	C2	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/speedchange/speedchange_tima01_nop_1_cgb04c_out07.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	06	07	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/speedchange/speedchange_tima01_nop_2_cgb04c_out08.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	07	08	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses

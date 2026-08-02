@@ -120,3 +120,20 @@ mod output;
 
 #[path = "tests/timing.rs"]
 mod timing;
+
+/// A STOP that leaves double speed restarts DIV without clocking the frame
+/// sequencer, whichever side of the bit-13 boundary the counter sits on — the
+/// gambatte `speedchange*_ch2_nr52` `a` rungs stop on both and neither may lose
+/// a length step (see [`Apu::div_write_switching`]).
+#[test]
+fn leaving_double_speed_restarts_div_without_a_frame_event() {
+    for prev in [0x1FFCu16, 0x2000] {
+        let mut a = Apu::new(true);
+        a.write(0xFF26, 0x80); // power on
+        a.tick(prev, true);
+        let before = a.div_divider;
+        a.div_write_switching();
+        assert_eq!(a.div_divider, before, "prev {prev:04X}: no frame event");
+        assert_eq!(a.prev_div, 0, "prev {prev:04X}: counter restarted");
+    }
+}

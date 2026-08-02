@@ -5030,7 +5030,7 @@ gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_1_cgb04c_
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_1_cgb04c_outaudio0.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb] | 9ab4e008dd5a4325 | b6b0632d997517d6
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
-gambatte/speedchange/speedchange2_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb] | f6e4e1eb05a5a42c | e8009885c27401d6
+gambatte/speedchange/speedchange2_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb] | 42f732e79bcf21d5 | e8009885c27401d6
 gambatte/speedchange/speedchange2_ch2_nr52_1a_cgb04c_outF2.gbc [Dmg] | 00e9c7f1d1b2b325 | e8009885c27401d6
 gambatte/speedchange/speedchange2_ch2_nr52_1b_cgb04c_outF0.gbc [Cgb] | f6e4e1eb05a5a42c | e8009885c27401d6
 gambatte/speedchange/speedchange2_ch2_nr52_1b_cgb04c_outF0.gbc [Dmg] | 00e9c7f1d1b2b325 | e8009885c27401d6
@@ -5274,7 +5274,7 @@ gambatte/speedchange/speedchange4_ch1_duty0_pos6_to_pos7_timing_nop_1_cgb04c_out
 gambatte/speedchange/speedchange4_ch1_duty0_pos6_to_pos7_timing_nop_1_cgb04c_outaudio0.gbc [Dmg] | 00e9c7f1d1b2b325 | e8009885c27401d6
 gambatte/speedchange/speedchange4_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb] | 9ab4e008dd5a4325 | b6b0632d997517d6
 gambatte/speedchange/speedchange4_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Dmg] | 00e9c7f1d1b2b325 | e8009885c27401d6
-gambatte/speedchange/speedchange4_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb] | f6e4e1eb05a5a42c | e8009885c27401d6
+gambatte/speedchange/speedchange4_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb] | 42f732e79bcf21d5 | e8009885c27401d6
 gambatte/speedchange/speedchange4_ch2_nr52_1a_cgb04c_outF2.gbc [Dmg] | 00e9c7f1d1b2b325 | e8009885c27401d6
 gambatte/speedchange/speedchange4_ch2_nr52_1b_cgb04c_outF0.gbc [Cgb] | f6e4e1eb05a5a42c | e8009885c27401d6
 gambatte/speedchange/speedchange4_ch2_nr52_1b_cgb04c_outF0.gbc [Dmg] | 00e9c7f1d1b2b325 | e8009885c27401d6
@@ -5378,7 +5378,7 @@ gambatte/speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2.gbc [Cgb] | f6e4e1eb05
 gambatte/speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2.gbc [Dmg] | 00e9c7f1d1b2b325 | e8009885c27401d6
 gambatte/speedchange/speedchange_ch2_nr52_2b_cgb04c_outF0.gbc [Cgb] | f6e4e1eb05a5a42c | e8009885c27401d6
 gambatte/speedchange/speedchange_ch2_nr52_2b_cgb04c_outF0.gbc [Dmg] | 00e9c7f1d1b2b325 | e8009885c27401d6
-gambatte/speedchange/speedchange_ch2_nr52_ds_1a_cgb04c_outF2.gbc [Cgb] | f6e4e1eb05a5a42c | e8009885c27401d6
+gambatte/speedchange/speedchange_ch2_nr52_ds_1a_cgb04c_outF2.gbc [Cgb] | 42f732e79bcf21d5 | e8009885c27401d6
 gambatte/speedchange/speedchange_ch2_nr52_ds_1a_cgb04c_outF2.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/speedchange/speedchange_ch2_nr52_ds_1b_cgb04c_outF0.gbc [Cgb] | f6e4e1eb05a5a42c | e8009885c27401d6
 gambatte/speedchange/speedchange_ch2_nr52_ds_1b_cgb04c_outF0.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6

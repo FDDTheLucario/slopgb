@@ -184,7 +184,11 @@ impl Interconnect {
         // pin the TIMA falling-edge quirk to this cell). Modelled as a DIV
         // write so the falling-edge effects apply (frame-sequencer edge
         // included, `Apu::div_write` — the speedchange ch2_nr52 families).
-        self.apu.div_write(self.double_speed);
+        if switching && !entering_ds {
+            self.apu.div_write_switching();
+        } else {
+            self.apu.div_write(self.double_speed);
+        }
         self.timer.write(0xFF04, 0);
         if !switching {
             // Deep stop: hand a still-pending block request back — the

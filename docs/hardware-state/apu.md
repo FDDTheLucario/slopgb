@@ -46,3 +46,20 @@ The completed-addend negate-clear kill uses the **E form** of the old-negate bit
 - Same-suite `channel_1_sweep` + `restart` + `restart_2` (the README's "even SameBoy-E fails it" ROM) all pass.
 - Residual: gambatte `ch1_init_reset_sweep_counter_timing` rows need the 128 Hz grid phase pinned <4 dots against the instruction stream per model — see the baseline comment.
 - Parked: whole-M-cycle ordering tweaks — they break same-suite.
+
+## Speed switch
+
+- The DIV reset of a STOP that **leaves** double speed restarts the counter but
+  emits **no** frame-sequencer edge (`Apu::div_write_switching`, called from
+  `Interconnect::stop_impl`): the DIV-APU tap is moving from bit 13 back to bit
+  12 in that instant and neither tap explains the corpus alone. The gambatte
+  `speedchange*_ch2_nr52` `a` rungs stop on the two adjacent DIV values `1FFC`
+  (one below the bit-13 boundary) and `2000` (exactly on it) and both must leave
+  the length counter unclocked — bit 12 fires on the first, bit 13 on the second.
+  Entering double speed, and a non-switching (deep) STOP, keep the ordinary
+  `Apu::div_write` falling-edge test. Unit test:
+  `leaving_double_speed_restarts_div_without_a_frame_event`.
+- Residual in that family: the six `speedchange{,2,5}_ch2_nr52*` `a` rungs whose
+  length clock lands exactly one M-cycle before the reference's (delta 0 where
+  the passing siblings show +2 dots) — all bucketed EXCEED, SameBoy misses them
+  too.

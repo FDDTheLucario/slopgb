@@ -231,6 +231,18 @@ impl Apu {
     /// late, which the gambatte speedchange ch2_nr52 a/b phase pairs
     /// resolve). The caller's next [`Self::tick`] passes the restarted
     /// counter.
+    /// The DIV reset of a STOP that *leaves* double speed: the counter
+    /// restarts like [`Self::div_write`], but no frame-sequencer edge comes out
+    /// of it, because the DIV-APU tap is moving from bit 13 back to bit 12 in
+    /// the same instant. Neither tap explains the gambatte
+    /// `speedchange*_ch2_nr52` `a` rungs on its own — the two adjacent DIV
+    /// values they stop on (`1FFC`, one below the bit-13 boundary, and `2000`,
+    /// exactly on it) both have to leave the length counter unclocked, and bit
+    /// 12 fires on the first while bit 13 fires on the second.
+    pub fn div_write_switching(&mut self) {
+        self.prev_div = 0;
+    }
+
     pub fn div_write(&mut self, double_speed: bool) {
         let bit = if double_speed { 13 } else { 12 };
         let was_high = (self.prev_div >> bit) & 1 == 1;

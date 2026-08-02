@@ -553,15 +553,12 @@ gambatte/dma/hdma_late_m3speedchange_read_hdmadst00_scx2_ds_2_cgb04c_out9F.gbc [
 gambatte/dma/hdma_late_m3speedchange_tima_scx1_ds_3_cgb04c_outF6.gbc [Cgb]
 gambatte/dma/hdma_m0speedchange_late_m3wakeup_scx1_2_cgb04c_out00.gbc [Cgb]
 gambatte/dma/hdma_m0speedchange_late_m3wakeup_scx2_2_cgb04c_out00.gbc [Cgb]
-gambatte/speedchange/speedchange2_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch2_nr52_ds_1a_cgb04c_outF2.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch2_nr52_ds_2a_cgb04c_outF2.gbc [Cgb]
-gambatte/speedchange/speedchange4_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb]
 gambatte/speedchange/speedchange5_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb]
 gambatte/speedchange/speedchange5_ch2_nr52_2a_cgb04c_outF2.gbc [Cgb]
 gambatte/speedchange/speedchange_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb]
 gambatte/speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2.gbc [Cgb]
-gambatte/speedchange/speedchange_ch2_nr52_ds_1a_cgb04c_outF2.gbc [Cgb]
 
 # --- window-machine wave swaps ------------------------------------------
 # These entries regressed when the gambatte window machine landed (WX
