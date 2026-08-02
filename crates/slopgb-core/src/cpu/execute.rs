@@ -46,7 +46,7 @@ fn run_step(cpu: &mut Cpu, bus: &mut impl Bus) {
         // only the M-cycle of time matters) that is rolled back while the
         // wake condition stays false.
         let pc_before = cpu.regs.pc;
-        let opcode = fetch_opcode(cpu, bus);
+        let opcode = fetch_halt_idle(cpu, bus);
         // The wake check uses the halt-exit sampling point, which sits
         // earlier *within* the M-cycle than the running CPU's end-of-fetch
         // `pending()` view (see `Bus::pending_halt_wake`): an IF bit
@@ -74,6 +74,11 @@ fn run_step(cpu: &mut Cpu, bus: &mut impl Bus) {
         // within the waking cycle is not pinned by any test ROM.
         bus.set_halted(false);
         cpu.halted = false;
+        // The wake's own cycle is the block's seam: `vram_dma_unhalt` re-flags
+        // a block deferred by the halt and it takes the bus there, ahead of any
+        // dispatch (`irq_precedence/late_hdma_vs_*_halt_1` read back the stack
+        // slot as it was BEFORE the dispatch pushed PC over it).
+        bus.run_dma();
         if cpu.ime {
             // The observing cycle is the aborted prefetch of the dispatch
             // sequence: the vector fetch lands 5 M-cycles after the cycle
@@ -90,6 +95,11 @@ fn run_step(cpu: &mut Cpu, bus: &mut impl Bus) {
             // IME=0: the observing cycle already was the next instruction's
             // opcode fetch (acceptance/halt_ime0_nointr_timing: "halt +
             // nops 6" measures the same DIV delta as dispatch + jp hl).
+            // The block above may have copied over the resume address, and
+            // this path runs the prefetched byte: re-sample it after the copy
+            // (see [`Bus::refetch`]). The IME=1 branch discards it for the
+            // vector fetch, so it must not re-read there.
+            let opcode = bus.refetch(pc_before, opcode);
             bus.profile_pc(pc_before);
             bus.check_exec(pc_before, opcode);
             execute(cpu, bus, opcode);
@@ -132,6 +142,7 @@ fn run_step(cpu: &mut Cpu, bus: &mut impl Bus) {
     // pin the aborting behavior on hardware.
     let pc_before = cpu.regs.pc;
     let mut opcode = fetch_opcode(cpu, bus);
+    bus.run_dma();
     // The address of the instruction `execute` will run: `pc_before`, unless an
     // interrupt was dispatched, in which case it is the handler's entry (the
     // re-fetch reads from the vector). Used only by the profiler/exception
@@ -144,6 +155,7 @@ fn run_step(cpu: &mut Cpu, bus: &mut impl Bus) {
         bus.set_dispatching(false);
         exec_pc = cpu.regs.pc;
         opcode = fetch_opcode(cpu, bus);
+        bus.run_dma();
     }
     bus.profile_pc(exec_pc);
     bus.check_exec(exec_pc, opcode);
@@ -206,6 +218,17 @@ fn dispatch_interrupt(cpu: &mut Cpu, bus: &mut impl Bus) {
 ///
 fn fetch_opcode(cpu: &mut Cpu, bus: &mut impl Bus) -> u8 {
     let opcode = bus.read(cpu.regs.pc);
+    if cpu.halt_bug {
+        cpu.halt_bug = false;
+    } else {
+        cpu.regs.pc = cpu.regs.pc.wrapping_add(1);
+    }
+    opcode
+}
+
+/// [`fetch_opcode`] for the halt idle cycle (see [`Bus::read_halt_idle`]).
+fn fetch_halt_idle(cpu: &mut Cpu, bus: &mut impl Bus) -> u8 {
+    let opcode = bus.read_halt_idle(cpu.regs.pc);
     if cpu.halt_bug {
         cpu.halt_bug = false;
     } else {

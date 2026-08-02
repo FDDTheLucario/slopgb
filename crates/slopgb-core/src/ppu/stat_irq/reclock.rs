@@ -576,6 +576,12 @@ impl Ppu {
                 self.m0sh_age = 2;
                 self.m0sh_dot = self.dot;
             }
+        } else if self.eng_stat & STAT_SRC_LYC != 0 && self.lyc_interrupt_line {
+            // Pure-LYC coincidence rise (the `mfi` arms above ruled the mode
+            // sources out): carries the same half-cycle halt law the mode-0
+            // rise does, classified by the interconnect against the CPU's
+            // M-cycle.
+            self.lyc_rise = true;
         }
     }
 

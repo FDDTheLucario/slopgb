@@ -74,6 +74,64 @@ fn m0_rise_second_half_commit_is_halt_late() {
     }
 }
 
+/// The pure-LYC rise's half-cycle halt law (`Ppu::take_lyc_rise` →
+/// `if_late`), CGB single speed. The coincidence fires at the line's dot 4,
+/// the second half of that M-cycle, so the halt-exit sampler misses it for
+/// one cycle — except on line 153, whose `ly_for_comparison` table matches
+/// two dots later (dot 6, the first half) and wakes at once. SameBoy lands
+/// the LYC=1, 144 and 153 dispatches on ONE dot; without the mask the
+/// ordinary anchors wake a cycle early and their ISR reads FF41 four dots
+/// short (gambatte dma/{g,h}dma_cycles_*).
+#[test]
+fn lyc_rise_second_half_commit_is_halt_late_cgb() {
+    for (lyc, late) in [(1u8, true), (144, true), (153, false)] {
+        let mut b = ic(Model::Cgb);
+        b.ie = 0x02;
+        b.write(0xFF45, lyc);
+        b.write(0xFF41, 0x40); // LYC STAT source
+        b.write(0xFF40, 0x91);
+        // Advance whole M-cycles to the coincidence, dropping every other
+        // rise so only the LYC edge is left standing.
+        let mut fired = false;
+        for _ in 0..20_000 {
+            b.intf = 0;
+            b.tick();
+            if b.pending() == 0x02 {
+                fired = true;
+                break;
+            }
+        }
+        assert!(fired, "lyc {lyc}: coincidence fired");
+        assert_eq!(
+            b.pending_halt_wake(),
+            if late { 0 } else { 0x02 },
+            "lyc {lyc}: halt-wake view"
+        );
+        b.tick();
+        assert_eq!(b.pending_halt_wake(), 0x02, "lyc {lyc}: visible next cycle");
+    }
+}
+
+/// The pure-LYC halt mask is CGB single-speed only: the DMG family emits its
+/// line-153 LYC on the dispatch frame already (`stat_irq/reclock.rs`) and a
+/// double-speed M-cycle is two dots, so neither carries the half split.
+#[test]
+fn lyc_rise_halt_mask_is_cgb_single_speed_only() {
+    let mut b = ic(Model::Dmg);
+    b.ie = 0x02;
+    b.write(0xFF45, 1);
+    b.write(0xFF41, 0x40);
+    b.write(0xFF40, 0x91);
+    for _ in 0..20_000 {
+        b.intf = 0;
+        b.tick();
+        if b.pending() == 0x02 {
+            break;
+        }
+    }
+    assert_eq!(b.pending_halt_wake(), 0x02, "DMG LYC rise is never masked");
+}
+
 /// The timer sync-ahead window measured from the acknowledge: zero machine
 /// ticks on the DMG family and one on CGB/AGB (gambatte ackIrq
 /// `updateTimaIrq(cc + 2 + isCgb())`, taken from the acknowledge's position

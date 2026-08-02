@@ -261,15 +261,11 @@ _LYC_ANCHOR = (
     'gambatte/dma/hdma_cycles_scx5_2_cgb04c_out0.gbc',
 )
 
-# `ours = 7` is `$FF & 7`: these read VRAM $8000 through `and 7`, so a 7 is a
-# BLOCKED read, not a transferred byte. The block is serviced inside the read's
-# own M-cycle and steals it; SameBoy runs it two M-cycles after the trigger
-# (traced: mode-0 entry cfl 257, run cfl 264), so the lever is the service lag,
-# not the mode-3 VRAM release. Both rows recover when that M-cycle is held.
-_BLOCKED_VRAM = (
-    'gambatte/dma/hdma_start_1_cgb04c_out0.gbc',
-    'gambatte/dma/hdma_start_scx5_1_cgb04c_out0.gbc',
-)
+# RECOVERED on feat/hdma-trigger-phase: `ours = 7` was `$FF & 7`, a BLOCKED read
+# — the block was stealing the read's own M-cycle. Anchoring the steal to the
+# opcode fetch (`Bus::run_dma`) fixed both; kept only so a regression is
+# recognisable. See dma.md "Where the HBlank block actually copies".
+_BLOCKED_VRAM = ()
 
 DERIVED = {}
 for _rel in _LYC_ANCHOR:
@@ -280,9 +276,8 @@ for _rel in _LYC_ANCHOR:
                      'wake one M-cycle early — see cpu-interrupts.md')
 for _rel in _BLOCKED_VRAM:
     DERIVED[_rel] = ('gambatte/hdma-service-lag',
-                     'derived: ours 7 is $FF & 7, a BLOCKED VRAM read — the '
-                     'block is serviced in the read\'s own M-cycle; SameBoy '
-                     'holds it one M-cycle longer — see dma.md')
+                     'derived: the block stole the read\'s own M-cycle; the '
+                     'steal is anchored to the opcode fetch — see dma.md')
 
 
 def adjudicate(rel, prov, sb):

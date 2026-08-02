@@ -640,6 +640,16 @@ pub struct Ppu {
     /// pulses' `stat_halt_late`). mooneye hblank_ly_scx_timing-GS and
     /// gbmicrotest int_hblank_halt_scx0-7 pin all eight SCX phases.
     m0_rise: bool,
+    /// The STAT IF bit handed out by the last tick came from a pure-LYC
+    /// coincidence rise (neither mode source was the one that rose). Carries
+    /// the same half-cycle halt law as [`Self::m0_rise`]: the CGB LYC match
+    /// lands on the line's dot 4 — the second half of that CPU M-cycle — on
+    /// every line except 153, whose `ly_for_comparison` table matches two dots
+    /// later, so without the mask the ordinary anchors wake one M-cycle before
+    /// the 153 one and their ISR reads FF41 four dots early (SameBoy's `SBACK`
+    /// lands the LYC=1, 144 and 153 anchors on the SAME dot; gambatte
+    /// dma/{g,h}dma_cycles_*, whose ISR reads FF41 once).
+    lyc_rise: bool,
     /// The mode-3→mode-0 OAM/VRAM *accessibility* unblock fired on the
     /// current dot (`line_render_done` set true by `m0_flip_events`).
     /// On hardware this access edge trails the mode-0 IRQ rise by one

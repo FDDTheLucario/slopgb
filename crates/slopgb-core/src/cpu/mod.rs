@@ -167,6 +167,31 @@ pub trait Bus {
     /// (`vram_dma_unhalt`), which is where the `*_halt` rows of that family
     /// want it. Takes no time; default no-op.
     fn set_dispatching(&mut self, _on: bool) {}
+    /// Service any flagged VRAM-DMA block. SameBoy calls `GB_hdma_run` only
+    /// from `GB_cpu_run`'s run branch, right after an opcode fetch, so the
+    /// copy is anchored to the instruction stream rather than to the bus
+    /// cycle the trigger fired in. Takes no time itself; the block's stolen
+    /// cycles do. Default no-op.
+    fn run_dma(&mut self) {}
+    /// The halt idle cycle's opcode prefetch. It burns the M-cycle and is
+    /// rolled back while the CPU stays asleep, so nothing samples its value —
+    /// a block flagged by that cycle must not be held off the bus waiting for
+    /// it the way a real read holds it (`hdma_transition_oamdma_2` reads back
+    /// the OAM-DMA index and counts the cycle the block would lose). Defaults
+    /// to a plain read.
+    fn read_halt_idle(&mut self, addr: u16) -> u8 {
+        self.read(addr)
+    }
+    /// Re-sample an opcode already fetched this M-cycle, without spending
+    /// another one. The halt wake folds the resumed fetch into the idle cycle
+    /// that observed the wake, but the unhalt's VRAM-DMA block reaches the bus
+    /// first (gambatte `Memory::event` intevent_unhalt), so a block copying
+    /// over the resume address changes the byte the CPU runs
+    /// (`hdma_transition_halt_hdmadst_unhalt` halts at `$7FFF` and resumes at
+    /// `$8000`, inside the block's destination). Default keeps `current`.
+    fn refetch(&mut self, _addr: u16, current: u8) -> u8 {
+        current
+    }
     /// Clear bit `bit` (0..=4) of IF. Takes no time.
     fn ack(&mut self, bit: u8);
     /// CPU executed STOP: if a speed switch is armed (CGB KEY1.0), perform

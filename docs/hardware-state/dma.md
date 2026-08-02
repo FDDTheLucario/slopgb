@@ -41,8 +41,23 @@ A gambatte-shaped request engine (`Interconnect::vram_dma_req`):
 
 - FF55 is the live register; cancel latches the *written* length `| $80`.
 - The dot-exact mode-0 entry — led by one dot, `Ppu::hdma_trigger_level`, gambatte xpos `lcd_hres+7` — flags one block.
-- Requests steal the bus at the head of the CPU's next bus op, with reads yielding to a same-cycle trigger while in-flight writes commit first (hdma_late_destl vs hdma_start `_1`/`_2` pairs).
-- The **interrupt dispatch holds** the steal (`Bus::set_dispatching`, the `dma_dispatch_hold` flag): SameBoy calls `GB_hdma_run` only from `GB_cpu_run`'s run branch after an opcode fetch, never inside the dispatch branch, so a block flagged while the dispatch is pushing PC waits for the handler's first opcode fetch and copies the *pushed* bytes (`irq_precedence/late_hdma_vs_{ei,ie,tima}`, whose HDMA1/2 point at the pushed stack slot; `hdma_vs_m0_scx2`). Scoped to the running CPU's dispatch — extending the hold to the halt-wake dispatch trades `late_hdma_vs_tima_scx{1,2}_halt_2` for their `_1` siblings and `hdma_vs_m0_scx2_halt`, all three currently green.
+- Requests steal the bus **after an opcode fetch** (`Bus::run_dma`), not at an
+  arbitrary bus cycle: SameBoy calls `GB_hdma_run` only from `GB_cpu_run`'s run
+  branch, so the copy is anchored to the instruction stream. A block flagged
+  while the dispatch is pushing PC therefore reaches the bus at the handler's
+  first fetch and copies the *pushed* bytes
+  (`irq_precedence/late_hdma_vs_{ei,ie,tima}`, whose HDMA1/2 point at the pushed
+  stack slot), with no separate hold needed. See "Where the HBlank block
+  actually copies" for the M-cycle counts that pin it.
+- The **halt wake** is the other seam: `vram_dma_unhalt` re-flags a deferred
+  block and it takes the bus there, ahead of any dispatch
+  (`late_hdma_vs_*_halt_1`, `hdma_vs_m0_scx2_halt`). Two consequences of the
+  wake being folded into the idle cycle that observed it: the hblank window is
+  re-evaluated on the wake's own sub-M-cycle view (`m0_stat_flip_reached`, the
+  same one `halt_wake_mid_impl` peeked with), and the resumed opcode is
+  re-sampled after the block (`Bus::refetch`) because the copy can land on the
+  resume address — `hdma_transition_halt_hdmadst_unhalt` halts at `$7FFF` and
+  resumes at `$8000`, inside the destination.
 - Each service ends with one teardown M-cycle.
 - The 16-bit dest counter terminates at the 0x10000 crossing — no VRAM wrap.
 - Enabling with the LCD off copies one block immediately.
@@ -81,6 +96,84 @@ them: the `gdma_cycles` rows are decided by the native `vis_mode()`, the
 244/248 (SCX 0, 2, 3) and 248/252 (SCX 5) with `exit = 510 + 2·SCX` half-dots
 force the demanded read boundary to `B(SCX) = 245 + SCX`, against our 251 + SCX,
 i.e. our CPU-visible exit is 6 dots late *for this anchor*.
+
+#### Where the HBlank block actually copies (2026-08-02)
+
+Disassembled, not swept. The `hdma_late_*` and `hdma_start` rows share ONE
+LYC=1 ISR (`$1000`: arm `HDMA5=$80`, NOP sled, one observation), so their
+observations can be counted in M-cycles from the ISR body at `$1006` — `ldh
+(n),a` commits on its third:
+
+| row | observation | M |
+|---|---|---|
+| `hdma_late_disable_1` | 42 NOP · `xor a` · `ldh ($55)` cancel | 46 |
+| `hdma_late_disable_2` | 43 NOP · `xor a` · `ldh ($55)` cancel | 47 |
+| `hdma_start_1` | 45 NOP · `ld a,(hl)` VRAM read | 47 |
+| `hdma_start_2` | 46 NOP · `ld a,(hl)` VRAM read | 48 |
+| `hdma_late_{destl,length,wrambank}_1` | 43 NOP · `ld a,n` · `ldh (n)` write | 48 |
+
+The three `hdma_late_*` rows are **two M-cycles later** than
+`hdma_late_disable_1`, not the same rung. Exactly one placement satisfies all
+seven: the copy lands **in M 48**, with the trigger flag already set by M 47.
+`disable_1`'s cancel beats the flag and `disable_2`'s does not (the cancel races
+the flag, not the copy — SameBoy's HDMA5 cancel never clears a pending
+`hdma_on`); `hdma_start_1`'s read samples in M 47, before the copy;
+`hdma_start_2`'s read is in M 48 and yields to it; and the `hdma_late_*` writes
+in M 48 commit before it. The last two are the same M-cycle with opposite
+outcomes — the read/write asymmetry [`Interconnect::service_vram_dma`] already
+models at the trigger's own cycle, one cycle out.
+
+**Resolved by moving the seam to the instruction stream.** Two bus-cycle rules
+were built and measured first — copy in the trigger's own cycle after the read
+(**+18/−3**, the three `hdma_late_*_1` lost) and copy in the next cycle with
+writes never hosting the steal (all seven green, eight others lost) — and neither
+covers both families, because the second family's count disagrees:
+
+The eight were counted too. `late_hdma_vs_*` sets `SP = $CFF2`, pushes `$1234`
+and pops it, leaving the value in the HDMA source page, then prints what the
+block copied: `_1` wants `1234` (copied before the dispatch overwrote the slot)
+and `_2` wants `11E9` (the pushed return address). Probed on `_1`: the copy runs
+at ly 1 dot 256 with the slot still `1234`, and that cycle is the **last opcode
+fetch before the timer dispatch** — deferring it one cycle lands it inside the
+dispatch instead (`dma_dispatch_hold` true at dots 256 and 260, copy at 272),
+where it takes the pushed PC and prints `11E9`, its own `_2` answer.
+
+The two families demand different cycles from the same *bus* seam — M 48 for the
+LYC kernel, the trigger's own cycle for the dispatch-adjacent one — and both are
+derived, not fitted. They are the same rule once the seam is the **opcode
+fetch**: the dispatch-adjacent copy sits right after the last fetch before the
+dispatch, and the LYC kernel's M 48 is the fetch boundary its `ldh` runs from.
+That is `Bus::run_dma`, and it scores +24 over the whole corpus while deleting
+the per-access seams, the trigger-phase stamp and the `dma_dispatch_hold`
+special case that approximated it.
+
+Ruled out by build and measurement along the way, do not retry: servicing at the
+trigger cycle's post-read seam, servicing from the next cycle with a write never
+hosting the steal, non-stacking the dispatch hold with a trigger-cycle wait
+(armed at the service attempt and per M-cycle in `tick_machine` — neither moves a
+row), scoping the same-cycle sample order to VRAM addresses, scoping the wake
+service by `VramDmaReq::HblankUnhalt` (either polarity, only swaps
+`hdma_transition_ei_halt_late_unhalt_scx1_1` against its `_2`), and servicing at
+the speed-switch pause's end (breaks that same `_1`).
+
+Two rows needed the seam narrowed further, and each named its own mechanism.
+
+`hdma_m0speedchange_late_m3wakeup_scx2_1` arms two blocks, `STOP`s into a speed
+switch and reads FF55 straight after. Probed: the read lands at ly 58 dot 260
+and the block at 262, so the ROM asks only whether the post-`STOP` read precedes
+the block — its `scx1` sibling passes because its block lands at 256. A read
+whose own M-cycle flags the block therefore yields to it, gated on
+`hdma_trigger_edge` (the trigger's dot-END eighth plus the two-dot bus arrival)
+against the read's `ACCESS_PHASE` sample: `hdma_start_1` samples first and reads
+`$00`, this one samples after and sees FF55 retired.
+
+`hdma_transition_oamdma_2` reads `(C000)` *while an OAM DMA is running from
+`$C000`*, so the conflicted read returns the engine's in-flight byte and the
+printed value IS its index (`$50 + idx`; want `$67`, we gave `$66`). Its gated
+read is at `$116C` — the halt idle prefetch, which is rolled back while the CPU
+sleeps and which nothing samples. Holding the block off the bus for that
+pseudo-read costs the OAM DMA a byte of advance, so it is exempt
+(`Bus::read_halt_idle`).
 
 #### What the `hdma_start` / `hdma_late_disable` rows actually constrain (2026-07-31)
 

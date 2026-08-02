@@ -142,6 +142,7 @@ impl Ppu {
         self.stat_update.write_state(w);
         w.bool(self.lyc_interrupt_line);
         w.bool(self.m0_rise);
+        w.bool(self.lyc_rise);
         w.write_opt(&self.m0_access_flip, |w, &v| w.u8(v as u8));
         w.write_opt(&self.pal_access_flip, |w, &v| w.u8(v as u8));
         w.write_opt(&self.m0_stat_flip, |w, &v| w.u8(v as u8));
@@ -296,6 +297,7 @@ impl Ppu {
         self.stat_update.read_state(r)?;
         self.lyc_interrupt_line = r.bool()?;
         self.m0_rise = r.bool()?;
+        self.lyc_rise = r.bool()?;
         self.m0_access_flip = r.read_opt(|r| Ok(r.u8()? as i8))?;
         self.pal_access_flip = r.read_opt(|r| Ok(r.u8()? as i8))?;
         self.m0_stat_flip = r.read_opt(|r| Ok(r.u8()? as i8))?;

@@ -27,6 +27,12 @@ impl Interconnect {
         }
     }
 
+    /// Whether a block flagged in THIS M-cycle reaches the bus only after the
+    /// current read has sampled (see the `hdma_trigger_edge` field docs).
+    pub(super) fn read_precedes_hdma_trigger(&self) -> bool {
+        !self.hdma_idle_prefetch && stamp_blocks(self.hdma_trigger_edge, ACCESS_PHASE)
+    }
+
     /// Service one flagged VRAM-DMA request, stalling the CPU while the
     /// rest of the machine keeps running. Pace: 2 bytes per stolen M-cycle
     /// at normal speed, 1 in double speed (gambatte memory.cpp `dma()`:
@@ -119,7 +125,8 @@ impl Interconnect {
         match self.halt_hdma {
             HaltHdmaState::Requested => self.vram_dma_req = Some(VramDmaReq::HblankUnhalt),
             HaltHdmaState::Low
-                if self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period_law() =>
+                if self.hdma_mode == HdmaMode::ArmedLcdOn
+                    && (self.ppu.hdma_period_law() || self.ppu.m0_stat_flip_reached()) =>
             {
                 self.vram_dma_req = Some(VramDmaReq::Hblank);
             }

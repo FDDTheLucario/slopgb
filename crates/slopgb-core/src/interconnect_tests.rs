@@ -57,9 +57,14 @@ fn ic_cgb_mode() -> Interconnect {
     Interconnect::new(Model::Cgb, Cartridge::from_bytes(rom).unwrap())
 }
 
+/// `n` machine cycles of a NOP stream: each is an instruction boundary, so a
+/// flagged VRAM-DMA block takes the bus there ([`Bus::run_dma`], which the CPU
+/// calls after every opcode fetch — these tests drive the interconnect
+/// directly, without one).
 fn ticks(b: &mut Interconnect, n: u32) {
     for _ in 0..n {
         b.tick();
+        b.run_dma();
     }
 }
 

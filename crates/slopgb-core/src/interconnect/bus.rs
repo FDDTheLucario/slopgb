@@ -27,12 +27,17 @@ impl Bus for Interconnect {
                 self.ppu.set_halt_refetch(false);
             }
         }
-        self.service_vram_dma();
         self.tick_machine();
-        // A trigger inside this very cycle still steals the bus before
-        // the read samples (see `service_vram_dma`: reads yield, writes
-        // in flight commit first).
-        self.service_vram_dma();
+        // A block flagged by this read's own cycle takes the bus before the
+        // read samples (gambatte: reads yield, in-flight writes commit first) —
+        // `hdma_m0speedchange_late_m3wakeup_scx2_1` reads FF55 in the cycle its
+        // post-STOP hblank flags the block and must see it retired — unless the
+        // trigger reaches the bus only after that sample, when the block waits
+        // for the next seam (`hdma_start_1` must read the untransferred `$00`;
+        // the three `hdma_late_*_1` need their FF5x write to win M 48).
+        if !self.read_precedes_hdma_trigger() {
+            self.service_vram_dma();
+        }
         self.maybe_oam_bug(addr, OamBugKind::Read);
         self.check_access(addr, false);
         let trailing = self.read_no_tick(addr);
@@ -58,7 +63,6 @@ impl Bus for Interconnect {
         // position is currently discarded (nothing samples it).
         let conflict = self.write_conflict(addr);
         let _commit = self.clock.write(conflict);
-        self.service_vram_dma();
         // The CPU drives the data bus during the second half of the write
         // M-cycle (gbctr "Memory access timing"), which the dot-clocked
         // pixel pipeline can observe mid-cycle: stage rendering-register
@@ -138,7 +142,6 @@ impl Bus for Interconnect {
         // Deferred-commit clock: an internal M-cycle parks +4 without
         // committing (SameBoy `cycle_no_access`); the next access pays it.
         self.clock.internal();
-        self.service_vram_dma();
         self.tick_machine();
     }
 
@@ -151,7 +154,6 @@ impl Bus for Interconnect {
         // is the commit *phase*, which matters once a later stage samples on
         // this cycle.)
         let _leading_edge = self.clock.read();
-        self.service_vram_dma();
         self.tick_machine();
         self.maybe_oam_bug(value, OamBugKind::Write);
     }
@@ -173,9 +175,7 @@ impl Bus for Interconnect {
                 self.ppu.set_halt_refetch(false);
             }
         }
-        self.service_vram_dma();
         self.tick_machine();
-        self.service_vram_dma(); // reads yield to a same-cycle trigger
         self.maybe_oam_bug(addr, OamBugKind::ReadIncrease);
         self.check_access(addr, false);
         let trailing = self.read_no_tick(addr);
@@ -230,6 +230,21 @@ impl Bus for Interconnect {
 
     fn pending_halt_wake(&self) -> u8 {
         self.halt_wake_impl()
+    }
+
+    fn run_dma(&mut self) {
+        self.service_vram_dma();
+    }
+
+    fn read_halt_idle(&mut self, addr: u16) -> u8 {
+        self.hdma_idle_prefetch = true;
+        let v = self.read(addr);
+        self.hdma_idle_prefetch = false;
+        v
+    }
+
+    fn refetch(&mut self, addr: u16, _current: u8) -> u8 {
+        self.read_no_tick(addr)
     }
 
     fn set_dispatching(&mut self, on: bool) {

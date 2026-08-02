@@ -196,8 +196,9 @@ const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// the joypad payload (the ICD2 mailbox feed; the SNES-fed pad latches stay
 /// transient — a live coprocessor re-feeds them on the next step); v10 moves the
 /// SNES-coprocessor tail behind its own presence flag at the very end, since the
-/// tail exists only when a coprocessor is installed, not per model.
-const STATE_VERSION: u16 = 10;
+/// tail exists only when a coprocessor is installed, not per model; v11 adds the
+/// PPU's pure-LYC STAT halt mask.
+const STATE_VERSION: u16 = 11;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/

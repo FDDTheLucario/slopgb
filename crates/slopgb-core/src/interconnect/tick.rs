@@ -22,6 +22,7 @@ impl Interconnect {
         self.m0_access_edge = None;
         self.pal_access_edge = None;
         self.stat_mode_edge = None;
+        self.hdma_trigger_edge = None;
     }
 
     /// Advance the whole machine by one CPU M-cycle (docs/ARCHITECTURE.md
@@ -113,6 +114,23 @@ impl Interconnect {
                 // int_oam_* grids pin the law).
                 self.if_late |= IF_STAT_BIT;
             }
+            if self.ppu.take_lyc_rise()
+                && self.model.is_cgb()
+                && !self.double_speed
+                && obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise, cc, 0))
+            {
+                // The pure-LYC coincidence rise takes the same second-half
+                // halt law as the mode-0 rise below: readable at once, missed
+                // by the halt-exit sampler for one M-cycle. Without it the
+                // ordinary LYC anchors wake a cycle before the line-153 one
+                // and their ISR reads FF41 four dots early (gambatte
+                // dma/{g,h}dma_cycles_*; SameBoy lands all three anchors on
+                // one dot). The DMG family already emits its line-153 LYC on
+                // the dispatch frame (`stat_irq/reclock.rs`) and a
+                // double-speed M-cycle is two dots, so neither carries the
+                // half classification.
+                self.if_late |= IF_STAT_BIT;
+            }
             if self.ppu.take_m0_rise() {
                 let second_half = obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise, cc, 0));
                 if second_half {
@@ -174,6 +192,14 @@ impl Interconnect {
                 && !self.cpu_halted
             {
                 self.vram_dma_req = Some(VramDmaReq::Hblank);
+                // Stamp the trigger's sub-M-cycle position so a read in this
+                // same cycle can tell whether it sampled before the block took
+                // the bus. The block reaches the bus two dots after the
+                // pipe-end level crosses (SameBoy enters mode 0 at `cfl` 257
+                // and runs the block at 264), carried as the trigger's own
+                // commit lead so the level — which the FF55 cancel race is
+                // calibrated against — does not move.
+                self.hdma_trigger_edge = Some(event_phase(EdgeKind::HdmaTrigger, cc, 4));
             }
             self.hdma_prev_hblank = hb;
         }

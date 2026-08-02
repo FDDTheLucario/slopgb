@@ -190,6 +190,49 @@ fn stat_update_mode0_rise_takes_m0_rise_flag_on() {
     );
 }
 
+/// A pure-LYC coincidence rise carries `lyc_rise`, the third source-specific
+/// halt mask; the mode-2 and mode-0 rises carry their own and leave it clear.
+#[test]
+fn stat_update_lyc_rise_is_source_specific() {
+    let mut p = cgb();
+    p.write(0xFF45, 3);
+    p.write(0xFF41, 0x40); // LYC source only
+    p.write(0xFF40, 0x91);
+    run_to(&mut p, 2, 400);
+    p.take_lyc_rise();
+    let mut saw = false;
+    for _ in 0..456 {
+        if p.tick() & 2 != 0 {
+            saw = p.take_lyc_rise();
+            break;
+        }
+    }
+    assert!(saw, "the LYC coincidence rise carries lyc_rise");
+    assert!(!p.take_lyc_rise(), "drained one-shot");
+
+    // The mode-2 line-start pulse is not a LYC rise.
+    let mut m2 = cgb();
+    m2.write(0xFF41, 0x20);
+    m2.write(0xFF40, 0x91);
+    run_to(&mut m2, 2, 455);
+    m2.take_lyc_rise();
+    assert_eq!(m2.tick() & 2, 2, "mode-2 pulse fires");
+    assert!(!m2.take_lyc_rise(), "the mode-2 pulse is not a LYC rise");
+
+    // Neither is the mode-0 source rise.
+    let mut m0 = cgb();
+    m0.write(0xFF41, 0x08);
+    m0.write(0xFF40, 0x91);
+    run_to(&mut m0, 2, 0);
+    m0.take_lyc_rise();
+    for _ in 0..456 {
+        if m0.tick() & 2 != 0 {
+            break;
+        }
+    }
+    assert!(!m0.take_lyc_rise(), "the mode-0 rise is not a LYC rise");
+}
+
 #[test]
 fn stat_write_bug_dmg_only() {
     let mut p = dmg();

@@ -62,6 +62,7 @@ impl Ppu {
             stat_update: crate::stat_update::StatUpdate::new(),
             lyc_interrupt_line: false,
             m0_rise: false,
+            lyc_rise: false,
             m0_access_flip: None,
             pal_access_flip: None,
             m0_stat_flip: None,

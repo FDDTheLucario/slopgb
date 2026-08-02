@@ -260,6 +260,14 @@ impl Ppu {
         std::mem::take(&mut self.m0_rise)
     }
 
+    /// Whether the STAT IF bit handed out by the last [`Self::tick`] came
+    /// from a pure-LYC coincidence rise. The interconnect drains this and
+    /// applies the same half-cycle halt law as [`Self::take_m0_rise`] (see
+    /// the `lyc_rise` field docs).
+    pub(crate) fn take_lyc_rise(&mut self) -> bool {
+        std::mem::take(&mut self.lyc_rise)
+    }
+
     /// The mode-3→mode-0 OAM/VRAM accessibility unblock's `lead_eighths`
     /// `Some(_)` if it fired on the dot just stepped, else `None` (see the
     /// `m0_access_flip` field docs). The interconnect stamps the edge at

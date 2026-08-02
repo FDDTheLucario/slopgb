@@ -331,6 +331,23 @@ pub struct Interconnect {
     halt_hdma: HaltHdmaState,
     /// Previous `hblank_active` level for the per-dot mode-0 edge detector.
     hdma_prev_hblank: bool,
+    /// This M-cycle's HBlank-DMA trigger commit phase (eighths), or `None` if
+    /// the level did not cross here. A CPU read whose own cycle flags the block
+    /// still yields the bus to it, but only when the trigger reaches the bus at
+    /// or before the read's [`ACCESS_PHASE`] sample — the pipe-end trigger
+    /// moves with SCX inside the cycle while every access samples at the one
+    /// phase. `hdma_start_1` reads its VRAM destination in the trigger's own
+    /// cycle and must see the untransferred `$00`;
+    /// `hdma_m0speedchange_late_m3wakeup_scx2_1` reads FF55 in the cycle its
+    /// post-STOP hblank flags the block and must see it retired. Cleared per
+    /// M-cycle by `reset_mcycle_edges`, so it never outlives its own cycle and
+    /// needs no save-state slot.
+    hdma_trigger_edge: Option<u8>,
+    /// The read in progress is the halt idle cycle's rolled-back prefetch, so
+    /// the trigger-phase hold does not apply to it (see
+    /// [`Bus::read_halt_idle`]). Scoped to one `Bus::read` call, never
+    /// observable across an M-cycle, so it takes no save-state slot.
+    hdma_idle_prefetch: bool,
     /// Re-entrancy guard: a VRAM DMA transfer is stalling the CPU and
     /// ticking the machine internally.
     vram_dma_stall: bool,
@@ -476,6 +493,8 @@ impl Interconnect {
             vram_dma_req: None,
             halt_hdma: HaltHdmaState::Low,
             hdma_prev_hblank: false,
+            hdma_trigger_edge: None,
+            hdma_idle_prefetch: false,
             vram_dma_stall: false,
             vram_dma_owns_bus: false,
             rp: 0,

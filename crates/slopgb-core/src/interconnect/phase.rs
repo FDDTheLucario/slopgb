@@ -82,6 +82,9 @@ pub(super) enum EdgeKind {
     /// The double-speed FF41 STAT mode-bit flip (`stat_mode_edge`); commits at
     /// the whole-M-cycle END phase, like `PalAccess`.
     StatMode,
+    /// The HBlank-DMA block request's trigger (`hdma_trigger_edge`), at its
+    /// dot-END eighth plus the block's own bus-arrival lead.
+    HdmaTrigger,
 }
 
 /// The commit phase (eighths of an M-cycle) of boundary event `kind` on the

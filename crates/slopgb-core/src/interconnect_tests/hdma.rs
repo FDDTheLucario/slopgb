@@ -18,6 +18,7 @@ fn gdma_steals_the_next_machine_cycle_plus_teardown() {
     assert_eq!(b.peek_no_io(0x8000), 0x00, "nothing copied yet");
     let before = b.cycles();
     b.tick(); // the steal precedes this op's own cycle
+    b.run_dma();
     assert_eq!(b.cycles() - before, (4 * 8 + 1 + 1) * 4, "stall + teardown");
     assert_eq!(b.peek_no_io(0x8000), 0x40);
     assert_eq!(b.peek_no_io(0x803F), 0x7F);
@@ -34,8 +35,10 @@ fn gdma_continues_from_incremented_addresses() {
     setup_gdma_regs(&mut b, 0xC000, 0x0000);
     b.write(0xFF55, 0x00); // one block
     b.tick();
+    b.run_dma();
     b.write(0xFF55, 0x00); // next block continues at +0x10
     b.tick();
+    b.run_dma();
     assert_eq!(b.read(0x8010), 0x10);
     assert_eq!(b.read(0x801F), 0x1F);
 }
@@ -54,9 +57,11 @@ fn hdma_partial_src_rewrite_blends_live_counter() {
     setup_gdma_regs(&mut b, 0xC000, 0x0000);
     b.write(0xFF55, 0x02); // 3 blocks: src counter is then 0xC030
     b.tick();
+    b.run_dma();
     b.write(0xFF51, 0xD0); // rewrite the high byte only
     b.write(0xFF55, 0x00); // 1 block: src 0xD030.., dst continues at 0x30
     b.tick();
+    b.run_dma();
     assert_eq!(b.read(0x8030), 0xA0, "live low byte kept: src 0xD030");
     assert_eq!(b.read(0x803F), 0xAF);
 }
@@ -78,6 +83,7 @@ fn gdma_invalid_sources_fill_destination_with_ff() {
         setup_gdma_regs(&mut b, src, 0x1800);
         b.write(0xFF55, 0x00); // one block
         b.tick();
+        b.run_dma();
         for i in 0..16 {
             assert_eq!(b.read(0x9800 + i), 0xFF, "src {src:04X} byte {i}");
         }
@@ -99,6 +105,7 @@ fn gdma_terminates_at_dest_0x10000_crossing() {
     setup_gdma_regs(&mut b, 0xC000, 0xFFF0);
     b.write(0xFF55, 0x01); // 2 blocks requested, only one fits
     b.tick();
+    b.run_dma();
     assert_eq!(
         b.peek_no_io(0x9FF0),
         0x40,
@@ -169,6 +176,7 @@ fn hblank_enable_with_lcd_off_copies_one_block_immediately() {
     setup_gdma_regs(&mut b, 0xC000, 0x0000);
     b.write(0xFF55, 0x81); // LCD is off
     b.tick();
+    b.run_dma();
     assert_eq!(b.peek_no_io(0x8000), 0x40);
     assert_eq!(b.peek_no_io(0x800F), 0x4F);
     assert_eq!(b.peek_no_io(0x8010), 0x00, "exactly one block");
@@ -194,9 +202,11 @@ fn hblank_enable_inside_window_fires_immediately() {
     b.write(0xFF40, 0x91);
     while !b.ppu.hblank_active() {
         b.tick();
+        b.run_dma();
     }
     b.write(0xFF55, 0x80); // 1 block, enabled mid-hblank
     b.tick();
+    b.run_dma();
     assert_eq!(b.peek_no_io(0x8000), 0x40);
     assert_eq!(b.read(0xFF55), 0xFF, "completed in the same hblank");
 }
@@ -218,6 +228,7 @@ fn hblank_enable_past_window_cutoff_waits() {
     assert!(b.ppu.hblank_active(), "still in the glitch line's hblank");
     b.write(0xFF55, 0x80); // PPU at dot 450: 2 dots left < 3-dot margin
     b.tick();
+    b.run_dma();
     assert_eq!(
         b.peek_no_io(0x8000),
         0x00,
@@ -272,6 +283,7 @@ fn hblank_block_race_has_machine_cycle_granularity() {
     ticks(&mut b, lead_ticks - 1);
     b.write(0xFF53, 0x90); // this op's tick contains the trigger
     b.tick(); // the steal happens here
+    b.run_dma();
     assert_eq!(b.peek_no_io(0x9000), 0x40, "write first: new dest");
     assert_eq!(b.peek_no_io(0x8000), 0x00);
 }
@@ -302,6 +314,7 @@ fn hblank_block_defers_while_core_clock_gated() {
     b.set_cpu_halted(false); // wake re-flags the deferred block
     let before = b.cycles();
     b.tick(); // the steal heads this op
+    b.run_dma();
     assert_eq!(b.cycles() - before, (8 + 1) * 4, "no teardown cycle");
     assert_eq!(b.peek_no_io(0x8000), 0x40);
     assert_eq!(b.read_no_tick(0xFF55), 0xFF);
@@ -321,9 +334,11 @@ fn halt_wake_inside_hblank_window_fires_block_once() {
     b.set_cpu_halted(true);
     while !b.ppu.hblank_active() {
         b.tick();
+        b.run_dma();
     }
     b.set_cpu_halted(false); // wake inside the window: block fires
     b.tick();
+    b.run_dma();
     assert_eq!(b.peek_no_io(0x8000), 0x40);
     // Re-arm inside the same hblank, halt, wake immediately: the halt
     // began inside the window (state High) — no retrigger.
@@ -332,6 +347,7 @@ fn halt_wake_inside_hblank_window_fires_block_once() {
     b.write(0xFF55, 0x80);
     // (the enable itself fired a request: let it run, then re-halt)
     b.tick();
+    b.run_dma();
     assert_eq!(b.peek_no_io(0x8010), 0x40);
 }
 
@@ -404,6 +420,7 @@ fn speed_switch_defers_pending_hblank_block_leaving_double_speed() {
         "block deferred across the pause"
     );
     b.tick();
+    b.run_dma();
     assert_eq!(b.peek_no_io(0x8000), 0x40);
     assert_eq!(b.read_no_tick(0xFF55), 0x00);
 }
@@ -427,11 +444,14 @@ fn vram_dma_steal_advances_oam_dma_capturing_the_bus() {
     }
     setup_gdma_regs(&mut b, 0x1000, 0x0000); // ROM pattern i ^ 0x5A
     b.write(0xFF46, 0xC0); // cycle W: OAM DMA from WRAM
-    ticks(&mut b, 5); // W+2..W+5 copy idx 0..3
-    b.write(0xFF55, 0x00); // W+6 copies idx 4, then flags 1 GDMA block
-    b.tick(); // steal: 8 M-cycles (idx 5..12 advance) + teardown (idx 13)
+    ticks(&mut b, 4); // W+2..W+4 copy idx 0..2
+    b.write(0xFF55, 0x00); // W+5 copies idx 3, then flags 1 GDMA block
+    b.tick(); // W+6 copies idx 4; the boundary below hosts the steal
+    // steal: 8 M-cycles (idx 5..12 advance) + teardown (idx 13)
+    b.run_dma();
     for _ in 0..160 {
         b.tick(); // let the transfer finish
+        b.run_dma();
     }
     let rom = |i: u8| i ^ 0x5A;
     // Positions copied normally before the steal, even slots: kept.
@@ -473,8 +493,10 @@ fn vram_dma_steal_capture_reaches_extra_oam_ram() {
     ticks(&mut b, 5);
     b.write(0xFF55, 0x00);
     b.tick();
+    b.run_dma();
     for _ in 0..170 {
         b.tick(); // transfer done, OAM idle again
+        b.run_dma();
     }
     // Captures land at odd offsets 0xA1..0xAF; the bits-3/4 alias
     // folds 0xA9/0xAB onto the 0xA1/0xA3 cells, so the later capture
@@ -499,11 +521,14 @@ fn vram_dma_steal_captures_every_byte_in_double_speed() {
     }
     setup_gdma_regs(&mut b, 0x1000, 0x0000);
     b.write(0xFF46, 0xC0);
-    ticks(&mut b, 5);
+    ticks(&mut b, 4);
     b.write(0xFF55, 0x00);
-    b.tick(); // steal: 16 M-cycles, one advance + capture per byte
+    b.tick(); // the boundary below hosts the steal
+    // steal: 16 M-cycles, one advance + capture per byte
+    b.run_dma();
     for _ in 0..160 {
         b.tick();
+        b.run_dma();
     }
     // All 16 block offsets captured — including 0..=4, whose earlier
     // normal copies are overwritten; positions 5..=20 advanced during
@@ -558,9 +583,11 @@ fn vram_dma_steal_counts_oam_dma_startup_delay() {
     setup_gdma_regs(&mut b, 0x1000, 0x0000);
     b.write(0xFF46, 0xC0); // cycle W: delay = 1 at commit
     b.write(0xFF55, 0x00); // W+1 ticks delay to 0, then flags the GDMA
-    b.tick(); // steal precedes this cycle: the start promotes inside it
+    // The steal lands on the boundary below; the start promotes inside it.
+    b.run_dma();
     for _ in 0..170 {
         b.tick();
+        b.run_dma();
     }
     // Steal advance 1 (2nd stolen byte, offset 1): promote, idx 0
     // consumed by the capture at OAM[1]. Advances 2..8: idx 1..7
