@@ -319,7 +319,7 @@ impl Interconnect {
             self.ppu.dsa_pause_correction();
         }
         self.engage_halt_gate(false);
-        self.vram_dma_unhalt();
+        self.vram_dma_unhalt(false);
         true
     }
 

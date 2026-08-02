@@ -156,12 +156,16 @@ service by `VramDmaReq::HblankUnhalt` (either polarity, only swaps
 `hdma_transition_ei_halt_late_unhalt_scx1_1` against its `_2`), and servicing at
 the speed-switch pause's end (breaks that same `_1`).
 
-#### The halt snapshot trails the line wrap by two dots (2026-08-02)
+#### The halt window trails the line wrap by two dots (2026-08-02)
 
-`Ppu::hdma_period_halt`. The halt-entry snapshot that decides whether a wake may
-re-trigger the armed HBlank block (`HaltHdmaState::High` = already serviced, no
-wake block) is `hdma_period_law` with the line wrap lagged **two raw dots**: a
-halt in a line's first two dots still counts the hblank it just left.
+`Ppu::hdma_period_halt` — `hdma_period_law` with the line wrap lagged **two raw
+dots** — is the window both ends of a halt use for the armed HBlank block. At
+the halt entry it decides whether the wake may re-trigger (`HaltHdmaState::High`
+= already serviced, no wake block); at the halt wake it decides whether the
+`Low` snapshot fires one. Both readings are the same statement: the hblank a
+line just left is still open for two dots after the wrap.
+
+##### The halt entry
 
 The four `hdma_late_m0halt*` `_1`/`_2` pairs pin it two-sided at both speeds and
 under an LCD-enable shift. All eight share one LYC=1 timer ISR (`$1000`: a NOP
@@ -194,6 +198,26 @@ M-cycle past the wrap, so it also suppresses `_ds_lcdoffset1_2`,
 `_lcdoffset3_2` and `hdma_late_m3halt_m0unhalt_scx2_2` — traced with an FF55
 read hook, SameBoy prints `00` where all three want `FF`. Porting `STAT & 3`
 verbatim scores +3/−5; the two-dot window scores **+3/−0**.
+
+##### The halt wake, and only the halt wake
+
+`hdma_late_m0unhalt[_ds]_{1,2}` pin the same two dots from the other side. Their
+ISR turns the LCD *on* (`LCDC = $91` at `$1110`), zeroes HDMA1-4, arms `HDMA5 =
+$80` — one block — then `xor a; ldh ($0F),a; HALT; nop; ldh a,($55)`. `_2` is
+`_1` plus one NOP *before* the LCD-on, so the PPU frame lags 4 dots against the
+timer-anchored wake, putting the wake at ly 2 dot 0 for `_2` and dot 4 for `_1`.
+`00` = no block by the read, `FF` = one. `_2` wants `FF`, so a wake at dot 0
+fires the block it is leaving and a wake at dot 4 does not — the same boundary,
+read as "still inside" instead of "already counted".
+
+The lag applies to the halt wake only. `vram_dma_unhalt` also serves the
+speed-switch pause exit, which lands at dot 1 of a visible line in
+`hdma_late_m3speedchange_tima_scx1_ds_{1,2}`; their TIMA count needs the block
+at that line's own mode-0 entry (probed: dot 257, not the exit's dot 5), so the
+pause exit keeps the un-lagged `hdma_period_law`. The two exits already differ
+the same way over the OAM-DMA catch-up M-cycle (see "Catch-up M-cycle on
+resume"). Sharing the lagged window with the pause exit scores +2/−2; scoping it
+to the halt wake scores **+2/−0**.
 
 - **Refuted: a one-dot-lagged HBlank-window snapshot.** A `hdma_period_prev`
   shadow OR'd into the snapshot moved no row — one dot does not reach `_1`'s

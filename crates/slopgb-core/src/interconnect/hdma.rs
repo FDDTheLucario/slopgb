@@ -121,12 +121,28 @@ impl Interconnect {
     /// deferred request re-flags (without the teardown cycle), and an
     /// armed transfer whose halt began outside the hblank window fires if
     /// the wake lands inside one.
-    pub(super) fn vram_dma_unhalt(&mut self) {
+    ///
+    /// `halt_wake` picks the window. A halt wake takes the wrap-lagged one
+    /// ([`Ppu::hdma_period_halt`]): waking in a line's first two dots still
+    /// lands inside the hblank it is leaving, which fires
+    /// `hdma_late_m0unhalt[_ds]_2`'s block before its FF55 read while `_1`,
+    /// one M-cycle later at dot 4, reads before any block. The speed-switch
+    /// pause exit keeps the un-lagged window: it lands at dot 1 of a visible
+    /// line in `hdma_late_m3speedchange_tima_scx1_ds_{1,2}`, whose TIMA count
+    /// needs the block at that line's own mode-0 entry instead. The two exits
+    /// already differ over the OAM-DMA catch-up M-cycle the same way
+    /// (docs/hardware-state/dma.md).
+    pub(super) fn vram_dma_unhalt(&mut self, halt_wake: bool) {
+        let in_window = if halt_wake {
+            self.ppu.hdma_period_halt()
+        } else {
+            self.ppu.hdma_period_law()
+        };
         match self.halt_hdma {
             HaltHdmaState::Requested => self.vram_dma_req = Some(VramDmaReq::HblankUnhalt),
             HaltHdmaState::Low
                 if self.hdma_mode == HdmaMode::ArmedLcdOn
-                    && (self.ppu.hdma_period_law() || self.ppu.m0_stat_flip_reached()) =>
+                    && (in_window || self.ppu.m0_stat_flip_reached()) =>
             {
                 self.vram_dma_req = Some(VramDmaReq::Hblank);
             }

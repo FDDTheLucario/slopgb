@@ -270,7 +270,7 @@ impl Interconnect {
             // the next machine cycle's head, so this is indistinguishable
             // from the regular deferred commit to the scan.
             self.oam_dma_commit_pending();
-            self.vram_dma_unhalt();
+            self.vram_dma_unhalt(true);
         }
     }
 

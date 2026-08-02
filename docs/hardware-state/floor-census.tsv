@@ -58,8 +58,6 @@ gambatte/dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_4_cgb04c_out03.gbc [Cgb]	gamba
 gambatte/dma/hdma_late_enable_ds_1_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/dma	Cgb	0	1	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_late_enable_lcdoffset3_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	1	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_late_if_and_ie_halt_1_cgb04c_out00.gbc [Cgb]	gambatte	gambatte/dma	Cgb	02	00	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/hdma_late_m0unhalt_2_cgb04c_outFF.gbc [Cgb]	gambatte	gambatte/dma	Cgb	00	FF	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/hdma_late_m0unhalt_ds_2_cgb04c_outFF.gbc [Cgb]	gambatte	gambatte/dma	Cgb	00	FF	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_late_m3halt_m2unhalt_inc_scx1_2_cgb04c_out02.gbc [Cgb]	gambatte	gambatte/dma	Cgb	01	02	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_late_m3halt_m2unhalt_inc_scx2_2_cgb04c_out02.gbc [Cgb]	gambatte	gambatte/dma	Cgb	01	02	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_late_m3halt_m2unhalt_ly_scx1_4_cgb04c_out03.gbc [Cgb]	gambatte	gambatte/dma	Cgb	02	03	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not

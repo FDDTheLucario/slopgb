@@ -188,10 +188,11 @@ impl Ppu {
         self.hdma_trigger_level() && ll == self.line && ld + 3 < len
     }
 
-    /// The halt-entry view of [`Self::hdma_period_law`]: the same window with
-    /// the line wrap lagged 2 dots, so a halt in a line's first two dots still
-    /// counts the hblank it just left as already serviced and the wake does not
-    /// re-trigger it.
+    /// The halt view of [`Self::hdma_period_law`]: the same window with the
+    /// line wrap lagged 2 dots, because the hblank a line just left stays open
+    /// for two dots past the wrap. Read at the halt entry that means the block
+    /// already went (no wake re-trigger); read at the halt wake it means one
+    /// still fires (`Interconnect::vram_dma_unhalt`, halt wake only).
     ///
     /// The four `hdma_late_m0halt*` `_1`/`_2` pairs pin the two-dot boundary at
     /// both speeds and under an LCD-enable shift: `_1` halts at dot 0 (`_1`,

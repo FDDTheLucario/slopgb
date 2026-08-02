@@ -627,3 +627,35 @@ fn halt_at_a_line_wrap_still_counts_the_hblank_it_left() {
         assert_eq!(b.halt_hdma, want, "halt snapshot at ly 2 dot {dot}");
     }
 }
+
+/// The wake-side window carries the same two-dot wrap lag, and only on the
+/// halt wake: waking in a line's first two dots still lands inside the hblank
+/// it is leaving and fires the armed block (gambatte
+/// `hdma_late_m0unhalt_2`), while a wake one M-cycle later at dot 4 does not
+/// (`_1`). The speed-switch pause exit keeps the un-lagged window
+/// (`hdma_late_m3speedchange_tima_scx1_ds_{1,2}`).
+#[test]
+fn only_the_halt_wake_carries_the_line_wrap_lag() {
+    for (dot, halt_wake, want) in [(0u16, true, true), (4, true, false), (0, false, false)] {
+        let mut b = ic_cgb_mode();
+        b.write(0xFF40, 0x80); // LCD on
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF55, 0xFF); // arm the HBlank engine, 128 blocks
+        for _ in 0..600 {
+            if b.ppu.line_dot() == (2, dot) {
+                break;
+            }
+            b.tick();
+            b.run_dma();
+        }
+        assert_eq!(b.ppu.line_dot(), (2, dot), "reached ly 2 dot {dot}");
+        b.halt_hdma = HaltHdmaState::Low;
+        b.vram_dma_req = None;
+        b.vram_dma_unhalt(halt_wake);
+        assert_eq!(
+            b.vram_dma_req.is_some(),
+            want,
+            "ly 2 dot {dot}, halt_wake {halt_wake}"
+        );
+    }
+}

@@ -534,14 +534,12 @@ gambatte/window/on_screen/wxA6_wy01_weoff_ly02_weon_ly60.gbc [Dmg]
 # speed M-cycle), unrepresentable under the whole-dot timing contract.
 #
 # * ch2_nr52 *a phases + late_m3speedchange/tima/read_hdmadst00/_hdma5 +
-#   m3wakeup/m0unhalt/late_enable/oamdma speedchange rows: pause-end and
+#   m3wakeup/late_enable/oamdma speedchange rows: pause-end and
 #   wake alignment, one half-cell off.
 # * hdma_vs_m0int_pc_scx1_1: bus steal inside an opcode-fetch cycle vs
 #   the interrupt dispatch sample (traded for the hdma_start_2 family).
 # * lcd_offset/offset3_lyc99int_m0stat_count_scx1_2: traded for its
 #   offset1_*_scx2_2 sibling.
-gambatte/dma/hdma_late_m0unhalt_2_cgb04c_outFF.gbc [Cgb]
-gambatte/dma/hdma_late_m0unhalt_ds_2_cgb04c_outFF.gbc [Cgb]
 gambatte/dma/hdma_late_m3speedchange_hdma5_scx1_ds_2_cgb04c_outFF.gbc [Cgb]
 gambatte/dma/hdma_late_m3speedchange_hdma5_scx2_ds_2_cgb04c_outFF.gbc [Cgb]
 gambatte/dma/hdma_late_m3speedchange_read_hdmadst00_scx1_ds_2_cgb04c_out9F.gbc [Cgb]
