@@ -59,7 +59,16 @@ The completed-addend negate-clear kill uses the **E form** of the old-negate bit
   Entering double speed, and a non-switching (deep) STOP, keep the ordinary
   `Apu::div_write` falling-edge test. Unit test:
   `leaving_double_speed_restarts_div_without_a_frame_event`.
-- Residual in that family: the six `speedchange{,2,5}_ch2_nr52*` `a` rungs whose
-  length clock lands exactly one M-cycle before the reference's (delta 0 where
-  the passing siblings show +2 dots) — all bucketed EXCEED, SameBoy misses them
+- Residual in that family, measured and two-sided — do not retry a uniform
+  shift. The `a`/`b` pair brackets the expiry to one M-cycle, so the demanded
+  off-cycle is exactly the `b` read. Probing the ch2-off cycle against the NR52
+  read cycle: every single-speed rung lands on it, and so do
+  `speedchange3_ch2_nr52_{1,2}` in double speed, but the six double-speed rungs
+  of `speedchange{,5}` and `speedchange2_ds` land one M-cycle early (their `a`
+  read shows delta 0 where the correct rungs show +2). Shifting the
+  double-speed length clock one M-cycle later fixes those six and breaks
+  `speedchange3_ch2_nr52_{1,2}b`, which already sit on the boundary — +6/−2. The
+  split is not the switch count either (1 and 5 are early, 3 is correct), so it
+  is the sub-M-cycle phase the pause end lands on, which the whole-M-cycle pause
+  quantises per configuration. All six are bucketed EXCEED; SameBoy misses them
   too.
