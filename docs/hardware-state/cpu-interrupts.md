@@ -26,6 +26,41 @@ block:
 - The whole dispatch holds any flagged VRAM-DMA block — see
   [`dma.md`](dma.md).
 
+### The LYC-anchor halt-wake dot (open, CGB single speed)
+
+Measured, not swept — `SB_TRACE` `SBIF su`/`SBWAKE`/`SBACK`/`SBDISP` against a
+probe on `Interconnect::ack_impl` + the FF41 read, on
+`gambatte/dma/{gdma_cycles_short,gdma_cycles_long,hdma_cycles}_{1,2}` (LYC 153 /
+144 / 1). SameBoy's `fp = absolute_debugger_ticks − display_cycles` is the PPU's
+own position; the CPU's is `fp + dc`, and an `SBMODE cfl=257` line calibrates
+both into `cfl`.
+
+| anchor | SameBoy LYC rise | SameBoy dispatch | our rise (dot, cc) | our ack |
+|---|---|---|---|---|
+| LYC 1 | PPU cfl 0 | cfl 30 | dot 4, cc 4 | dot 20 |
+| LYC 144 | PPU cfl 0 | cfl 30 | dot 4, cc 4 | dot 20 |
+| LYC 153 | PPU cfl 0 | cfl 30 | dot 6, cc 2 | dot 24 |
+
+SameBoy's dispatch dot does not move with the anchor line; ours splits by 4 dots,
+and that 4 dots is the whole `gambatte/lyc-anchor` residual (the ISR's single FF41
+read lands at 244/248 instead of 248/252 — see [`dma.md`](dma.md)).
+
+The split is an M-cycle snap, not a rise-dot error: our line-153 rise falls in the
+first half of its M-cycle (cc 2) and wakes the halt at once, while the ordinary
+lines' rise falls in the second half (cc 4). `Ppu::stat_update_halt_masks` gives the
+second-half halt-late mask to the mode-2 OAM rise (`stat_halt_late`) and the mode-0
+HBlank rise (`m0_rise`) but to a **pure-LYC rise it gives none**, so the ordinary
+anchors wake one M-cycle early.
+
+Giving a pure-LYC rise the same second-half law (a `lyc_rise` flag drained in
+`fold_ppu_events` against `obs_pre_edge(MID_PHASE, event_phase(EdgeKind::M0Rise,
+cc, 0))`, scoped to CGB single speed) moves every anchor to dot 24 and scores
+**+13/−5** over the corpus. Not shipped: the five are currently green —
+`hdma_late_{destl,length,wrambank}_1`, `hdma_start_scx{2,3}_1` — and they lose
+because the +4 walks their observation into the HBlank-DMA service M-cycle, which
+is a second, independent offset (`dma.md`, "the HBlank service lag"). The two land
+together or not at all.
+
 ## Dispatch-ack source sync-ahead
 
 `Interconnect::ack` + `ack_squash_*` (gambatte memory.cpp `Memory::ackIrq`). The dispatch's IF clear syncs the acked bit's source slightly past the ack point first, so a hardware re-set due just after the clear is consumed by it.

@@ -124,6 +124,41 @@ only the read-side post-tick service scores 75 — the read side is pinned by
 Both directions are load-bearing, so the split is below the M-cycle: the FF55
 write commits in its cycle's second half while the VRAM read samples at the end.
 
+#### The HBlank service lag (2026-08-01)
+
+The "genuine conflict" above was derived with the STAT dispatch 4 dots early — see
+[`cpu-interrupts.md`](cpu-interrupts.md) "The LYC-anchor halt-wake dot". Traced
+against SameBoy on the shared LYC=1 kernel, in `cfl` on line 1, SCX 0:
+
+| event | SameBoy | ours | Δ |
+|---|---|---|---|
+| STAT dispatch (`SBACK`) | 30 | 24 | −6 |
+| `HDMA5 = $80` arm | 64 | 60 | −4 |
+| `hdma_late_disable_1` cancel | 256 | 252 | −4 |
+| mode-0 entry | 257 | 251 | −6 |
+| `hdma_late_disable_2` cancel | 261 | 256 | −5 |
+| block runs (`SBWHDMA run`) | 264 | 256 | −8 |
+
+Every event is a rigid −4..−6 translate of SameBoy's except the service, which is
+−8: SameBoy runs the block **two** M-cycles after the trigger, we run it at the
+head of the next bus operation. Both cancels straddle the trigger the same way in
+either emulator, so the trigger dot itself is right — dropping the `hdma_lead`
+one-dot lead recovers nothing. What is missing is the extra M-cycle between
+flagging and stealing the bus, which is exactly what keeps `hdma_start_1`'s VRAM
+read out of the block's cycle.
+
+Holding a flagged HBlank request one extra M-cycle before `service_vram_dma` takes
+it, **together with** the pure-LYC halt-late law, scores **+17/−11** and recovers
+`hdma_start[_ds,_ly0,_scx5,_scx5_ds]_1` — the `ours = 7` blocked-read rows — plus
+the four `lyc-anchor` SCX-0/5 rungs and five `hdma_late_disable/enable_2`. The
+eleven lost are currently green and cluster on the dispatch-hold seam
+(`irq_precedence/late_hdma_vs_{ei,ie,tima}_scx{1,2}`, `hdma_vs_m0_scx1`) plus
+`hdma_transition_{oamdma_2,halt_hdmadst_unhalt}` and
+`hdma_late_m3speedchange_tima_scx1_ds_{5,6}`: the dispatch hold already defers the
+steal to the handler's first opcode fetch, so a blanket extra M-cycle
+double-counts there. A hold that does not stack with `dma_dispatch_hold` is the
+next thing to derive.
+
 - **Disproven: SameBoy's whole placement (service only after an opcode fetch).** It recovers the `late_hdma_vs_*` family and `hdma_{start_ly0,pc_7ffe}` but breaks the M-cycle-granular races the head placement models (`hdma_late_{destl,length,wrambank}_2`, `hdma_start[_scx*]_2`, `hdma_transition_{oamdma,halt_hdmadst_unhalt}`) — ~15 recovered for ~11 lost. Only the dispatch-hold half of it is kept above.
 - **Parked: SameBoy-derived VRAM wrap** — the old wrap behavior; superseded by terminating at the 0x10000 crossing (no VRAM wrap), per gambatte `dma_dst_wrap_2`.
 - **Parked: chasing the residual `_2`/`a-phase` parity rows with whole-dot timing** — these are documented swaps in `baselines/gambatte.txt`; they need sub-M-cycle phase, so whole-dot timing won't close them.

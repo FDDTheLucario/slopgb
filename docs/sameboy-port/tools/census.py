@@ -262,9 +262,10 @@ _LYC_ANCHOR = (
 )
 
 # `ours = 7` is `$FF & 7`: these read VRAM $8000 through `and 7`, so a 7 is a
-# BLOCKED read, not a transferred byte. They fail on the mode-3 VRAM release,
-# not on the DMA seam. Left in the dma cluster — the arming is what puts the
-# read at that dot — but the value needs saying, or the row reads as nonsense.
+# BLOCKED read, not a transferred byte. The block is serviced inside the read's
+# own M-cycle and steals it; SameBoy runs it two M-cycles after the trigger
+# (traced: mode-0 entry cfl 257, run cfl 264), so the lever is the service lag,
+# not the mode-3 VRAM release. Both rows recover when that M-cycle is held.
 _BLOCKED_VRAM = (
     'gambatte/dma/hdma_start_1_cgb04c_out0.gbc',
     'gambatte/dma/hdma_start_scx5_1_cgb04c_out0.gbc',
@@ -273,12 +274,15 @@ _BLOCKED_VRAM = (
 DERIVED = {}
 for _rel in _LYC_ANCHOR:
     DERIVED[_rel] = ('gambatte/lyc-anchor',
-                     'derived: the LYC anchor dispatch dot, not the DMA '
-                     '(the transfer span is exact) — see dma.md')
+                     'derived: the LYC anchor dispatch dot, not the DMA (the '
+                     'transfer span is exact) — a pure-LYC STAT rise carries no '
+                     'second-half halt-late mask, so the ordinary-line anchors '
+                     'wake one M-cycle early — see cpu-interrupts.md')
 for _rel in _BLOCKED_VRAM:
-    DERIVED[_rel] = (None,
-                     'derived: ours 7 is $FF & 7, a BLOCKED VRAM read — this '
-                     'is the mode-3 VRAM release, not the DMA — see dma.md')
+    DERIVED[_rel] = ('gambatte/hdma-service-lag',
+                     'derived: ours 7 is $FF & 7, a BLOCKED VRAM read — the '
+                     'block is serviced in the read\'s own M-cycle; SameBoy '
+                     'holds it one M-cycle longer — see dma.md')
 
 
 def adjudicate(rel, prov, sb):
