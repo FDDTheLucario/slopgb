@@ -907,6 +907,12 @@ pub struct Ppu {
     /// (`commit_eff`, `regs/stage.rs`), confirmed by probe (forcing it off
     /// changes `golden_fingerprint`, the gambatte bgtilemap rows).
     render_lcdc_pending: Option<(u8, u8)>,
+    /// LCDC.1 history, one bit per PPU dot, bit 0 = this dot: the object
+    /// fetcher needs the whole [`OBJ_ENABLE_LAG`]-dot run set rather than the
+    /// live level, so an OBJ enable reaches a sprite only if it landed that
+    /// many dots before the sprite's fetch trigger
+    /// (see [`Self::obj_fetch_enabled`]).
+    obj_en_lag: u8,
 
     render: Render,
 
@@ -931,6 +937,14 @@ pub struct Ppu {
 /// at the write's leading edge (cc+0), the render fetch grid is calibrated
 /// +4 late, so the addressing view re-commits this many `Ppu::tick`s later.
 const RENDER_LCDC_DELAY: u8 = 3;
+
+/// How far each side of a sprite's fetch trigger dot the OBJ-enable bit still
+/// decides that fetch, in PPU dots: LCDC.1 must be set for the whole run of
+/// this many dots ending on the trigger ([`Ppu::obj_fetch_enabled`]), and a
+/// clear this many dots after it still aborts a fetch already charged
+/// (`Ppu::stall_tick`). Both edges are pinned two-sided by the gambatte
+/// `sprite_late_*_spx18..1B` ladders.
+const OBJ_ENABLE_LAG: u8 = 4;
 
 fn pixel_buffer(fill: u32) -> Box<[u32; SCREEN_PIXELS]> {
     vec![fill; SCREEN_PIXELS]

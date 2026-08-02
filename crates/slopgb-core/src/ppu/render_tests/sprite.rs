@@ -95,6 +95,45 @@ fn sprites_disabled_no_penalty() {
     assert_eq!(render_line(&mut p, 3), 254);
 }
 
+/// LCDC.1 reaches the object fetcher over a window straddling each sprite's
+/// fetch trigger, not at the trigger dot alone: it must have been set for the
+/// whole `OBJ_ENABLE_LAG`-dot run ending there, and a clear up to
+/// `OBJ_ENABLE_LAG` dots after it still cancels the fetch. Both edges are
+/// pinned two-sided by the gambatte `sprite_late_enable_spx*` /
+/// `sprite_late_disable_spx*` / `sprite_late_late_disable_spx*` ladders.
+#[test]
+fn obj_enable_window_straddles_the_sprite_fetch_trigger() {
+    // One sprite at X=24: it triggers at line dot 113 and costs 6 + 5 dots,
+    // moving the mode-0 flip from the bare 254 to 264.
+    // `dot` is the first dot the render step sees the new LCDC: `run_to`
+    // returns with that dot's predecessor already stepped.
+    fn flip(start: u8, write: Option<(u16, u8)>) -> u16 {
+        let mut p = dmg_on(start);
+        sprite(&mut p, 0, 19, 24, 0, 0);
+        if let Some((dot, value)) = write {
+            run_to(&mut p, 3, dot - 1);
+            p.write(0xFF40, value);
+            finish_line(&mut p)
+        } else {
+            render_line(&mut p, 3)
+        }
+    }
+    assert_eq!(flip(0x93, None), 264, "OBJ on all line: full object stall");
+    assert_eq!(flip(0x91, None), 254, "OBJ off all line: bare line");
+
+    // Enabling must land 4 dots before the trigger to reach the sprite.
+    assert_eq!(flip(0x91, Some((109, 0x93))), 264);
+    assert_eq!(flip(0x91, Some((110, 0x93))), 254);
+
+    // A clear on the trigger dot itself closes the same window, so the fetch
+    // never starts; one landing inside the following 4 dots cancels a fetch
+    // already charged, leaving the pipeline restarting on the next dot.
+    assert_eq!(flip(0x93, Some((113, 0x91))), 254);
+    assert_eq!(flip(0x93, Some((114, 0x91))), 256);
+    assert_eq!(flip(0x93, Some((117, 0x91))), 259);
+    assert_eq!(flip(0x93, Some((118, 0x91))), 264);
+}
+
 #[test]
 fn sprite_pixels_palettes_transparency() {
     let mut p = dmg_on(0x93);

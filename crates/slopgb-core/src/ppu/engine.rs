@@ -120,6 +120,7 @@ impl Ppu {
             },
             staged: None,
             render_lcdc_pending: None,
+            obj_en_lag: 0,
             render: Render::new(),
             front: pixel_buffer(0xFF_FFFF),
             back: pixel_buffer(0xFF_FFFF),
@@ -215,6 +216,9 @@ impl Ppu {
             self.line = if self.line == 153 { 0 } else { self.line + 1 };
             self.start_line();
         }
+        // One dot of LCDC.1 history for the object fetcher's delayed view,
+        // pushed before this dot's render step so bit 0 is this dot's level.
+        self.obj_en_lag = (self.obj_en_lag << 1) | u8::from(self.eff.lcdc & LCDC_OBJ_ENABLE != 0);
         self.step_dot();
         // Maintain the decoupled interrupt-facing mode (`mode_for_interrupt`),
         // consulted by the STAT engine on the very next line. Runs after

@@ -23,7 +23,7 @@
 
 use super::{
     LCDC_BG_ENABLE, LCDC_BG_MAP, LCDC_OBJ_ENABLE, LCDC_OBJ_SIZE, LCDC_TILE_DATA, LCDC_WIN_ENABLE,
-    LCDC_WIN_MAP, Ppu,
+    LCDC_WIN_MAP, OBJ_ENABLE_LAG, Ppu,
 };
 use crate::SCREEN_W;
 use crate::model::Model;
@@ -181,6 +181,13 @@ pub(super) struct Render {
     /// (the bare `259+SCX&7` exit does not carry the sprite penalty).
     pub(super) n_sprites: u8,
     fetched: u16,
+    /// Dots left in the newest object fetch's abort window, counting the
+    /// trigger dot: while non-zero an LCDC.1 clear cancels the fetch
+    /// (`Ppu::stall_tick`). 0 outside a cancellable fetch.
+    obj_abort: u8,
+    /// `sprites` slot the open abort window belongs to. Meaningless while
+    /// `obj_abort` is 0.
+    obj_abort_slot: u8,
     /// BG tiles that already paid the first-sprite alignment penalty,
     /// keyed by (x + SCX) / 8.
     penalty_tiles: u64,
@@ -316,6 +323,8 @@ impl Render {
             sprites: [Sprite::default(); 10],
             n_sprites: 0,
             fetched: 0,
+            obj_abort: 0,
+            obj_abort_slot: 0,
             penalty_tiles: 0,
             sp_fifo: [EMPTY_SPRITE_PIXEL; 8],
             win_active: false,
@@ -382,6 +391,8 @@ impl Ppu {
         r.win_mode = false;
         r.first_discard = true;
         r.fetched = 0;
+        r.obj_abort = 0;
+        r.obj_abort_slot = 0;
         r.penalty_tiles = 0;
         r.sp_fifo = [EMPTY_SPRITE_PIXEL; 8];
         r.win_active = false;
@@ -436,7 +447,19 @@ impl Ppu {
         }
     }
 
-    /// One mode-3 dot.
+    /// Whether the object fetcher may start a fetch on this dot: LCDC.1 must
+    /// have been set for the whole window of [`OBJ_ENABLE_LAG`] dots ending
+    /// here, because the fetch is decided that far ahead of the output
+    /// position reaching the sprite. The gambatte `sprite_late_enable_spx*`
+    /// ladder pins the width two-sided — the `_1` rungs enable 4-7 dots before
+    /// the trigger and pay the object stall, the `_2` rungs enable 0-3 dots
+    /// before it and pay none. The mixer's OBJ-enable gate and the STAT read
+    /// laws keep the live view; only the fetch/length side takes this one.
+    pub(in crate::ppu) fn obj_fetch_enabled(&self) -> bool {
+        let window = (1u8 << (OBJ_ENABLE_LAG + 1)) - 1;
+        self.obj_en_lag & window == window
+    }
+
     /// Commit the sprite the fetch loop just picked at slot `i`: charge the
     /// object-fetch base + per-sprite X penalty onto `stall`, mark it fetched
     /// and run the fetch. The identical tail of both the prefill and mid-line
@@ -448,6 +471,10 @@ impl Ppu {
         let wait = self.sprite_penalty(s.x);
         self.fetch_sprite(i);
         self.render.stall += base + wait;
+        // Open this fetch's abort window (see `Ppu::stall_tick`): it stays
+        // cancellable on this dot and the next `OBJ_ENABLE_LAG`.
+        self.render.obj_abort = OBJ_ENABLE_LAG + 1;
+        self.render.obj_abort_slot = i as u8;
     }
 
     pub(super) fn render_step(&mut self) {
@@ -533,7 +560,7 @@ impl Ppu {
                 // docs/hardware-state/ppu-render.md.
                 self.render.fetch_x = self.render.fetch_x.wrapping_sub(1);
             }
-            if self.eff.lcdc & LCDC_OBJ_ENABLE != 0 {
+            if self.obj_fetch_enabled() {
                 loop {
                     let mut pick: Option<usize> = None;
                     for i in 0..usize::from(self.render.n_sprites) {
@@ -580,7 +607,7 @@ impl Ppu {
         // (Pan Docs "Drawing priority": smaller X = higher priority, OAM
         // order only breaks ties).
         let fine_scrolling = !self.render.win_mode && !self.render.hunt_done;
-        if self.eff.lcdc & LCDC_OBJ_ENABLE != 0
+        if self.obj_fetch_enabled()
             && self.render.bg_count > 0
             && self.render.discard == 0
             && !fine_scrolling
@@ -764,6 +791,8 @@ impl Render {
         }
         w.u8(self.n_sprites);
         w.u16(self.fetched);
+        w.u8(self.obj_abort);
+        w.u8(self.obj_abort_slot);
         w.u64(self.penalty_tiles);
         for p in &self.sp_fifo {
             p.write_state(w);
@@ -813,6 +842,8 @@ impl Render {
         }
         self.n_sprites = r.u8()?;
         self.fetched = r.u16()?;
+        self.obj_abort = r.u8()?;
+        self.obj_abort_slot = r.u8()?;
         self.penalty_tiles = r.u64()?;
         for p in &mut self.sp_fifo {
             p.read_state(r)?;

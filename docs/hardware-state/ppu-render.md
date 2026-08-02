@@ -48,6 +48,24 @@ Parked: chasing the residual late_sp `_ds` out3 rows (half-dot, cc-granular race
 
 - Every fetch VRAM access samples `eff` clean at its read dot on **both** families, except the two scroll registers, which are read from per-dot rings at a lead (`map_scx_formed` for the column, `map_scy_formed` for the row — see "Mid-mode-3 SCY" below).
 - LCDC.1 gates sprite pixels at the mix as well as the fetch (m3_lcdc_obj_en_change).
+- The fetch-side LCDC.1 gate is a **window straddling each sprite's fetch
+  trigger dot `F`, not a sample at `F`** (`OBJ_ENABLE_LAG` = 4 dots, `ppu/mod.rs`):
+  the bit must have been set for all of `F-4..=F` for the fetch to start
+  (`Ppu::obj_fetch_enabled`, off the per-dot `obj_en_lag` history), and a clear
+  landing anywhere in `F..=F+4` still cancels a fetch already charged
+  (`Ppu::stall_tick` → `abort_obj_fetch`). A cancelled fetch drops its stall to
+  1 remaining dot, un-marks its own `fetched` slot, and takes its pixels back
+  out of the sprite FIFO (a fetch that never completes never pushed them —
+  m3_lcdc_obj_en_change [Cgb] is the pin for the pixel half).
+  Both edges and the 1-dot restart are pinned two-sided by three gambatte
+  ladders over SPX $18-$1B, whose kernels move one write by one NOP per rung:
+  `sprite_late_enable_spx*` (enable 4-7 dots before `F` pays the stall, 0-3
+  dots before pays none), and `sprite_late_disable_spx*` +
+  `sprite_late_late_disable_spx*`, which between them sweep the clear from
+  `F-3` to `F+8` and keep the penalty only from `F+5` on. The two disable
+  ladders read STAT one M-cycle apart, so the same clear offset appears in both
+  with opposite demands — that pair is what fixes the restart cost at 1 dot and
+  rules out a full refund. Unit test: `obj_enable_window_straddles_the_sprite_fetch_trigger`.
 - Sprites with OAM X 0-7 fetch during the pause-aware prefill walk (`prefill_pos`), freezing the SCX hunt (gambatte spx0/spx1); penalty math unchanged (mooneye tables frozen).
 - The BG fetcher free-runs through every sprite stall (prefill included), with the line's first push waiting for the pause-aware startup walk (`push_allowed`), keeping pixel 0 on its stall-shifted dot.
 

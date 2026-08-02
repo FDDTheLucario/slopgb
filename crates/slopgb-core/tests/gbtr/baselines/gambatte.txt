@@ -491,11 +491,6 @@ gambatte/sprites/space/10spritesPrLine_wx3_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/space/10spritesPrLine_wx4_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/space/10spritesPrLine_wx5_m3stat_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/sprites/space/1pos8_8pos9_wx08_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/sprite_late_enable_spx18_2_dmg08_out0.gb [Dmg]
-gambatte/sprites/sprite_late_late_disable_spx18_1_dmg08_out0.gb [Dmg]
-gambatte/sprites/sprite_late_late_disable_spx19_1_dmg08_out0.gb [Dmg]
-gambatte/sprites/sprite_late_late_disable_spx1A_1_dmg08_out0.gb [Dmg]
-gambatte/sprites/sprite_late_late_disable_spx1B_1_dmg08_out0.gb [Dmg]
 # (tima/ + div/ + serial/trigger_int8 cleared 2026-06: the late_retrigger
 # DMG/CGB splits are the dispatch-ack source sync-ahead — gambatte
 # Memory::ackIrq, see Interconnect::ack — and tc00_start_2/div/start_inc
@@ -541,8 +536,6 @@ gambatte/window/on_screen/wxA6_wy01_weoff_ly02_weon_ly60.gbc [Dmg]
 # window/late_disable_spx10). What remains is sub-dot residue of those
 # models; documented as swaps rather than reverted.
 gambatte/sprites/late_sizechange_sp39_2_dmg08_out0_cgb04c_out3.gbc [Cgb]
-gambatte/sprites/sprite_late_enable_spx1A_2_dmg08_out0.gb [Dmg]
-gambatte/sprites/sprite_late_enable_spx1B_2_dmg08_out0.gb [Dmg]
 
 # Speed-switch / HDMA rework residuals (documented strictly-more-accurate
 # swaps): the STOP pause (gambatte cc+0x20000+4), the gambatte-shaped

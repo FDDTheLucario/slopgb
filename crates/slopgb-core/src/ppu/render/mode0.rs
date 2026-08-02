@@ -8,10 +8,45 @@ impl Ppu {
     /// (`fetch_run`) until it parks with a completed row — see the field
     /// docs.
     pub(super) fn stall_tick(&mut self) {
+        // An LCDC.1 clear still reaches an object fetch for `OBJ_ENABLE_LAG`
+        // dots after its trigger and cancels it: the pipeline restarts on the
+        // next dot instead of paying out the rest of the object stall, and the
+        // line stops counting as sprite-laden. The gambatte
+        // `sprite_late_disable_spx18..1B` and `sprite_late_late_disable_spx18..1B`
+        // ladders together sweep the clear from 3 dots before the trigger to 8
+        // after; the object penalty survives only from 5 dots after it on.
+        if self.render.obj_abort > 0 {
+            self.render.obj_abort -= 1;
+            if self.eff.lcdc & LCDC_OBJ_ENABLE == 0 {
+                self.render.stall = self.render.stall.min(1);
+                self.render.fetch_run = self.render.fetch_run.min(self.render.stall);
+                self.abort_obj_fetch();
+            }
+        }
         self.render.stall -= 1;
         if self.render.fetch_run > 0 {
             self.render.fetch_run -= 1;
             self.fetcher_step();
+        }
+    }
+
+    /// Undo the object fetch the abort window still covers: the sprite drops
+    /// out of the line's fetched set (so the line stops paying its flip lead)
+    /// and the pixels it merged leave the sprite FIFO, since a fetch that never
+    /// completes never pushes them (mealybug m3_lcdc_obj_en_change).
+    fn abort_obj_fetch(&mut self) {
+        let slot = usize::from(self.render.obj_abort_slot);
+        self.render.obj_abort = 0;
+        // `get` rather than `[slot]`: the fetch path only ever opens a window
+        // on a live slot, but a crafted save-state can carry any index.
+        let Some(&Sprite { idx, .. }) = self.render.sprites.get(slot) else {
+            return;
+        };
+        self.render.fetched &= !(1 << slot);
+        for p in &mut self.render.sp_fifo {
+            if p.oam_idx == idx {
+                *p = EMPTY_SPRITE_PIXEL;
+            }
         }
     }
 
@@ -206,7 +241,7 @@ impl Ppu {
         // Sprite fetches still ahead of the output position: the base
         // cost plus the first-per-tile alignment penalty (mirrors the
         // fetch path without committing the tile set).
-        if self.eff.lcdc & LCDC_OBJ_ENABLE != 0 {
+        if self.obj_fetch_enabled() {
             let mut tiles = r.penalty_tiles;
             let mut fetched = r.fetched;
             for i in 0..usize::from(r.n_sprites) {
