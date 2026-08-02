@@ -188,6 +188,32 @@ impl Ppu {
         self.hdma_trigger_level() && ll == self.line && ld + 3 < len
     }
 
+    /// The halt-entry view of [`Self::hdma_period_law`]: the same window with
+    /// the line wrap lagged 2 dots, so a halt in a line's first two dots still
+    /// counts the hblank it just left as already serviced and the wake does not
+    /// re-trigger it.
+    ///
+    /// The four `hdma_late_m0halt*` `_1`/`_2` pairs pin the two-dot boundary at
+    /// both speeds and under an LCD-enable shift: `_1` halts at dot 0 (`_1`,
+    /// `_ds_1`), dot 1 (`_ds_lcdoffset1_1`) or the previous line's dot 455
+    /// (`_lcdoffset3_1`, already inside the un-shifted window) and defers its
+    /// second block a whole line, while `_2` halts at dot 2 (`_ds_2`), 3
+    /// (`_ds_lcdoffset1_2`, `_lcdoffset3_2`) or 4 (`_2`) and takes it at the
+    /// wake. The lag is in raw dots, not the `law_pos` frame: `_lcdoffset3_2`
+    /// halts at raw dot 3 under a 3-dot shift and must still re-trigger.
+    ///
+    /// SameBoy latches the STAT *register*'s mode bits here instead
+    /// (sm83_cpu.c halt(): `allow_hdma_on_wake = io_registers[GB_IO_STAT] & 3`),
+    /// which holds mode 0 for a whole M-cycle past the wrap and so suppresses
+    /// `_ds_lcdoffset1_2`, `_lcdoffset3_2` and
+    /// `hdma_late_m3halt_m0unhalt_scx2_2` — three rows SameBoy fails and the
+    /// two-dot window gets right.
+    pub(crate) fn hdma_period_halt(&self) -> bool {
+        self.hdma_period_law()
+            // Line 0 follows the vblank, so there is no hblank to carry over.
+            || (self.enabled && self.dot < 2 && (1..=144).contains(&self.line))
+    }
+
     /// LCDC bit 7 as committed (architectural view).
     pub(crate) fn lcd_enabled(&self) -> bool {
         self.enabled

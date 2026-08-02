@@ -147,21 +147,7 @@ That is `Bus::run_dma`, and it scores +24 over the whole corpus while deleting
 the per-access seams, the trigger-phase stamp and the `dma_dispatch_hold`
 special case that approximated it.
 
-Ruled out by build and measurement along the way, do not retry:
-
-- **Refuted: a one-dot-lagged HBlank-window snapshot at the halt entry.** The
-  `hdma_late_m0halt_{1,2}` pair halts at ly 2 dot 0 / dot 4 with identical
-  recorded state, so the dot-0 rung looked like it should inherit the line wrap's
-  still-open window as `HaltHdmaState::High`. Built it (a `hdma_period_prev`
-  shadow OR'd into the halt snapshot) and **no row moved** — the window is
-  already closed at ly 1 dot 455 in our model too, because the block that ran at
-  ly 1 dot 400 was triggered back at the mode-0 entry (~dot 254) and only
-  *serviced* at 400 by the instruction-stream seam. The observation is an FF55
-  read at ly 2 dot 436: `_1` demands one block retired by then and we retire two
-  (ly 1 dot 400 + the ly 2 wake at dot 388). The open question is therefore which
-  of those two blocks the reference does not run, not whether the halt snapshot
-  sees the wrap.
- servicing at the
+Ruled out by build and measurement along the way, do not retry: servicing at the
 trigger cycle's post-read seam, servicing from the next cycle with a write never
 hosting the steal, non-stacking the dispatch hold with a trigger-cycle wait
 (armed at the service attempt and per M-cycle in `tick_machine` — neither moves a
@@ -169,6 +155,49 @@ row), scoping the same-cycle sample order to VRAM addresses, scoping the wake
 service by `VramDmaReq::HblankUnhalt` (either polarity, only swaps
 `hdma_transition_ei_halt_late_unhalt_scx1_1` against its `_2`), and servicing at
 the speed-switch pause's end (breaks that same `_1`).
+
+#### The halt snapshot trails the line wrap by two dots (2026-08-02)
+
+`Ppu::hdma_period_halt`. The halt-entry snapshot that decides whether a wake may
+re-trigger the armed HBlank block (`HaltHdmaState::High` = already serviced, no
+wake block) is `hdma_period_law` with the line wrap lagged **two raw dots**: a
+halt in a line's first two dots still counts the hblank it just left.
+
+The four `hdma_late_m0halt*` `_1`/`_2` pairs pin it two-sided at both speeds and
+under an LCD-enable shift. All eight share one LYC=1 timer ISR (`$1000`: a NOP
+sled, `HDMA5=$81` — two blocks — `xor a; ldh ($0F),a; HALT; nop; ldh a,($55)`),
+`_2` being `_1` plus one sled NOP, so the arm and the halt sit one M-cycle later
+while the timer-driven wake stays on the same absolute dot. The observable is the
+FF55 read: `00` = one block retired, `FF` = both.
+
+| rung | halt at (ly.dot) | want | second block |
+|---|---|---|---|
+| `_1` | 2.0 | `00` | deferred to ly 3 |
+| `_2` | 2.4 | `FF` | at the ly-2 wake |
+| `_ds_1` | 3.0 | `00` | deferred |
+| `_ds_2` | 3.2 | `FF` | at the wake |
+| `_ds_lcdoffset1_1` | 2.1 | `00` | deferred |
+| `_ds_lcdoffset1_2` | 2.3 | `FF` | at the wake |
+| `_lcdoffset3_1` | 1.455 | `00` | deferred |
+| `_lcdoffset3_2` | 2.3 | `FF` | at the wake |
+
+Dots 0 and 1 suppress, dot 2 onwards does not — the same two dots at both
+speeds, so the lag is in dots and not M-cycles. `_lcdoffset3_1` halts at the
+previous line's dot 455, already inside the un-shifted `hdma_period_law` window,
+and `_lcdoffset3_2` halts at raw dot 3 under a 3-dot LCD shift and must still
+re-trigger, so the lag is measured in **raw** dots, not the `law_pos` frame.
+
+SameBoy latches the STAT *register*'s mode bits here instead (sm83_cpu.c
+`halt()`: `allow_hdma_on_wake = io_registers[GB_IO_STAT] & 3`, checked by the
+three wake sites in `GB_cpu_run`). That register holds mode 0 for a whole
+M-cycle past the wrap, so it also suppresses `_ds_lcdoffset1_2`,
+`_lcdoffset3_2` and `hdma_late_m3halt_m0unhalt_scx2_2` — traced with an FF55
+read hook, SameBoy prints `00` where all three want `FF`. Porting `STAT & 3`
+verbatim scores +3/−5; the two-dot window scores **+3/−0**.
+
+- **Refuted: a one-dot-lagged HBlank-window snapshot.** A `hdma_period_prev`
+  shadow OR'd into the snapshot moved no row — one dot does not reach `_1`'s
+  dot-0 halt from the previous line's still-open window. Two dots does.
 
 Two rows needed the seam narrowed further, and each named its own mechanism.
 

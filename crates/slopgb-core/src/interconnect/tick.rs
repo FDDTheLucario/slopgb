@@ -233,9 +233,11 @@ impl Interconnect {
             // wake — HBlank DMA never proceeds while the core clock is
             // gated; otherwise remember whether the hblank window was
             // already active so the same hblank cannot retrigger at wake.
+            // The window trails the line wrap by two dots here
+            // ([`Ppu::hdma_period_halt`]).
             self.halt_hdma = if self.vram_dma_req.take().is_some() {
                 HaltHdmaState::Requested
-            } else if self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period_law() {
+            } else if self.hdma_mode == HdmaMode::ArmedLcdOn && self.ppu.hdma_period_halt() {
                 HaltHdmaState::High
             } else {
                 HaltHdmaState::Low

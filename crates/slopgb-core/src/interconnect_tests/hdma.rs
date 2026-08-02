@@ -601,3 +601,29 @@ fn vram_dma_steal_counts_oam_dma_startup_delay() {
     assert_eq!(b.peek_no_io(0xFE08), 0x58, "normal copies resume at idx 8");
     assert_eq!(b.peek_no_io(0xFE09), 0x59, "capture at 9 re-copied");
 }
+
+/// The halt-entry HBlank snapshot trails the line wrap by two dots, so a halt
+/// in a line's first two dots still counts the hblank it just left and the
+/// wake does not re-trigger the armed block ([`Ppu::hdma_period_halt`]).
+/// gambatte `hdma_late_m0halt_1` halts at dot 0 and defers its second block a
+/// whole line; `_2`, one M-cycle later at dot 4, takes it at the wake.
+#[test]
+fn halt_at_a_line_wrap_still_counts_the_hblank_it_left() {
+    for (dot, want) in [(0u16, HaltHdmaState::High), (4, HaltHdmaState::Low)] {
+        let mut b = ic_cgb_mode();
+        b.write(0xFF40, 0x80); // LCD on
+        setup_gdma_regs(&mut b, 0xC000, 0x0000);
+        b.write(0xFF55, 0xFF); // arm the HBlank engine, 128 blocks
+        assert_eq!(b.hdma_mode, HdmaMode::ArmedLcdOn);
+        for _ in 0..600 {
+            if b.ppu.line_dot() == (2, dot) {
+                break;
+            }
+            b.tick();
+            b.run_dma();
+        }
+        assert_eq!(b.ppu.line_dot(), (2, dot), "reached ly 2 dot {dot}");
+        b.set_cpu_halted(true);
+        assert_eq!(b.halt_hdma, want, "halt snapshot at ly 2 dot {dot}");
+    }
+}
