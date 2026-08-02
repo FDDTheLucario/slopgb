@@ -202,6 +202,7 @@ impl Ppu {
             w.u8(b);
         });
         w.u8(self.obj_en_lag);
+        w.bool(self.scan_obj_size);
         self.render.write_state(w);
 
         w.u32_slice(&self.front[..]);
@@ -344,6 +345,7 @@ impl Ppu {
         };
         self.render_lcdc_pending = r.read_opt(|r| Ok((r.u8()?, r.u8()?)))?;
         self.obj_en_lag = r.u8()?;
+        self.scan_obj_size = r.bool()?;
         self.render.read_state(r)?;
 
         r.u32_slice_into(&mut self.front[..])?;

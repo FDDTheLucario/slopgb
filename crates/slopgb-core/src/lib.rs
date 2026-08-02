@@ -198,8 +198,8 @@ const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// SNES-coprocessor tail behind its own presence flag at the very end, since the
 /// tail exists only when a coprocessor is installed, not per model; v11 adds the
 /// PPU's pure-LYC STAT halt mask; v12 adds the renderer's object-fetch abort
-/// countdown.
-const STATE_VERSION: u16 = 12;
+/// countdown; v13 adds the OAM scan's one-dot-lagged LCDC.2 snapshot.
+const STATE_VERSION: u16 = 13;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/

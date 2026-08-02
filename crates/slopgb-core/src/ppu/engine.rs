@@ -121,6 +121,7 @@ impl Ppu {
             staged: None,
             render_lcdc_pending: None,
             obj_en_lag: 0,
+            scan_obj_size: false,
             render: Render::new(),
             front: pixel_buffer(0xFF_FFFF),
             back: pixel_buffer(0xFF_FFFF),
@@ -220,6 +221,9 @@ impl Ppu {
         // pushed before this dot's render step so bit 0 is this dot's level.
         self.obj_en_lag = (self.obj_en_lag << 1) | u8::from(self.eff.lcdc & LCDC_OBJ_ENABLE != 0);
         self.step_dot();
+        // Close this dot's LCDC.2 snapshot for the next dot's OAM scan step
+        // (see `scan_obj_size`).
+        self.scan_obj_size = self.eff.lcdc & LCDC_OBJ_SIZE != 0;
         // Maintain the decoupled interrupt-facing mode (`mode_for_interrupt`),
         // consulted by the STAT engine on the very next line. Runs after
         // step_dot so it sees this dot's `line_render_done` flip.

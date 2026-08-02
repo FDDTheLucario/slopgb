@@ -913,6 +913,12 @@ pub struct Ppu {
     /// many dots before the sprite's fetch trigger
     /// (see [`Self::obj_fetch_enabled`]).
     obj_en_lag: u8,
+    /// LCDC.2 as it stood at the end of the previous dot. The DMG family's OAM
+    /// scan reads this instead of the live bit, putting its per-entry 8x16
+    /// sample on the same phase relative to the write that CGB's live read
+    /// already sits on — our FF40 `eff` commit lands two dots earlier on DMG.
+    /// Kept on every model; only the scan consults it (`oam_scan_entry`).
+    scan_obj_size: bool,
 
     render: Render,
 

@@ -26,6 +26,10 @@ impl Ppu {
     /// path goes through [`Self::oam_scan_step`].
     #[cfg(test)]
     pub(super) fn oam_scan(&mut self) {
+        // The per-dot loop keeps `scan_obj_size` one dot behind `eff`; on an
+        // undisturbed line the two agree, so seed it here rather than model the
+        // race this helper skips.
+        self.scan_obj_size = self.eff.lcdc & LCDC_OBJ_SIZE != 0;
         self.render.n_sprites = 0;
         for i in 0..40 {
             self.oam_scan_entry(i);
@@ -69,11 +73,16 @@ impl Ppu {
                 self.oam[b + 3],
             )
         };
-        let h = if self.eff.lcdc & LCDC_OBJ_SIZE != 0 {
-            16u16
+        // LCDC.2 reaches the scan's height comparator at a fixed phase after the
+        // write, but our FF40 `eff` commit lands two dots earlier on the DMG
+        // family than on CGB, so the DMG side reads the one-dot-old snapshot to
+        // sit on the same phase (gambatte late_sizechange*, per slot).
+        let tall = if self.model.is_cgb() {
+            self.eff.lcdc & LCDC_OBJ_SIZE != 0
         } else {
-            8
+            self.scan_obj_size
         };
+        let h = if tall { 16u16 } else { 8 };
         let row = u16::from(self.ly) + 16;
         if self.render.n_sprites < 10 && row >= u16::from(y) && row < u16::from(y) + h {
             let n = usize::from(self.render.n_sprites);

@@ -134,6 +134,36 @@ fn obj_enable_window_straddles_the_sprite_fetch_trigger() {
     assert_eq!(flip(0x93, Some((118, 0x91))), 264);
 }
 
+/// The OAM scan's per-entry LCDC.2 sample sits one dot behind the `eff`
+/// commit on the DMG family and on it for CGB, because our FF40 commit lands
+/// two dots earlier there — so a write on an entry's own latch dot loses the
+/// race on DMG and wins it on CGB. The gambatte `late_sizechange*` per-slot
+/// ladders (latch dots 3/5/7/81, write dot stepped 4 at a time) pin the DMG
+/// side on all 20 rungs.
+#[test]
+fn oam_scan_obj_size_sample_lags_the_commit_on_dmg() {
+    // Slot 2 latches at dot 7. Y=$10 puts the sprite on lines 0-15 at 8x16 and
+    // 0-7 at 8x8, so line 8 selects it only if the latch still saw 8x16.
+    fn selected_on_line_8(mut p: Ppu, write_dot: u16) -> u8 {
+        sprite(&mut p, 2, 0x10, 0x08, 0, 0);
+        run_to(&mut p, 8, write_dot - 1);
+        p.write(0xFF40, 0x93); // 8x16 -> 8x8
+        run_to(&mut p, 8, 84);
+        p.render.n_sprites
+    }
+    assert_eq!(selected_on_line_8(dmg_on(0x97), 6), 0, "dmg, a dot early");
+    assert_eq!(
+        selected_on_line_8(dmg_on(0x97), 7),
+        1,
+        "dmg, on the latch dot"
+    );
+    assert_eq!(
+        selected_on_line_8(cgb_on(0x97), 7),
+        0,
+        "cgb, on the latch dot"
+    );
+}
+
 #[test]
 fn sprite_pixels_palettes_transparency() {
     let mut p = dmg_on(0x93);
