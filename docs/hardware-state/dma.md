@@ -223,6 +223,41 @@ to the halt wake scores **+2/−0**.
   shadow OR'd into the snapshot moved no row — one dot does not reach `_1`'s
   dot-0 halt from the previous line's still-open window. Two dots does.
 
+#### The remaining halt-family rows sit behind a halt→wake duration gap (2026-08-02)
+
+Measured, not swept. Two `gambatte/dma` clusters are left whose blocks and reads
+were traced on both sides, and neither is a placement lever — both bottom out on
+our halt lasting longer than the reference's from the same halt dot.
+
+`hdma_transition_{,ei_}halt_late_unhalt_scx1_1` (ours `FF`, want `00`). Kernel:
+LCD on at `$10D9`, `SCX=1`, `HDMA1-4 = $0000/$00F0`, `HDMA5 = $81` at `$1180`
+(two blocks), `xor a; ldh ($0F),a; HALT` at `$1185`, a 74-NOP sled, `ldh a,($55)`
+at `$11D0`. `_2` is `_1` plus one NOP before the LCD-on. Ours: arm ly 1 dot 232,
+block 1 at ly 1 dot 256, halt at ly 1 dot 292 (`High`), wake ly 2 dot 224, block
+2 at ly 2 dot 256, read at ly 3 dot 108 (`_1`) / 100 (`_2`) — `FF` for both.
+SameBoy: arm ly 1 cfl 236, halt ly 1 cfl 260 with `allow_hdma_on_wake = 0`
+(matching our `High`), wake ly 2 cfl 89, blocks at ly 2 and ly 3, read ly 3 cfl
+112 / 104 — `00` for both, so SameBoy passes `_1` and fails `_2`. The read dots
+agree to the frame offset; the block *lines* do not, and the wake dots differ by
+135. No block placement splits `_1` from `_2`: their reads are 8 dots apart and
+both blocks are more than a line earlier, so nothing can retire between them.
+
+`hdma_late_{ei_,}m3halt_m2unhalt_ly_scx{1,2}_4` (ours `02`, want `03`). Six-rung
+ladder alternating two insertion sites — one NOP in the post-halt sled, one
+before the arm. `HDMA5 = $80`, one block; the observable is `ldh a,($44)`. Ours,
+per rung: arm ly 1 dot 228/228/232/232/236/236, block at ly 2 dot 256 (rungs
+1-2, the halt at dot 252 precedes the trigger so the flag is deferred) or ly 1
+dot 256 (rungs 3-6), read at ly 2 dot 452 · ly 3 dot 0 · ly 2 dot 416 · ly 2 dot
+420 · ly 2 dot 452 · ly 3 dot 0. Wants alternate 02/03; only rung 4 misses, and
+it needs its read a whole block-stall (36 dots) later than rung 3's while rung 5
+must stay before the boundary. SameBoy passes rungs 1-4 and **fails rung 5**
+(reads `03`, want `02`), so its shape is not the target either.
+
+Both clusters need the halt→wake duration reconciled first: rung 4's read sits
+32 dots from rung 5's for a one-NOP difference that should move it 4, and the
+post-wake sled is identical, so the gap is in the wake instant and not in the
+DMA. Do not sweep the DMA seams for these rows.
+
 Two rows needed the seam narrowed further, and each named its own mechanism.
 
 `hdma_m0speedchange_late_m3wakeup_scx2_1` arms two blocks, `STOP`s into a speed
