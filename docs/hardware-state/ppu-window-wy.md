@@ -156,9 +156,163 @@ Five of the 120 are already in `baselines/gambatte.txt`
 
 Nothing here special-cases a test ROM: the mechanism is SameBoy's, with its own
 citations, and it lives in the render where the hardware puts it. This was the
-first of the three deletions that retire the arm table; the window
-enable/disable/WX-rewrite arms (3, 4, 5, D3, D5, D-wx, 3b) are the next
-whole-dot-fixable group, and arms 8/8-spr wait on the half-dot render FSM.
+first of the three deletions that retire the arm table. The window
+enable/disable/WX-rewrite arms (3, 4, 5, D3, D5, D-wx, 3b) turn out NOT to be
+whole-dot-fixable at the render — they compensate an ISR dispatch-frame offset
+(see below) — and arms 8/8-spr wait on the half-dot render FSM.
+
+## Next group: the window abort / re-enable / WX-rewrite arms (3, 4, 5, 3b, D3, D5, D-wx)
+
+Measured by deleting them and running the matrix: they hold **31 rows** in three
+families — `late_disable_*` (20), `late_reenable_*` (6), `late_wx_*` (3).
+
+Dual-traced `late_disable_{early,late}_scx03_wx0f` (CGB, WX=15, SCX&7=3):
+
+| | SameBoy | slopgb |
+|---|---|---|
+| window activation, ly0 | cfl 105 | never activates |
+| window activation, ly1 | cfl 108 | never activates |
+| LCDC.5 clear, `_1` / `_2` | cfl 108 / 112 | same |
+| mode-3 exit, `_1` / `_2` | cfl 260 / 266 | 254 / 254 (bare) |
+
+So SameBoy's exit moves +6 dots as the clear moves +4 (the clear lands in
+different fetcher slots: at the activation dot the window ships nothing, four
+dots later its first tile is committed), while slopgb never draws the window at
+all on these lines and both legs collapse onto the bare exit. The arms patch the
+read verdict on top of that.
+
+Why slopgb misses the window here: `wy_triggered` latches only ONCE across 16
+frames. These ROMs clear LCDC.5 mid-line and leave it clear across the frame
+boundary, so line 0's dot-4 compare sees the window disabled and returns early;
+no later compare can latch it, because `WY == comparison` only holds at line 0.
+SameBoy latches anyway, so one of its compares sees LCDC.5 still set where
+slopgb's does not.
+
+Probed and rejected:
+
+* **Adding back the line-start (dot 0) compare** — SameBoy runs `wy_check` at
+  both the line start and the mode-2 rise, but enabling both takes the arms-cut
+  failure count from 31 to **37**. Dot 4 alone stays the measured optimum.
+* **Moving the frame reset ahead of the wrap's scheduled compare** — correct in
+  itself (landed, see below) but changes none of the 31.
+
+Landed from this probe list: the activation gate now reads the ARCHITECTURAL
+LCDC, like SameBoy's `check_window` (`display.c:1315`) and like `wy_check`,
+instead of the pipeline view `eff.lcdc` (which sees a write ~2 dots early —
+right for the fetch/addressing side, wrong for the enable test). Zero suite
+regressions, and the arms' reach drops **31 → 29**. Golden moved two rows:
+`mealybug ppu/m3_lcdc_win_en_change_multiple_wx [Dmg]`, which is already
+baselined (it fails against the photo before and after, so this is one wrong
+output for another, not a photo regression), and `gbmicrotest/ppu_win_vs_wx
+[Dmg]`, whose matrix still passes — its verdict is a memory value, the screen is
+an echo.
+
+### The remaining 29 are a CPU-frame offset, NOT a render gap
+
+**This corrects the earlier reading of this group.** Disassembling the ROMs
+(`rom-disasm-gaps`) shows the arms are compensating for the ISR write frame, not
+for a missing fetcher-slot model, so no window/render change can reach them.
+
+The `late_*` family is STAT-IRQ driven. Vector `0048` is `jp 1000`; `1000` is a
+NOP sled ending in the write under test:
+
+```
+0048  C3 00 10  jp 1000
+1000..100D      nop            ; the sled — one NOP longer in `_2` than `_1`
+100E  3E 91     ld a,91        ; LCDC.5 clear
+1010  E0 40     ld (ff00+40),a
+```
+
+`cmp -l` on the `_1`/`_2` pair is a single inserted `00` at `0x100D` shifting the
+run down one byte, i.e. the rungs step the write by exactly one M-cycle. **Both
+emulators reproduce that +4-dot step correctly** — the ladder is not the problem.
+
+The problem is the absolute frame, and it decomposes exactly
+(`late_disable_early_scx03_wx10`, ly1, dual-traced `ACK` against `SBACK`):
+
+| | SameBoy | slopgb | delta |
+|---|---|---|---|
+| STAT dispatch (ack) | dot 18 | dot 16 | **−2** |
+| ack → LCDC.5 clear, `_1` | 90 | 88 | **−2** |
+| ack → LCDC.5 clear, `_2` | 94 | 92 | **−2** |
+| resulting clear dot | 108 / 112 | 104 / 108 | −4 |
+
+Two dots of STAT dispatch plus two of ISR path. The WX match dot agrees
+perfectly (both 109), so the render is aligned; only the CPU's arrival is not.
+SameBoy's rule is simply "did the clear beat the match" — at 108 it did (no
+window, exit 260), at 112 it did not (window activates, exit 266) — and slopgb's
+104/108 both land on the same side, collapsing the pair onto one exit (257/257).
+The same −2 dispatch was confirmed on `late_reenable_2`, so it is systematic
+across the family.
+
+slopgb's dispatch dot is not free to move: it is counter-pinned (the CLAUDE.md
+rule — a PPU advance at dispatch hangs mooneye `intr_2`/`int_hblank`/
+`di_timing`), and mooneye is green at 439/439 with dot 16. So slopgb and SameBoy
+genuinely disagree here and mooneye backs slopgb; the gambatte `late_*`
+expectations need SameBoy's relationship. That is a real trade, not a bug with a
+one-sided fix — and it is the same root cause as the
+`late_scx_late_wy_FFto4_ly4_wx00_2` row floored above.
+
+Probes run against this, all consistent with the diagnosis:
+
+| change | arms-cut rows |
+|---|---|
+| baseline | 29 |
+| arm 8 extended to aborted-window lines (emergent `2*flip` exit) | 25 |
+| + enable test on the deferred `eff.render_lcdc` | 20 |
+| deferring the WHOLE LCDC.5 window pathway 4 dots (view + abort flags together) | 29 — no change |
+
+The first two cannot be combined with the arms present (they double-correct: 8
+rows regress with arms intact), and the pair alone still leaves 20. The third —
+the one the frame measurement seemed to call for — moves nothing, which is what
+the disassembly predicts: the offset is upstream of the window machine
+entirely. A dedicated per-dot LCDC.5 lag was likewise rejected (2 dots ties the
+render view at 20, 3 gives 26, 4 gives 32).
+
+**Conclusion: this group is not the next whole-dot-fixable one.** Retiring it
+needs the STAT dispatch frame reconciled with mooneye first, which is a separate
+piece of work on the counter-pinned dispatch — not a window law.
+
+### The `win*_b` golden drift: reviewed, benign
+
+The re-captured `golden_fingerprint` moves 25 rows: 7 gambatte window rows whose
+verdict changed, and 18 `gbmicrotest/win*_b [Cgb]`. No commercial-game row
+moved. The `win*_b` set was checked three ways before re-capturing:
+
+* slopgb HEAD, slopgb+port and SameBoy all activate the window on every visible
+  line at dot 95 with the same window row counter (2304 activations per 16
+  frames in both slopgb builds) — HEAD and the port are byte-identical there, so
+  the drift cannot come from the window trigger;
+* no `win*` row is baselined in `baselines/gbmicrotest.txt` and every one still
+  passes — their verdict is a HRAM value, not the screen;
+* the changed pixels are the on-screen echo those ROMs draw, downstream of the
+  FF41 read verdict they poll.
+
+Also ruled out: the LCD-enable glitch line (suppressing `wy_check` there took
+the drift from 27 to 47) and any `win_line` off-by-one.
+
+### Probe
+
+`gambatte/window/**/*wy*` runs in ~10 s off the debug runner:
+
+```sh
+cargo build -p slopgb-core --release --example run_gambatte
+# then, per ROM: target/release/examples/run_gambatte <rom> [dmg|cgb]
+# expectation is in the filename: _dmg08_out<H> / _cgb04c_out<H> / _dmg08_cgb04c_out<H>
+```
+
+Five of the 120 are already in `baselines/gambatte.txt`
+(`late_scx_late_wy_FFto4_ly4_wx20_2 [Cgb]`, `..._wx20_3 [Dmg]`,
+`late_wy_lcdoffset1_1 [Cgb]`, `arg/late_wy_1 [Cgb]`, `window/late_wy_1 [Cgb]`).
+
+## Rule note
+
+Nothing here special-cases a test ROM: the mechanism is SameBoy's, with its own
+citations, and it lives in the render where the hardware puts it. This was the
+first of the three deletions that retire the arm table. The window
+enable/disable/WX-rewrite arms (3, 4, 5, D3, D5, D-wx, 3b) turn out NOT to be
+whole-dot-fixable at the render — they compensate an ISR dispatch-frame offset
+(see below) — and arms 8/8-spr wait on the half-dot render FSM.
 
 ## Next group: the window abort / re-enable / WX-rewrite arms (3, 4, 5, 3b, D3, D5, D-wx)
 
