@@ -51,7 +51,12 @@ impl Ppu {
                 && self.dot < self.render.win_pending_until
                 && self.wy_triggered
         };
-        let win_en_now = self.eff.lcdc & LCDC_WIN_ENABLE != 0;
+        // The activation gate reads the ARCHITECTURAL LCDC, like SameBoy's
+        // `check_window` (`display.c:1315` reads `io_registers[GB_IO_LCDC]`) and
+        // like `Ppu::wy_check`. The pipeline view (`eff.lcdc`) sees a write ~2
+        // dots early, which is right for the fetch/addressing side but not for
+        // the window's enable test.
+        let win_en_now = self.lcdc & LCDC_WIN_ENABLE != 0;
         // Record the raw WX-comparator match dot for the shadow WY-trigger's
         // activation deadline — *before* the `wy_ok`/`win_en` gate, so a bare
         // line the window never enters still pins the dot the window *would*

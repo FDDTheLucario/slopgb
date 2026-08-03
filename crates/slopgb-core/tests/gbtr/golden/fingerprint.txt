@@ -7979,7 +7979,7 @@ gbmicrotest/ppu_sprite_testbench.gb [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gbmicrotest/ppu_spritex_vs_scx.gb [Cgb] | a95f46fb19bda525 | b6b0632d997517d6
 gbmicrotest/ppu_spritex_vs_scx.gb [Dmg] | a95f46fb19bda525 | b6b0632d997517d6
 gbmicrotest/ppu_win_vs_wx.gb [Cgb] | fa1dcfa1647ce1e5 | b6b0632d997517d6
-gbmicrotest/ppu_win_vs_wx.gb [Dmg] | 699820d25067fa7c | b6b0632d997517d6
+gbmicrotest/ppu_win_vs_wx.gb [Dmg] | fa1dcfa1647ce1e5 | b6b0632d997517d6
 gbmicrotest/ppu_wx_early.gb [Cgb] | a204a5461775b0e5 | b6b0632d997517d6
 gbmicrotest/ppu_wx_early.gb [Dmg] | 8c98519f9f747165 | b6b0632d997517d6
 gbmicrotest/sprite4_0_a.gb [Cgb] | c41d57f08f4b9325 | b6b0632d997517d6
@@ -8335,7 +8335,7 @@ mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change2.gb [Dmg] | 6850c4e30aa0c
 mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb [Cgb] | 023d73f9e5c6528d | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb [Dmg] | dc635bce8a413ead | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Cgb] | 9c84bd668ca64f41 | b6b0632d997517d6
-mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Dmg] | 2706e2af72e120a5 | b6b0632d997517d6
+mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Dmg] | cafcbe01d0accec5 | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Cgb] | 5d43ad53e48cdfc5 | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Dmg] | 8bf4244a34610345 | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change2.gb [Cgb] | be666b5d6e7500d1 | b6b0632d997517d6

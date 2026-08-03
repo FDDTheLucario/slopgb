@@ -195,8 +195,21 @@ Probed and rejected:
 * **Moving the frame reset ahead of the wrap's scheduled compare** — correct in
   itself (landed, see below) but changes none of the 31.
 
-Still untested, and the next thing to try: the activation gate reads the
-PIPELINE LCDC (`eff.lcdc`) where SameBoy's `check_window` reads the
-architectural `io_registers[GB_IO_LCDC]`. On the traced line `eff.lcdc` has the
-window disabled at dot 105 while the architectural clear is at 112. `wy_check`
-already uses the architectural view; the activation gate does not.
+Landed from this probe list: the activation gate now reads the ARCHITECTURAL
+LCDC, like SameBoy's `check_window` (`display.c:1315`) and like `wy_check`,
+instead of the pipeline view `eff.lcdc` (which sees a write ~2 dots early —
+right for the fetch/addressing side, wrong for the enable test). Zero suite
+regressions, and the arms' reach drops **31 → 29**. Golden moved two rows:
+`mealybug ppu/m3_lcdc_win_en_change_multiple_wx [Dmg]`, which is already
+baselined (it fails against the photo before and after, so this is one wrong
+output for another, not a photo regression), and `gbmicrotest/ppu_win_vs_wx
+[Dmg]`, whose matrix still passes — its verdict is a memory value, the screen is
+an echo.
+
+The remaining 29 need the fetcher-slot model itself: SameBoy's exit moves +6
+dots as the LCDC.5 clear moves +4, because the clear lands in different fetcher
+slots. slopgb's `window_abort_render` re-anchors the BG fetch and the line ends
+at the bare-line dot, discarding the window restart cost already paid. That is a
+render change with pixel consequences (the mealybug `m3_lcdc_win_en_change*`
+photos pin the drawn columns), so it wants the same measure-first treatment the
+window-Y group got.
