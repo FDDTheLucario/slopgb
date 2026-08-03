@@ -76,13 +76,21 @@ wide on the read grid at both speeds. The line-144 and line-0 arms are not
 mirror images. The visible-line arm (lines 1..143) was left alone for the same
 reason — its `_1`-rung siblings poll dot 0 of every line and currently pass.
 
-The `enable_display/frame{0,1}_*_count_ds_2` rows are NOT this lever: probed,
-`frame1_m2stat_count_ds_2` issues only two FF41 reads in the whole run (line 0
-dots 0 and 2, reading modes 1 then 2) and then leaves its loop, where the
-passing `_1` sibling polls a dot-454/dot-0 pair on every line. The count
-collapses because the loop exits after one iteration, not because a mode read is
-misclassified — start from the loop's exit condition in the disassembly, not the
-read laws.
+The `enable_display/frame{0,1}_m2stat_count_ds_2` rows are the **third** arm, and
+they are blocked. Disassembled: the kernel enables the LCD, delays, then spins on
+`ldh a,(41); cp $86; jp nz` and on the first mismatch prints **LY** — so the
+reference holds mode 2 + coincidence until VBlank (`$90`) and ours bails at the
+first poll. `frame1` polls (ly 0, dot 0) and needs mode 2 from the LINE-0 arm;
+`frame0` polls (ly 1, dot 0) and needs it from the VISIBLE-LINE arm. Both are
+refuted:
+
+| arm | drop the `dot + debt >= 4` guard | why |
+|---|---|---|
+| line 0 | **0/−1** | `ly0/lycint152_ly0stat_ds_2` (want `C1`) reads the IDENTICAL state — ly 0, dot 0, DS, `line_render_done` false, `read_carried` false, not the glitch line — and demands mode **1** where the count row demands **2**. Co-temporal at whole-dot resolution; `line_render_done` (the DMG arm's discriminator) and `read_carried` both fail to separate them. |
+| lines 1..143 | **+5/−6** | trades 5 `halt/m0*_m0stat_*_ds_2` + `m0int_m0stat_scx5_ds_2` for 6 `lyc*`/`m0int_m0stat` `_ds_1` rows — **and does not recover `frame0` either**. |
+
+So the two surviving guards are load-bearing and two-sided; only the line-144 arm
+was vacuous. Separating these needs sub-dot read positions, not another arm.
 
 ### FF41 writes — DMG vs CGB
 
