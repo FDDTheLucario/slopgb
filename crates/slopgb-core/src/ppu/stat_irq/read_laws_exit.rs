@@ -86,16 +86,29 @@ impl Ppu {
             && self.wy <= 143
             && m == 3
         {
-            // The polled read sits at +0 of SameBoy's exit where the ISR frame
-            // sits at -4. The off-screen (WX >= 0xA0) window renders nothing
-            // and is read before it HBlank-activates, so its arming exit is
-            // the closed form the read lands on an M-cycle later either way.
-            let base = if self.read_carried || self.eff.wx >= 0xA0 {
-                259
+            // The off-screen (WX >= 0xA0) window renders nothing and is read
+            // before it HBlank-activates, so its arming exit stays the closed
+            // form the read lands on an M-cycle later either way.
+            if self.eff.wx >= 0xA0 {
+                fold(&mut exit, 2 * (259 + scx7 + ds1));
             } else {
-                263
-            };
-            fold(&mut exit, 2 * (base + scx7 + ds1));
+                // EMERGENT: an on-screen active window's whole mode-3 cost —
+                // including the fine-scroll discard it activates into — is in
+                // the render's own flip, so the exit is that flip plus one
+                // read-frame offset. The offset is the ISR frame: a polled read
+                // sits +4 dots of the flip where a carried mode-2-ISR read sits
+                // -4. Derived from the ROMs rather than swept: the polled rows
+                // (`late_wy_FFto2_ly2_scx{2,3,5}`) bound it above 2 half-dots
+                // and the carried DS rows (`m2int_wx{03,07,0C,57}_m3stat_ds_2`
+                // against `..._scx5_m3stat_ds_1`) bracket it to exactly -4.
+                let flip = if self.line_render_done && self.flip_dot != 0 {
+                    self.flip_dot
+                } else {
+                    self.projected_flip_dot()
+                };
+                let frame = if self.read_carried { -4 } else { 4 };
+                fold(&mut exit, 2 * i32::from(flip) + frame);
+            }
         }
         // Arm D1 — the DMG triggering-window exit family, the arm-1
         // port. The deferred read samples +4 dots
@@ -125,7 +138,19 @@ impl Ppu {
             && m == 3
         {
             if self.eff.wx < 0xA6 {
-                fold(&mut exit, 2 * (259 + scx7));
+                // EMERGENT, as arm 1: the render's flip already carries the
+                // window's mode-3 cost including its fine-scroll discard, so
+                // only the read frame remains a constant. DMG takes a flat -4
+                // with no polled/carried split (the closed form it replaces had
+                // none either): derived from `gbmicrotest/win{0,10}_b` +
+                // `win0_scx3_b`, whose polled read wants mode 0 at rphd 520 /
+                // 528 against a flip of 522 / 530.
+                let flip = if self.line_render_done && self.flip_dot != 0 {
+                    self.flip_dot
+                } else {
+                    self.projected_flip_dot()
+                };
+                fold(&mut exit, 2 * i32::from(flip) - 4);
             } else if self.render.n_sprites == 0 {
                 fold(&mut exit, 2 * (253 + scx7));
             } else if self.render.sprites[..usize::from(self.render.n_sprites)]

@@ -492,11 +492,30 @@ so per `rom-diff-weld` the discriminator is outside the render FSM.
 golden re-captured for exactly those four rows; no mealybug, gbmicrotest or
 commercial-game row moved.
 
-**Arms 1/D1 still cannot go emergent**, and the derivation says why precisely: even
-with the flip tracking SCX the feasible-constant intervals do not intersect
-(`k > 10` from `late_wy_FFto2_ly2_scx2_1` against `k <= 0` from
-`m2int_wx03_m3stat_ds_2`). SS and DS want different constants and the SS rows
-disagree among themselves, so the remaining gap is a second render term, not a
-read-frame offset. Note the derivation samples each ROM's LAST FF41 read, which
-is not always the observable one — pin the observable read by PC before trusting
-those intervals for a specific row.
+### Arms 1 and D1 are now emergent
+
+The first derivation pass sampled each ROM's LAST FF41 read and gave an
+infeasible interval. That was a method bug, not a fact: every ROM in this family
+makes exactly TWO reads at its kernel PC, and **the first — the carried mode-2
+ISR read — is the observable one.** `gbmicrotest/win*_b` proves it directly
+(`m2int_wx03_m3stat_ds_2` reads `v=0` then `v=3` and prints 0). Pin the read by
+PC (`check_exec` stamps it) before deriving anything.
+
+Re-derived on the observable read, the intervals close:
+
+* CGB (arm 1): polled rows bound `k > 2` (binding `late_wy_FFto2_ly2_scx2_1`),
+  carried rows `k <= -4` from the DS scx0 set against `k > -6` from
+  `m2int_wx{03,07}_scx5_m3stat_ds_1`. Landed as `2*flip + 4` polled,
+  `2*flip - 4` carried.
+* DMG (arm D1): flat `2*flip - 4`, no polled/carried split — the closed form it
+  replaces had none either. Derived from `gbmicrotest/win{0,10}_b` and
+  `win0_scx3_b`, whose polled read wants mode 0 at rphd 520 / 528 against a flip
+  of 522 / 530. Getting this wrong (reusing CGB's split) failed
+  `gbmicrotest_dmg_matrix` with `$FF80=0x83` against an expected `0x80`, which is
+  how the DMG constant was pinned rather than swept.
+
+So the on-screen window exit is no longer a closed form at all: the render's own
+flip carries the whole mode-3 cost, and one read-frame constant remains. The
+off-screen (WX >= 0xA0) arming case keeps its closed form — it renders nothing
+and is read before it HBlank-activates. gbtr 221/221 with
+`golden_fingerprint` byte-identical, so this is a pure representation change.
