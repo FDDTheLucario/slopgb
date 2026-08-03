@@ -162,11 +162,12 @@ impl Ppu {
         // mode 1 at the VBlank boundary (`enable_display/*_m1stat`,
         // `lcd_offset/*_m1stat` — want the VBlank bit set). CGB-scoped (DMG's
         // VBlank-entry frame is a separate calibration).
-        if self.model.is_cgb()
-            && self.line == 144
-            && m == 0
-            && self.dot + if self.ds { 2 } else { 4 } >= 4
-        {
+        // The hold is 4 dots at single speed and 2 in double (the DS mode-bits
+        // lag), so with the matching +4 / +2 debt EVERY cc+0 read inside it
+        // back-dates past the boundary — `enable_display/frame{0,1}_m1stat
+        // {,_ds}_2` all read line 144 dot 0 and all want the VBlank bit,
+        // double speed included.
+        if self.model.is_cgb() && self.line == 144 && m == 0 {
             return 1;
         }
         // Line-0 entry mode-2 back-date (CGB): at CGB line 0 dots 0-3 the VBlank

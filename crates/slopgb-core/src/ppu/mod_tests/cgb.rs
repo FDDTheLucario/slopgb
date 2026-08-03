@@ -430,3 +430,26 @@ fn cgb_glitch_line_vram_locks_carry_the_grace() {
     assert!(d.vram_read_blocked(), "DMG dot 80 VRAM read is locked");
     assert!(d.vram_write_blocked(), "DMG dot 80 VRAM write is dropped");
 }
+
+/// The line-144 mode-0 hold is raw FSM state no read observes: a cc+0 FF41
+/// read inside it back-dates to the VBlank mode 1 at BOTH speeds, because the
+/// hold is 4 dots at single speed and 2 in double while the read debt is the
+/// matching +4 / +2 (`enable_display/frame{0,1}_m1stat{,_ds}_2` all read line
+/// 144 dot 0 and want the VBlank bit).
+#[test]
+fn cgb_line144_hold_reads_vblank_at_both_speeds() {
+    for ds in [false, true] {
+        let mut p = cgb();
+        if ds {
+            p.set_double_speed(true);
+        }
+        p.write(0xFF40, 0x81);
+        run_to(&mut p, 144, 0);
+        assert_eq!(p.vis_mode(), 0, "ds {ds}: the raw hold is still mode 0");
+        assert_eq!(
+            p.read(0xFF41) & 3,
+            1,
+            "ds {ds}: the cc+0 read back-dates to VBlank"
+        );
+    }
+}

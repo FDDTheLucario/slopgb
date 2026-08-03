@@ -52,6 +52,21 @@ STAT IRQs are **per-source events with predicates** (`Ppu::stat_update_tick` in 
 - line-0 dispatch-late.
 - m0 half-cycle halt law.
 
+### FF41 reads — the line-144 VBlank-entry hold
+
+The line-144 dots-0..3 mode-0 hold in `vis_mode` is raw FSM state no read ever
+observes: reads sample cc+4, which is already VBlank. The read law back-dates a
+cc+0 read of the hold to mode 1 (CGB), and that arm is **speed-independent**
+(2026-08-02) — the hold is 4 dots at single speed and 2 in double (the DS
+mode-bits lag), while the read debt is the matching +4 / +2, so every cc+0 read
+inside the hold lands past the boundary either way. The former `dot + debt >= 4`
+guard left double-speed dots 0..1 on the raw mode 0:
+`enable_display/frame{0,1}_m1stat{,_ds}_2` all read line 144 dot 0 and all want
+the VBlank bit, their `_1` siblings read the previous line's dot 452/454 and
+want mode 0 (excluded by `line == 144`). Scores **+2/−0**; unit test
+`cgb_line144_hold_reads_vblank_at_both_speeds`, which also asserts the raw
+`vis_mode` stays 0 so the back-date remains read-scoped.
+
 ### FF41 writes — DMG vs CGB
 
 | Model | FF41-write behavior |

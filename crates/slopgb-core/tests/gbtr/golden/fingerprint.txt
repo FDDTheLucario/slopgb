@@ -996,7 +996,7 @@ gambatte/enable_display/frame0_m1stat_2_dmg08_cgb04c_out81.gbc [Cgb] | 8ee8dcffa
 gambatte/enable_display/frame0_m1stat_2_dmg08_cgb04c_out81.gbc [Dmg] | 8ee8dcffa485eb85 | b6b0632d997517d6
 gambatte/enable_display/frame0_m1stat_ds_1_cgb04c_out80.gbc [Cgb] | 11c35b8d0d6bf71c | b6b0632d997517d6
 gambatte/enable_display/frame0_m1stat_ds_1_cgb04c_out80.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
-gambatte/enable_display/frame0_m1stat_ds_2_cgb04c_out81.gbc [Cgb] | 11c35b8d0d6bf71c | b6b0632d997517d6
+gambatte/enable_display/frame0_m1stat_ds_2_cgb04c_out81.gbc [Cgb] | 8ee8dcffa485eb85 | b6b0632d997517d6
 gambatte/enable_display/frame0_m1stat_ds_2_cgb04c_out81.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/enable_display/frame0_m2irq_count_1_dmg08_cgb04c_out98.gbc [Cgb] | 98787f5dd6037a05 | b6b0632d997517d6
 gambatte/enable_display/frame0_m2irq_count_1_dmg08_cgb04c_out98.gbc [Dmg] | 98787f5dd6037a05 | b6b0632d997517d6
@@ -1052,7 +1052,7 @@ gambatte/enable_display/frame1_m1stat_2_dmg08_cgb04c_out81.gbc [Cgb] | 8ee8dcffa
 gambatte/enable_display/frame1_m1stat_2_dmg08_cgb04c_out81.gbc [Dmg] | 8ee8dcffa485eb85 | b6b0632d997517d6
 gambatte/enable_display/frame1_m1stat_ds_1_cgb04c_out80.gbc [Cgb] | 11c35b8d0d6bf71c | b6b0632d997517d6
 gambatte/enable_display/frame1_m1stat_ds_1_cgb04c_out80.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
-gambatte/enable_display/frame1_m1stat_ds_2_cgb04c_out81.gbc [Cgb] | 11c35b8d0d6bf71c | b6b0632d997517d6
+gambatte/enable_display/frame1_m1stat_ds_2_cgb04c_out81.gbc [Cgb] | 8ee8dcffa485eb85 | b6b0632d997517d6
 gambatte/enable_display/frame1_m1stat_ds_2_cgb04c_out81.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/enable_display/frame1_m2irq_count_1_dmg08_cgb04c_out98.gbc [Cgb] | 98787f5dd6037a05 | b6b0632d997517d6
 gambatte/enable_display/frame1_m2irq_count_1_dmg08_cgb04c_out98.gbc [Dmg] | 98787f5dd6037a05 | b6b0632d997517d6
@@ -1456,7 +1456,7 @@ gambatte/lcd_offset/offset1_lyc8fint_m1stat_1_cgb04c_outC4.gbc [Cgb] | 8192685ab
 gambatte/lcd_offset/offset1_lyc8fint_m1stat_1_cgb04c_outC4.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/lcd_offset/offset1_lyc8fint_m1stat_2_cgb04c_outC1.gbc [Cgb] | 1ff870704a4c6c15 | b6b0632d997517d6
 gambatte/lcd_offset/offset1_lyc8fint_m1stat_2_cgb04c_outC1.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
-gambatte/lcd_offset/offset1_lyc8fint_m1stat_ds_1_cgb04c_outC0.gbc [Cgb] | 8192685ab7789f1c | b6b0632d997517d6
+gambatte/lcd_offset/offset1_lyc8fint_m1stat_ds_1_cgb04c_outC0.gbc [Cgb] | 8cde234e35257a75 | b6b0632d997517d6
 gambatte/lcd_offset/offset1_lyc8fint_m1stat_ds_1_cgb04c_outC0.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/lcd_offset/offset1_lyc8fint_m1stat_ds_2_cgb04c_outC1.gbc [Cgb] | 1ff870704a4c6c15 | b6b0632d997517d6
 gambatte/lcd_offset/offset1_lyc8fint_m1stat_ds_2_cgb04c_outC1.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
