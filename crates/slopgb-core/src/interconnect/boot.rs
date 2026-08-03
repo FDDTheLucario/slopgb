@@ -139,6 +139,15 @@ impl Interconnect {
             self.apu.tick(warm_div, false);
         }
         self.apu.tick(div, false);
+        // The real tail is far longer than that second, and the part of it
+        // the warmup does not model is observable: it leaves channel 1
+        // mid-duty-cycle, and gambatte sound/ch1_init_pos_1..8 retriggers
+        // the still-running beep and reads the frozen output level. Only the
+        // duty phase carries over — the frame sequencer's own phase at
+        // hand-off is pinned separately (the ch2 envelope-counter rows) — so
+        // the remainder is applied to channel 1's frequency unit alone.
+        self.apu
+            .advance_beep_duty(s.beep_duty_advance - (cgb_cart_cut / 2) as u16);
         let mut sink = Vec::new();
         self.apu.drain_samples(&mut sink);
     }

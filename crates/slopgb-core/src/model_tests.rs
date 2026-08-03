@@ -184,3 +184,35 @@ fn lcd_phase_is_inside_the_boot_hwio_window() {
         144 * 456 + 164 + 4 + 0x7D8
     );
 }
+
+/// The post-boot beep is the boot ROM's *second* chime note, so the frequency
+/// unit runs at `$7C1` — 63 M-cycles per duty step — and the duty position it
+/// has reached at hand-off is the model's `beep_duty_advance`. Both are pinned
+/// by gambatte `sound/ch1_init_pos_1..8`; see docs/hardware-state/apu.md.
+#[test]
+fn post_boot_beep_frequency_and_duty_phase() {
+    for m in ALL {
+        let s = m.post_boot_state();
+        let val = |addr| {
+            s.hwio
+                .iter()
+                .rev()
+                .find(|(a, _)| *a == addr)
+                .map(|(_, v)| *v)
+        };
+        assert_eq!(val(0xFF13), Some(0xC1), "{m:?}: NR13 is the second chime");
+        let freq = (u16::from(val(0xFF14).unwrap() & 7) << 8) | u16::from(val(0xFF13).unwrap());
+        assert_eq!(freq, 0x7C1, "{m:?}");
+        // (2048 - freq) * 4 T per duty step, 8 steps per cycle.
+        assert_eq!((2048 - freq) * 4, 252, "{m:?}: duty step in T-cycles");
+    }
+    // The SGB boot writes the frequency but never triggers (NR52 reads $F0),
+    // so its channel steps nothing and the advance is inert there.
+    for m in [Model::Sgb, Model::Sgb2] {
+        let s = m.post_boot_state();
+        let nr14 = s.hwio.iter().rev().find(|(a, _)| *a == 0xFF14).unwrap().1;
+        assert_eq!(nr14 & 0x80, 0, "{m:?}: no trigger");
+    }
+    assert_eq!(Model::Dmg.post_boot_state().beep_duty_advance, 860);
+    assert_eq!(Model::Cgb.post_boot_state().beep_duty_advance, 1298);
+}

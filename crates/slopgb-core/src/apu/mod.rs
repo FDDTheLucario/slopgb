@@ -600,6 +600,17 @@ impl Apu {
         matches!(channel, 1..=4) && self.mute_mask & (1 << (channel - 1)) != 0
     }
 
+    /// Advance channel 1's frequency unit by `cycles` 2 MHz cycles without
+    /// running the rest of the APU: the post-boot install's beep tail
+    /// ([`crate::PostBootState::beep_duty_advance`]). An unenabled channel
+    /// steps nothing, which is what makes this inert on SGB — that boot
+    /// writes the frequency but never triggers.
+    pub(crate) fn advance_beep_duty(&mut self, cycles: u16) {
+        for _ in 0..cycles {
+            self.ch1.step();
+        }
+    }
+
     /// The raw 16 stored wave-RAM bytes (FF30-FF3F), for the debug I/O viewer.
     /// Bypasses the CPU read gating of [`Self::read`] (which returns 0xFF or the
     /// volatile current sample byte while the channel plays). Side-effect-free.

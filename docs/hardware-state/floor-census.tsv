@@ -254,14 +254,6 @@ gambatte/scy/scy_during_m3_spx09_ds_2.gbc [Cgb]	gambatte	gambatte/scy	Cgb	8px-di
 gambatte/scy/scy_during_m3_spx09_ds_3.gbc [Cgb]	gambatte	gambatte/scy	Cgb	16px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/scy/scy_during_m3_spx09_ds_4.gbc [Cgb]	gambatte	gambatte/scy	Cgb	128px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/sound/ch1_duty0_pos6_to_pos7_timing_ds_6_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/sound	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/sound/ch1_init_pos_1_dmg08_outaudio0_cgb04c_outaudio1.gbc [Dmg]	gambatte	gambatte/sound	Dmg	varying-output	silence	unknown	hw-capture:dmg08	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/sound/ch1_init_pos_4_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb]	gambatte	gambatte/sound	Cgb	varying-output	silence	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/sound/ch1_init_pos_5_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb]	gambatte	gambatte/sound	Cgb	varying-output	silence	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/sound/ch1_init_pos_6_dmg08_cgb04c_outaudio0.gbc [Cgb]	gambatte	gambatte/sound	Cgb	varying-output	silence	unknown	hw-capture:dmg08+cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/sound/ch1_init_pos_6_dmg08_cgb04c_outaudio0.gbc [Dmg]	gambatte	gambatte/sound	Dmg	varying-output	silence	unknown	hw-capture:dmg08+cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/sound/ch1_init_pos_7_dmg08_cgb04c_outaudio0.gbc [Cgb]	gambatte	gambatte/sound	Cgb	varying-output	silence	unknown	hw-capture:dmg08+cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/sound/ch1_init_pos_7_dmg08_cgb04c_outaudio0.gbc [Dmg]	gambatte	gambatte/sound	Dmg	varying-output	silence	unknown	hw-capture:dmg08+cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/sound/ch1_init_pos_8_dmg08_outaudio0_cgb04c_outaudio1.gbc [Dmg]	gambatte	gambatte/sound	Dmg	varying-output	silence	unknown	hw-capture:dmg08	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/sound/ch1_init_reset_sweep_counter_timing_10_dmg08_outaudio0_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/sound	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/sound/ch1_init_reset_sweep_counter_timing_4_dmg08_outaudio1_cgb04c_outaudio0.gbc [Dmg]	gambatte	gambatte/sound	Dmg	constant-output	sound	unknown	hw-capture:dmg08	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/sound/ch2_init_env_counter_timing_2_dmg08_outaudio1_cgb04c_outaudio0.gbc [Dmg]	gambatte	gambatte/sound	Dmg	constant-output	sound	unknown	hw-capture:dmg08	BUG	hardware-captured want; SameBoy verdict unmeasured

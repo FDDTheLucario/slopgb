@@ -65,6 +65,18 @@ pub struct PostBootState {
     /// Initial values for FF00..=FF7F and FFFF where they differ from the
     /// peripheral reset defaults: (address, value) pairs applied in order.
     pub hwio: &'static [(u16, u8)],
+    /// 2 MHz cycles of extra channel-1 duty advance at hand-off, on top of
+    /// the fixed envelope-decay warmup: the boot ROM's chime plays millions
+    /// of cycles before PC=$0100 and leaves the beep mid-duty-cycle. The
+    /// DMG-cart value on CGB, like `div_counter`/`lcd_phase_dots`.
+    ///
+    /// Pinned two-sided on both models by gambatte `sound/ch1_init_pos_1..8`,
+    /// which retriggers the still-running beep (freezing its duty position,
+    /// since the retrigger period is far shorter than the `freq = $7C1`
+    /// step) and reads the frozen output level: each of the ladder's four
+    /// rung pairs is one machine cycle wide, and DMG wants sound on rungs
+    /// 2-5 where CGB wants it on 8-3.
+    pub beep_duty_advance: u16,
     /// PPU position at hand-off, in dots from the start of a steady frame
     /// (line = dots / 456, dot-in-line = dots % 456). The boot ROM enabled
     /// the LCD long before PC=0x100, so the machine starts mid-frame; the
@@ -142,8 +154,15 @@ macro_rules! hwio_table {
 
 /// DMG-family boot: P1 both columns selected ($CF), channel-1 beep left
 /// playing (NR52 reads $F1), DMA register $FF (boot_hwio-dmgABCmgb).
+///
+/// The beep frequency is the **second** of the boot ROM's two chime notes:
+/// `dmg_boot.bin` calls its NR13/NR14 helper (`$00CB`: `ldh ($13),a; ld
+/// a,$87; ldh ($14),a`) with `$83` at `$007E` and again with `$C1` at
+/// `$0088`, so hand-off leaves NR13 = $C1 and the channel free-running at
+/// `freq = $7C1` — one duty step every 63 M-cycles. See
+/// [`Model::post_boot_state`] for what pins it.
 const HWIO_DMG: &[(u16, u8)] =
-    hwio_table!(p1: 0x00, beep: 0x83, 0x87, wave: WAVE_RAM_DMG, obp: 0xFF, dma: 0xFF);
+    hwio_table!(p1: 0x00, beep: 0xC1, 0x87, wave: WAVE_RAM_DMG, obp: 0xFF, dma: 0xFF);
 
 /// SGB boot: P1 deselected ($FF), frequency written to NR13/NR14 but never
 /// triggered (NR52 reads $F0 — boot_hwio-S).
@@ -153,7 +172,7 @@ const HWIO_SGB: &[(u16, u8)] =
 /// CGB/AGB boot with a DMG cart: P1 deselected ($FF), beep on (NR52 $F1),
 /// OBP0/OBP1 = $00, DMA register $00, 00/FF wave pattern (misc/boot_hwio-C).
 const HWIO_CGB: &[(u16, u8)] =
-    hwio_table!(p1: 0x30, beep: 0x83, 0x87, wave: WAVE_RAM_CGB, obp: 0x00, dma: 0x00);
+    hwio_table!(p1: 0x30, beep: 0xC1, 0x87, wave: WAVE_RAM_CGB, obp: 0x00, dma: 0x00);
 
 impl Model {
     /// Post-boot state table for this model.
@@ -212,6 +231,7 @@ impl Model {
             div_counter: 0,
             hwio: HWIO_DMG,
             lcd_phase_dots: 70164,
+            beep_duty_advance: 860,
         };
         match self {
             // boot_regs-dmg0, boot_div-dmg0, boot_hwio-dmg0.
@@ -301,6 +321,7 @@ impl Model {
                 div_counter: 0x2674,
                 hwio: HWIO_CGB,
                 lcd_phase_dots: 67836,
+                beep_duty_advance: 1298,
                 ..base
             },
             // misc/boot_regs-A, misc/boot_div-A.
@@ -316,6 +337,7 @@ impl Model {
                 div_counter: 0x2678,
                 hwio: HWIO_CGB,
                 lcd_phase_dots: 67840,
+                beep_duty_advance: 1298,
                 ..base
             },
         }

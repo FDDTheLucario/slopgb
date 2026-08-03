@@ -5,6 +5,55 @@
 - The APU is warmed ~1 emulated second post-boot so the boot beep's envelope is decayed at hand-off: PCM12/FF76 reads `$00`, and NR52 keeps the ch1 status bit.
 - Parked: "simplifying" the warmup away — it is load-bearing for the post-boot PCM12/NR52 state. Do keep the ~1 s warmup.
 
+### The beep is still running, at `$7C1`, mid-duty-cycle (2026-08-02)
+
+The decayed beep is not silent state: channel 1 is enabled with its frequency
+unit free-running, and a game that retriggers it inherits both the frequency and
+the duty position. Two constants carry that, and `gambatte/sound/ch1_init_pos_1..8`
+pins them.
+
+**NR13 = `$C1`, not `$83`.** Every boot ROM plays *two* chime notes through one
+helper, and the post-boot table must hold the second. Original Nintendo
+`dmg_boot.bin`: `$0070` sets `c = $13`, then `ld e,$83` / `cp h,$62` / `ld
+e,$C1` / `cp h,$64` before `ld a,e; ld (ff00+c),a; inc c; ld a,$87; ld
+(ff00+c),a` — `h` counts up, so the `$C1` pass is the last one. SameBoy's DMG
+and CGB replacements have the same shape (`ld a,$83; call` then `ld a,$C1; call`
+into `ldh ($13),a; ld a,$87; ldh ($14),a`). Hand-off therefore leaves `freq =
+$7C1`: **252 T (63 M-cycles) per duty step**, 2016 T per full cycle. NR13 is
+write-only and NR14 reads back bit 6 only, so `boot_hwio` cannot see this — the
+ladder is the only oracle.
+
+**`PostBootState::beep_duty_advance`** (2 MHz cycles, applied to channel 1 alone
+after the warmup; the DMG-cart value on CGB, `cgb_cart_cut` subtracted like
+`div_counter`/`lcd_phase_dots`). DMG 860, CGB/AGB 1298.
+
+The ladder's kernel runs from the entry point: `NR51 = 0`, `NR10 = 0`, `NR11 =
+NR12 = $80` (duty 2, volume 8, envelope period 0), a `dec b` delay, then `NR50 =
+$77`, `NR51 = $11`, and a loop that alternates `NR12` between `$80` and `$C0`
+and retriggers `NR14 = $80` every ~134 M-cycles. That retrigger period is far
+shorter than the 63-M-cycle duty step's reload, so the duty position **freezes**
+at whatever the delay left it on, for the whole run. The volume then alternates
+8/12 per trigger, which the harness's raw-sample comparator reads as sound — but
+only if the frozen duty bit is 1. `_outaudio1` ⇔ frozen on a high position.
+
+The eight rungs are four pairs one machine cycle wide, at delays 88/89, 119/120,
+340/341 and 371/372 M-cycles, so each model gets two boundaries pinned to a
+single machine cycle:
+
+| model | sound rungs | rising | falling |
+|---|---|---|---|
+| DMG | 2-5 | 88→89 | 340→341 |
+| CGB | 8-3 | 371→372 | 119→120 |
+
+Both spans are 252 M-cycles — four duty steps, which is what fixes the step at
+63 M-cycles and so the frequency at `$7C1` independently of the phase.
+
+Do **not** carry the advance by lengthening the warmup instead: that also moves
+the frame sequencer's hand-off phase, which the `ch2_init_env_counter_timing`
+rows pin separately. Measured — a warmup long enough to place the duty phase
+scores +11/−3, winning three `ch2_init_env_counter_timing` rows on DMG and
+losing the same three on CGB; advancing channel 1 alone scores **+8/−0**.
+
 ## SameBoy countdown model
 
 The APU follows SameBoy's countdown model (`src/apu/`):

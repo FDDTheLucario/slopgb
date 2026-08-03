@@ -392,14 +392,6 @@ gambatte/scy/scy_during_m3_spx09_ds_2.gbc [Cgb]
 gambatte/scy/scy_during_m3_spx09_ds_3.gbc [Cgb]
 gambatte/scy/scy_during_m3_spx09_ds_4.gbc [Cgb]
 gambatte/sound/ch1_duty0_pos6_to_pos7_timing_ds_6_cgb04c_outaudio1.gbc [Cgb]
-gambatte/sound/ch1_init_pos_1_dmg08_outaudio0_cgb04c_outaudio1.gbc [Dmg]
-gambatte/sound/ch1_init_pos_4_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb]
-gambatte/sound/ch1_init_pos_5_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb]
-gambatte/sound/ch1_init_pos_6_dmg08_cgb04c_outaudio0.gbc [Dmg]
-gambatte/sound/ch1_init_pos_6_dmg08_cgb04c_outaudio0.gbc [Cgb]
-gambatte/sound/ch1_init_pos_7_dmg08_cgb04c_outaudio0.gbc [Dmg]
-gambatte/sound/ch1_init_pos_7_dmg08_cgb04c_outaudio0.gbc [Cgb]
-gambatte/sound/ch1_init_pos_8_dmg08_outaudio0_cgb04c_outaudio1.gbc [Dmg]
 # ch1_init_reset_sweep_counter_timing residuals (the rest of the family
 # passes via the SameBoy sweep-calculation machinery in src/apu/pulse.rs):
 # these rows scan an NR14 trigger / NR10 write landing within a few dots
