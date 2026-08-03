@@ -1136,11 +1136,11 @@ gambatte/enable_display/ly0_late_vramr_3_dmg08_cgb04c_outFF.gbc [Cgb] | 2d35b762
 gambatte/enable_display/ly0_late_vramr_3_dmg08_cgb04c_outFF.gbc [Dmg] | 2d35b7625f2b2925 | b6b0632d997517d6
 gambatte/enable_display/ly0_late_vramr_ds_1_cgb04c_out55.gbc [Cgb] | fadf7f762a78e065 | b6b0632d997517d6
 gambatte/enable_display/ly0_late_vramr_ds_1_cgb04c_out55.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
-gambatte/enable_display/ly0_late_vramr_ds_2_cgb04c_outFF.gbc [Cgb] | fadf7f762a78e065 | b6b0632d997517d6
+gambatte/enable_display/ly0_late_vramr_ds_2_cgb04c_outFF.gbc [Cgb] | 2d35b7625f2b2925 | b6b0632d997517d6
 gambatte/enable_display/ly0_late_vramr_ds_2_cgb04c_outFF.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/enable_display/ly0_late_vramw_1_dmg08_cgb04c_outAA.gbc [Cgb] | 99b46ebd7d03ab25 | b6b0632d997517d6
 gambatte/enable_display/ly0_late_vramw_1_dmg08_cgb04c_outAA.gbc [Dmg] | 99b46ebd7d03ab25 | b6b0632d997517d6
-gambatte/enable_display/ly0_late_vramw_2_dmg08_out55_cgb04c_outAA.gbc [Cgb] | fadf7f762a78e065 | b6b0632d997517d6
+gambatte/enable_display/ly0_late_vramw_2_dmg08_out55_cgb04c_outAA.gbc [Cgb] | 99b46ebd7d03ab25 | b6b0632d997517d6
 gambatte/enable_display/ly0_late_vramw_2_dmg08_out55_cgb04c_outAA.gbc [Dmg] | fadf7f762a78e065 | b6b0632d997517d6
 gambatte/enable_display/ly0_late_vramw_3_dmg08_cgb04c_out55.gbc [Cgb] | fadf7f762a78e065 | b6b0632d997517d6
 gambatte/enable_display/ly0_late_vramw_3_dmg08_cgb04c_out55.gbc [Dmg] | fadf7f762a78e065 | b6b0632d997517d6
@@ -8202,7 +8202,7 @@ gbmicrotest/vram_read_l1_d.gb [Cgb] | a02df1171e8f7325 | b6b0632d997517d6
 gbmicrotest/vram_read_l1_d.gb [Dmg] | a02df1171e8f7325 | b6b0632d997517d6
 gbmicrotest/vram_write_l0_a.gb [Cgb] | a02df1171e8f7325 | b6b0632d997517d6
 gbmicrotest/vram_write_l0_a.gb [Dmg] | a02df1171e8f7325 | b6b0632d997517d6
-gbmicrotest/vram_write_l0_b.gb [Cgb] | a02df1171e8f7325 | b6b0632d997517d6
+gbmicrotest/vram_write_l0_b.gb [Cgb] | 9ab4e008dd5a4325 | b6b0632d997517d6
 gbmicrotest/vram_write_l0_b.gb [Dmg] | a02df1171e8f7325 | b6b0632d997517d6
 gbmicrotest/vram_write_l0_c.gb [Cgb] | a02df1171e8f7325 | b6b0632d997517d6
 gbmicrotest/vram_write_l0_c.gb [Dmg] | a02df1171e8f7325 | b6b0632d997517d6

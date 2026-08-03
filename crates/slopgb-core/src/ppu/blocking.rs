@@ -222,6 +222,22 @@ impl Ppu {
         self.eager_access_released()
     }
 
+    /// Dots of grace the CGB gives a VRAM lock past its mode-3 anchor: a read
+    /// at state(80) still returns data (gambatte vramReadable `lineCycles + ds
+    /// < 76 + 3*cgb`; SameBoy keeps `vram_read_blocked` false through the OAM
+    /// scan on CGB; age vram-read-cgbBCE). The DS grid drops one dot of it,
+    /// exactly as the non-glitch DS lock (82) sits one below its SS twin (83)
+    /// — `enable_display/ly0_late_vramr_ds_{1,2}` open at dot 78 and block at
+    /// 80. Only the LCD-enable line reads the DS form, since the non-glitch
+    /// CGB DS paths return their own lock before reaching this one.
+    fn vram_lock_grace(&self) -> u16 {
+        if self.model.is_cgb() {
+            3 - u16::from(self.ds)
+        } else {
+            0
+        }
+    }
+
     pub(crate) fn vram_read_blocked(&self) -> bool {
         if !self.enabled
             || self.line > 143
@@ -242,11 +258,9 @@ impl Ppu {
         {
             return false;
         }
-        // CGB read locking starts 3 dots later than DMG — a read at
-        // state(80) still returns data (gambatte vramReadable
-        // `lineCycles + ds < 76 + 3*cgb`; SameBoy keeps vram_read_blocked
-        // false through the OAM scan on CGB; age vram-read-cgbBCE).
-        let late = if self.model.is_cgb() { 3 } else { 0 };
+        // CGB read locking starts later than DMG (see
+        // [`Self::vram_lock_grace`]).
+        let late = self.vram_lock_grace();
         // Shifted ROMs classify the lock on the un-shifted frame
         // (`vram_m3/preread_lcdoffset1_1` reads dot83 after the +1-dot machine
         // advance where SameBoy still reads open; identity otherwise). Measured:
@@ -321,7 +335,12 @@ impl Ppu {
             return false;
         }
         if self.glitch_line {
-            self.dot >= GLITCH_MODE3_START
+            // On this line the write lock takes the same anchor and the same
+            // grace as the read lock: no ROM separates the two there
+            // (`ly0_late_vramw_{1,2,3}` bracket both to dots 76..=80 open /
+            // 84 blocked on CGB and 76 open / 80 blocked on DMG), unlike the
+            // normal line where the write lock trails at 84.
+            self.dot >= GLITCH_MODE3_START + self.vram_lock_grace()
         } else {
             // DS: the write's true DS sample sits later on the dot grid, so the
             // mode-3 write lock covers it from dot 82 (`prewrite_ds_2` wants its

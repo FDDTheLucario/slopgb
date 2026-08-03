@@ -396,3 +396,37 @@ fn cgb_glitch_line_palette_lock_trails_the_anchor() {
         "the `_ds_2` rung's dot-82 palette access is locked"
     );
 }
+
+/// The LCD-enable (glitch) line's VRAM locks carry the same CGB grace the
+/// normal line's read lock does — and the DS grid drops one dot of it, as the
+/// non-glitch DS lock (82) sits one below its SS twin (83). Pinned by
+/// `enable_display/ly0_late_vram{r,w}_*`: on CGB a read/write at dot 80 lands
+/// and one at 84 does not, while the DS read blocks from 80.
+#[test]
+fn cgb_glitch_line_vram_locks_carry_the_grace() {
+    let mut p = cgb();
+    p.write(0xFF40, 0x81);
+    run_to(&mut p, 0, 80);
+    assert!(p.glitch_line, "line 0 after enable is the glitch line");
+    assert!(!p.vram_read_blocked(), "dot 80 VRAM read is open");
+    assert!(!p.vram_write_blocked(), "dot 80 VRAM write lands");
+    run_to(&mut p, 0, 84);
+    assert!(p.vram_read_blocked(), "dot 84 VRAM read is locked");
+    assert!(p.vram_write_blocked(), "dot 84 VRAM write is dropped");
+
+    // Double speed drops one dot of the grace: the DS read blocks from 80.
+    let mut q = cgb();
+    q.set_double_speed(true);
+    q.write(0xFF40, 0x81);
+    run_to(&mut q, 0, 78);
+    assert!(!q.vram_read_blocked(), "DS dot 78 VRAM read is open");
+    run_to(&mut q, 0, 80);
+    assert!(q.vram_read_blocked(), "DS dot 80 VRAM read is locked");
+
+    // DMG keeps the bare anchor: its dot-80 read and write are already locked.
+    let mut d = dmg();
+    d.write(0xFF40, 0x81);
+    run_to(&mut d, 0, 80);
+    assert!(d.vram_read_blocked(), "DMG dot 80 VRAM read is locked");
+    assert!(d.vram_write_blocked(), "DMG dot 80 VRAM write is dropped");
+}

@@ -142,6 +142,18 @@ Both port `lycRegChangeTriggersStatIrq` (held-compare target tables, m0/m1 block
   `cgb_glitch_line_palette_lock_trails_the_anchor`. The VRAM and
   OAM predicates keep 78 — `ly0_late_vramr_{1,2,3}` and `ly0_late_oamw_{1,2}`
   pass on both speeds with the unchanged anchor, so the grace is palette-only.
+- **VRAM locks carry the CGB grace too, and the DS grid drops one dot of it**
+  (2026-08-02) — the glitch-line read and write locks were both the bare dot-78
+  anchor. `enable_display/ly0_late_vram{r,w}_{1,2,3}` put a CGB read *and* write
+  at dots 76/80 (both land) and 84 (both dropped), so the CGB lock is
+  `78 + 3` like the normal line's read grace; the DMG legs block at 80 already
+  and keep the bare anchor. `ly0_late_vramr_ds_{1,2}` open at 78 and block at
+  80, one dot below the SS lock — the same relation the non-glitch DS lock (82)
+  has to its SS twin (83). No ROM separates read from write on this line, so
+  both take the identical anchor + grace (unlike the normal line, where the
+  write lock trails at 84). Scores **+2/−0**; unit test
+  `cgb_glitch_line_vram_locks_carry_the_grace` pins each arm. OAM is unaffected
+  (`ly0_late_oamw_{1,2}{,_ds}` pass at the bare anchor on both speeds).
 
 ### IF rise timing
 
