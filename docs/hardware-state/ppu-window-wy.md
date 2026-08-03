@@ -402,3 +402,65 @@ at the bare-line dot, discarding the window restart cost already paid. That is a
 render change with pixel consequences (the mealybug `m3_lcdc_win_en_change*`
 photos pin the drawn columns), so it wants the same measure-first treatment the
 window-Y group got.
+
+## Group 3 scoped: the "sub-dot" verdict does not survive
+
+The remaining arms (1, D1, 8, 8-spr) hold **112 rows**, of which **96 of the 98
+CGB rows are SameBoy-PASS** (classifier) — genuine, not floor. Prior maps called
+this the atomic half-dot render FSM rewrite. Scoped with `rom-diff-weld` +
+`rom-disasm-gaps`, it splits into three separable pieces and most of it was never
+sub-dot:
+
+| piece | rows | shape |
+|---|---|---|
+| arms 1 + D1 (closed-form window length `259`/`263 + SCX&7`) | 33 | table-shaped; candidates for the emergent flip, like arm 8 already uses |
+| the post-switch STOP table (the two `stop_anchor_midframe` branches) | 32 | render re-pacing after a speed switch, NOT a read law |
+| arm 8's emergent core + 8-spr | ~47 | already emergent from the render's own flip — legitimate modelling |
+
+### Not a weld: the pairs separate at whole-dot
+
+`cmp -l` on the speedchange siblings is a **single inserted `00`** shifting a run
+(`m2int_m3stat_lcdoffds` at 0x1074, `speedchange2_m2int_m3stat_scx2` at 0x1032),
+and disassembly shows what it shifts is the observable read itself:
+
+```
+1074  F2        ld a,(ff00+c)      ; the FF41 read — one M-cycle later in `_2`
+1075  A0        and b
+1076  C3 00 70  jp 7000
+```
+
+One inserted byte = one whole M-cycle, the `rom-diff-weld` signature for
+REPRESENTABLE. Traced end to end on `speedchange2_m2int_m3stat_scx2_1/_2`, the
+pair separates cleanly on the whole-dot grid:
+
+| | read dot | rphd | exit | verdict | want |
+|---|---|---|---|---|---|
+| `_1` | 251 | 510 | 514 | mode 3 | 3 |
+| `_2` | 255 | 518 | 514 | mode 0 | 0 |
+
+The exit sits exactly between the two reads. Arm 8's emergent `2*flip + 2`,
+anchored to the render's own projection, is what does that — no table, no
+half-dot.
+
+### The post-switch 32 are a render projection error
+
+On `speedchange_ly44_m3_m3stat_2` (DS, want mode 0) with the table disabled the
+emergent exit is 508 against a true 504, i.e. the render's post-switch flip
+projects 255 where it should be 253 — **2 dots, whole-dot representable**. The
+reads also sit 4-6 dots off SameBoy's on that line, the same ISR-frame class as
+the group-2 finding. So this block wants the speed-switch render re-pacing
+corrected, not a sub-dot read.
+
+### What this means for the rewrite
+
+The blanket "coupled multi-session half-dot render FSM" verdict does not hold for
+the bulk of this group. Two of the three pieces are ordinary whole-dot work
+(closed forms that should be emergent; a post-switch re-pace), and the third is
+already emergent and behaving. What is NOT established here is that the ~47
+emergent rows need nothing at all — only that arm 8's core is modelling rather
+than compensation, so it is not what the reviewer's critique is aimed at.
+
+Method note: the earlier verdict came from sweeping uniform read-frame levers,
+which shift every affected row equally and so can never separate want-opposite
+siblings — the exact trap `rom-diff-weld` documents. Five prior verdicts in this
+tree fell the same way.
