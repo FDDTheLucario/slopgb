@@ -55,6 +55,30 @@ Parked: chasing the residual late_sp `_ds` out3 rows (half-dot, cc-granular race
 - A WX match while drawing injects one color-0 pixel when it lands on a window tile boundary (mealybug "reactivation").
 - WX=0 start adds `SCX&7+1` discards.
 
+#### Measured, NOT landed: the double-speed WX render-commit class (2026-08-03)
+
+At single speed WX (FF4B) carries its own render-commit debt (12, against the
+uniform 8) because "its render stage is the smallest, so it needs the largest
+debt to reach the WX activation comparator" (`regs/stage.rs`). Double speed has
+no WX arm — everything takes the uniform 4. Giving it one, `0xFF4B => 8`, scores
+**+2/−0** on the full collection: `window/late_wx_ds_2` and its pixel-exact
+`window/on_screen/late_wx_ds_2` sibling.
+
+The scenario, probed from the ROM: WY=0 and WX=7 are set in VBlank with the
+window enabled, so the window matches at screen x 0; then on line 1 WX is moved
+to 255 mid-mode-3, at dot 92 (`_1`) or 94 (`_2`). At dot 92 the write still
+suppresses the window (the FF41 read at dot 258 wants mode 0); at dot 94 it does
+not, and the extended mode 3 is what the read sees. Our uniform-4 commit lands
+early enough to suppress in both.
+
+**Not landed for want of a pin.** Three synthetic reproductions were built and
+all three failed to discriminate: replaying the ROM's write order against a bare
+`Ppu` leaves `render.win_active` false at both dots, and probing the `eff.wx`
+commit dot directly shows no difference between debt 4 and 8 — the staged-commit
+path is not reached by register writes alone. Landing this needs a harness that
+drives the render pipeline the way the ROM does (or an interconnect-level test),
+not another constant.
+
 ### WY sampling
 
 - Discrete weMaster sampling at dots 450/454 (+1 DMG) and line-0 dot 2.
