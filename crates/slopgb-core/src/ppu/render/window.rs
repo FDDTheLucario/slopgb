@@ -124,18 +124,27 @@ impl Ppu {
                     // WX<7 cuts the leading 7-WX window columns instead,
                     // and the BG fine-scroll comparator hunt ends with
                     // the BG fetching.
+                    // A WX <= 7 window activates inside the prefill, while the
+                    // BG fine-scroll discard is still being paid out. Those
+                    // pixels do not vanish when the window takes over the
+                    // fetcher — carrying them is what makes a triggering
+                    // window's mode 3 end at SameBoy's `263 + SCX&7` instead of
+                    // a flat 261. (A WX >= 8 window activates after the discard
+                    // has already been spent, so `discard` is 0 and nothing
+                    // carries.)
+                    let bg_left = if r.hunt_done {
+                        r.discard
+                    } else {
+                        self.eff.scx & 7
+                    };
                     r.hunt_done = true;
-                    r.discard = 7u8.saturating_sub(wx);
-                    if wx == 0 {
-                        // WX=0 with a fine scroll: the start eats the
-                        // SCX&7 discard plus one extra dot (SameBoy
-                        // display.c WX=0/SCX&7 extra cycle; the mealybug
+                    r.discard = 7u8.saturating_sub(wx) + bg_left;
+                    if wx == 0 && self.eff.scx & 7 > 0 {
+                        // WX=0 pays one extra dot on top (SameBoy display.c's
+                        // WX=0/SCX&7 extra cycle; the mealybug
                         // m3_window_timing_wx_0 photos pin pixel 0 at
                         // dot 103 + SCX&7 + 1 on both DMG and CGB-C).
-                        let fine = self.eff.scx & 7;
-                        if fine > 0 {
-                            r.discard += fine + 1;
-                        }
+                        r.discard += 1;
                     }
                 }
             } else if !self.model.is_cgb() && wx == 166 && !self.win_start_pending {
