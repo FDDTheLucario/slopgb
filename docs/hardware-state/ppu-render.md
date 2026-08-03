@@ -71,13 +71,22 @@ suppresses the window (the FF41 read at dot 258 wants mode 0); at dot 94 it does
 not, and the extended mode 3 is what the read sees. Our uniform-4 commit lands
 early enough to suppress in both.
 
-**Not landed for want of a pin.** Three synthetic reproductions were built and
-all three failed to discriminate: replaying the ROM's write order against a bare
-`Ppu` leaves `render.win_active` false at both dots, and probing the `eff.wx`
-commit dot directly shows no difference between debt 4 and 8 — the staged-commit
-path is not reached by register writes alone. Landing this needs a harness that
-drives the render pipeline the way the ROM does (or an interconnect-level test),
-not another constant.
+**Not landed for want of a pin.** Five reproductions were built; none
+discriminates. Against a bare `Ppu`: replaying the ROM's write order leaves
+`render.win_active` false at both dots, and probing the `eff.wx` commit dot
+directly shows no difference between debt 4 and 8 — writes straight to `Ppu`
+never reach the staged-commit path. Through the **interconnect** (which does
+reach it, `interconnect_tests`): arming the window right after the enable makes
+line 1 the glitch line's successor and both dots read mode 0 (the fix changes
+nothing); arming from VBlank so line 1 is an ordinary line of a running frame
+overshoots the other way and both dots read mode 3, losing the `_1` arm the ROM
+pins. The deadline evidently depends on further line state the replay does not
+carry — the window having already run on earlier lines, and whatever the
+suite's `_1`/`_2` share beyond WY/WX/LCDC.
+
+So the constant is corpus-fitted only. Landing it needs the ROM's own state
+reproduced (drive the actual `late_wx_ds` kernel, or diff its full render trace
+against the replay to find the missing term) — not a sixth guess at the setup.
 
 ### WY sampling
 
