@@ -206,7 +206,42 @@ output for another, not a photo regression), and `gbmicrotest/ppu_win_vs_wx
 [Dmg]`, whose matrix still passes — its verdict is a memory value, the screen is
 an echo.
 
-The remaining 29 need the fetcher-slot model itself: SameBoy's exit moves +6
+### Probed for the remaining 29 (measured, not landed)
+
+Two ingredients each move the arms-cut failure count, and both are
+directionally right, but they cannot be combined with the arms still present —
+the arms were calibrated against the old views and double-correct (8 rows
+regress with arms intact). It is either/or, and the pair alone still leaves 20,
+so the group is not ready:
+
+| change | arms-cut rows |
+|---|---|
+| baseline | 29 |
+| arm 8 extended to aborted-window lines (`win_gone`: `!win_active && wx_match_dot != 0 && wy_triggered`, taking the emergent `2*flip` exit) | 25 |
+| enable test on the deferred `eff.render_lcdc` instead of the architectural bit | 20 (with `win_gone`) |
+
+The enable-view finding is exact. Dual-traced `late_disable_early_scx03_wx10`
+(CGB, WX=16, SCX&7=3), where the WX match dots agree perfectly (both 109):
+
+| | SameBoy | slopgb (arch view) |
+|---|---|---|
+| `_1` LCDC.5 clear | cfl 108 (< match -> no window) | dot 104 |
+| `_2` LCDC.5 clear | cfl 112 (> match -> window) | dot 108 |
+| `_1` / `_2` exit | 260 / 266 | 257 / 257 |
+
+slopgb's clear lands a uniform 4 dots early on the architectural view, so both
+legs fall on the same side of the match and the pair collapses. The deferred
+render view moves it back.
+
+Rejected by measurement: a dedicated per-dot LCDC.5 lag (`win_en_lag`, the
+`obj_en_lag` shape) — 2 dots ties the render view at 20, 3 gives 26, 4 gives 32,
+i.e. it gets WORSE exactly where the trace says it should get better. The reason
+is that the enable test and the abort are separate paths: `window_abort_flags`
+fires at cc+0 regardless, so delaying only the activation gate makes the window
+activate and then be aborted by an already-committed clear. **Reconciling those
+two frames is the next step for this group** — not another view swap.
+
+The remaining rows also need the fetcher-slot model itself: SameBoy's exit moves +6
 dots as the LCDC.5 clear moves +4, because the clear lands in different fetcher
 slots. slopgb's `window_abort_render` re-anchors the BG fetch and the line ends
 at the bare-line dot, discarding the window restart cost already paid. That is a
