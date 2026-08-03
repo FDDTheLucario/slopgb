@@ -79,6 +79,44 @@ step-value error of one moves the whole race a full 8192 T:
 
 Only the two values above satisfy their model, and each is bracketed on both
 sides. Scores **+3/−0** (the DMG rungs; CGB was already right at 0).
+### The `_reset_` variant is a zombie-write race, not a phase (2026-08-02)
+
+`ch2_init_reset_env_counter_timing_1..16` (4 rows left: `5`/`11` on DMG,
+`7`/`15` on CGB) is the same kernel with an `NR52 = $00; NR52 = $80` power
+cycle in front, so the frame sequencer restarts there and `apu_div_step` above
+cannot reach it. The sixteen rungs are **eight pairs**, each pair one machine
+cycle apart, over two knobs: the delay before the power cycle (`ld b,c` at
+`$0151`) and the delay before the locking `NR22 = $08` after the trigger.
+
+| pair | pre-cycle | post-trigger | lock | DMG want | DMG ours | CGB want | CGB ours |
+|---|---|---|---|---|---|---|---|
+| 1,2 | `3E,01` | `EB,0F` | `$186` | 0,1 | 0,1 | 0,0 | 0,0 |
+| 3,4 | `10,02` | `EB,0F` | `$186` | 0,0 | 0,0 | 0,1 | 0,1 |
+| 5,6 | `3E,01` | `E9,11` | `$188` | 0,1 | **1,1** | 1,1 | 1,1 |
+| 7,8 | `10,02` | `E9,11` | `$188` | 1,1 | 1,1 | 0,1 | **1,1** |
+| 9,10 | `E0,3E` | `FC,02` | `$186` | 0,1 | 0,1 | 0,0 | 0,0 |
+| 11,12 | `E0,3E` | `F0,12` | `$186` | 0,1 | **1,2** | 1,1 | 1,1 |
+| 13,14 | `E0,3E` | `FC,02` | `$189` | 0,0 | 0,0 | 0,1 | 0,1 |
+| 15,16 | `E0,3E` | `F0,12` | `$189` | 1,1 | 1,1 | 0,1 | **1,2** |
+
+0 = `_outaudio0`; the "ours" columns are channel 2's volume at the lock write,
+probed, where volume 0 is the silent stream.
+
+Each model fails exactly two pairs, in two shapes: the low rung one too high
+(DMG 5,6 · CGB 7,8) and *both* rungs one too high (DMG 11,12 · CGB 15,16).
+Every failure is our volume one step further along than the reference's, so a
+single "step later" lever would move all four — and the twelve correct pairs
+are what it has to survive.
+
+The mechanism is **not** the divider phase. Probed on DMG 9-12, which share a
+pre-cycle delay and therefore a power-on (`prev_div = $ABFC`, DIV bit 12 clear,
+no skip glitch) and differ only in the post-trigger delay: the envelope's step
+lands between events 7 and 8 for both, while the two pairs' locks land at event
+7 and event 15. A step time fixed by the power-on cannot give pair 9,10 a
+straddle at event 7 and pair 11,12 one at event 15, so what the reference reads
+at the later lock is produced by the locking `NR22` write itself — NRx2 zombie
+mode — not by the frame-sequencer step. Start there, not on the divider.
+
 
 ## SameBoy countdown model
 
