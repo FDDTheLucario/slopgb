@@ -227,60 +227,54 @@ fn dmg_wx_166_no_window_pixels_counter_advances() {
     assert_eq!(p.win_line, 2);
 }
 
-/// The WY condition is sampled at discrete dots (gambatte weMaster
-/// checks at line cycles 450/454 and line 0 dot 2), not compared
-/// continuously: a WY value that matches LY only *between* the
-/// sample points and is gone again by the window's WX match dot
-/// must not arm the frame latch. The live comparison against the
-/// delayed wy2 copy covers same-line writes instead.
+/// A WY write schedules its compare for the next 4-dot boundary (SameBoy
+/// `wy_check_scheduled`), so a mid-line write that matches LY arms the frame
+/// latch even though no fixed per-line sample point is anywhere near it — and
+/// a value that is gone again by that boundary does not.
 #[test]
-fn wy_latch_samples_discretely() {
+fn mid_line_wy_write_arms_the_frame_latch_at_its_scheduled_check() {
+    // WY matches LY only between two boundaries and is gone by the next one:
+    // no compare ever sees the match, so the window never arms.
     let mut p = dmg_on(0xB1);
     p.write(0xFF4B, 87); // window at pixel 80
     p.write(0xFF4A, 200); // WY: no match anywhere
-    // Mid-line on line 2 (after dot 2, before dot 451), set WY=2 and
-    // move it away again before the dot-451 sample: with continuous
-    // latching this would arm the window for the rest of the frame.
     run_to(&mut p, 2, 100);
     p.write(0xFF4A, 2);
-    run_to(&mut p, 2, 300);
-    p.write(0xFF4A, 200);
+    p.write(0xFF4A, 200); // moved away before the scheduled compare runs
     let v0 = render_line(&mut p, 3);
-    assert_eq!(v0, 254, "no window: WY matched only between samples");
-    // A WY write that holds through the dot-451 sample arms the
-    // latch for the rest of the frame.
+    assert_eq!(v0, 254, "no compare saw the match: the window stays bare");
+    // A WY write left standing arms the latch at its scheduled compare, and
+    // the latch is sticky for the rest of the frame.
     run_to(&mut p, 4, 100);
     p.write(0xFF4A, 4);
     run_to(&mut p, 5, 0);
     p.write(0xFF4A, 200);
     let v0 = render_line(&mut p, 6);
-    assert_eq!(v0, 261, "the dot-451 sample armed the frame latch");
+    assert_eq!(v0, 261, "the scheduled compare armed the frame latch");
 }
 
-/// On CGB the live WY comparison uses a copy that lags the
-/// architectural write by ~6 dots (gambatte video.cpp wyChange:
-/// wy2 at cc+6 vs the wx-style commit at cc+2): a WY write landing
-/// within 6 dots before the WX match dot is not seen by the
-/// comparator on that line.
+/// The scheduled compare has to land before the window's WX comparator match
+/// to catch that line: a WY write whose 4-dot boundary falls past the match
+/// leaves the line bare, and the window only draws from the next line on.
 #[test]
-fn cgb_wy2_lags_architectural_wy() {
+fn wy_write_past_the_wx_match_misses_its_own_line() {
+    // Window at pixel 80 → WX match at dot 177 on CGB.
     let mut p = cgb_on(0xB1);
-    p.write(0xFF4B, 87); // window at pixel 80: match dot 170
+    p.write(0xFF4B, 87);
     p.write(0xFF4A, 200);
-    // Commit WY=2 at dot 173 of line 2: arch wy == ly at the match
-    // dot 177 (lx == 80), but wy2 catches up only at dot 179.
-    run_to(&mut p, 2, 173);
+    // Commit WY=2 at dot 177: the next 4-dot boundary (180) is past the match.
+    run_to(&mut p, 2, 177);
     p.write(0xFF4A, 2);
     let v0 = finish_line(&mut p);
-    assert_eq!(v0, 254, "wy2 still held the old value at the match");
-    // Same write 5 dots earlier: wy2 caught up before the match.
+    assert_eq!(v0, 254, "the compare landed after the WX match");
+    // The same write a boundary earlier catches the line.
     let mut p = cgb_on(0xB1);
     p.write(0xFF4B, 87);
     p.write(0xFF4A, 200);
     run_to(&mut p, 3, 168);
     p.write(0xFF4A, 3);
     let v0 = finish_line(&mut p);
-    assert_eq!(v0, 261, "wy2 caught up: the live comparison triggers");
+    assert_eq!(v0, 261, "the compare landed before the WX match");
 }
 
 /// WX reaches the pipeline one dot later than the palette strobe

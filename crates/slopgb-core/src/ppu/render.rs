@@ -256,6 +256,16 @@ pub(super) struct Render {
     /// its native verdict, parked). Reset per line; law input only.
     pub(super) scx_write_dot: u16,
 
+    /// While non-zero, the dot up to which a WX comparator match that failed
+    /// ONLY on the window-Y latch stays live. SameBoy re-tests
+    /// `wy_triggered && WX == position_in_line + 7` every dot until it fires,
+    /// and its `position_in_line` reaches that position
+    /// [`Ppu::win_activation_lead`] dots after slopgb's fixed prefill match, so
+    /// a WY write landing in between still catches the line
+    /// (`late_wy_FFto2_ly2_scx5_ds`: SameBoy's write at `ly2 cfl100`, compare
+    /// at 101, activation at 102, against slopgb's match at dot 97). Reset per
+    /// line and at activation.
+    pub(super) win_pending_until: u16,
     /// `SCX & 7` at the fine-scroll comparator match — the value that fixed
     /// this line's discard, and therefore the alignment of `lx` to the tile
     /// grid. The BG map column only needs its position-derived form once the
@@ -344,6 +354,7 @@ impl Render {
             prefill_pos: 0,
             wx_match_dot: 0,
             wx_match_scx: 0,
+            win_pending_until: 0,
         }
     }
 }
@@ -412,6 +423,7 @@ impl Ppu {
         r.prefill_pos = 0;
         r.wx_match_dot = 0;
         r.wx_match_scx = 0;
+        r.win_pending_until = 0;
         if self.glitch_line {
             // No OAM scan ran on the glitched LCD-enable line: no sprites.
             r.n_sprites = 0;
@@ -810,6 +822,7 @@ impl Render {
         w.u8(self.prefill_pos);
         w.u16(self.wx_match_dot);
         w.u8(self.wx_match_scx);
+        w.u16(self.win_pending_until);
     }
     pub(super) fn read_state(
         &mut self,
@@ -861,6 +874,7 @@ impl Render {
         self.prefill_pos = r.u8()?;
         self.wx_match_dot = r.u16()?;
         self.wx_match_scx = r.u8()?;
+        self.win_pending_until = r.u16()?;
         Ok(())
     }
 }

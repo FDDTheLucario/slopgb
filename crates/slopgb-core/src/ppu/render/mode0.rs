@@ -265,7 +265,7 @@ impl Ppu {
         // (±1 dot, boundary-dependent) is not projected.
         let wx = self.eff.wx;
         if self.eff.lcdc & LCDC_WIN_ENABLE != 0
-            && (self.wy_latch || self.wy2 == self.ly)
+            && self.wy_triggered
             && (7..=166).contains(&wx)
             && wx - 7 >= r.lx
         {

@@ -31,14 +31,26 @@ impl Ppu {
         } else {
             wx <= 166 && self.render.lx == wx - 7
         };
-        // The WY condition: the frame-sticky latch OR a live match
-        // against the delayed WY copy (gambatte plotPixel:
-        // `weMaster || (wy2 == ly && lcdcWinEn)`).
-        let wy_ok = self.wy_latch || self.wy2 == self.ly;
+        // The WY condition: the frame-sticky window-Y latch (SameBoy
+        // `check_window = wy_triggered && LCDC.5`, display.c:1315).
+        let wy_ok = self.wy_triggered_for_activation();
         // Rising edge only: the match level holds while lx is frozen
         // through the start stall and must not re-fire.
         let prev_match = std::mem::replace(&mut self.render.win_match_prev, win_match);
         let win_match = win_match && !prev_match;
+        // A match that failed only on the window-Y latch stays live until
+        // SameBoy's own activation instant (see `Render::win_pending_until`),
+        // so a WY write landing in between still catches this line.
+        let win_match = if win_match {
+            if !wy_ok {
+                self.render.win_pending_until = self.dot + self.win_activation_lead();
+            }
+            true
+        } else {
+            self.render.win_pending_until != 0
+                && self.dot < self.render.win_pending_until
+                && self.wy_triggered
+        };
         let win_en_now = self.eff.lcdc & LCDC_WIN_ENABLE != 0;
         // Record the raw WX-comparator match dot for the shadow WY-trigger's
         // activation deadline — *before* the `wy_ok`/`win_en` gate, so a bare
@@ -50,7 +62,7 @@ impl Ppu {
         }
         if win_match
             && !win_en_now
-            && self.wy_latch
+            && self.wy_triggered
             && !self.model.is_cgb()
             && wx == 166
             && !self.win_start_pending
@@ -66,6 +78,7 @@ impl Ppu {
             self.win_start_pending = true;
         }
         if win_match && wy_ok && win_en_now {
+            self.render.win_pending_until = 0;
             if !self.render.win_active {
                 // Activation: the window line counter advances *here*
                 // (gambatte plotPixel: ++winYPos), which is what makes a

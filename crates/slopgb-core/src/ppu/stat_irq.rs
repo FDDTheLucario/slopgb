@@ -98,8 +98,7 @@ impl Ppu {
             && self.eff.lcdc & LCDC_WIN_ENABLE != 0
             && self.line >= 1
             && self.line < 144
-            && self.wy2 <= self.line
-            && self.wy2 <= 143
+            && self.wy_triggered
             && !self.render.win_aborted
             && !self.render.win_active
     }

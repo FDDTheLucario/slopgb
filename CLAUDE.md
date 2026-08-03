@@ -170,5 +170,8 @@ unaffected. Save states carry the SNES tail only when a coprocessor is installed
 UI theming (contemporary Light default / Dark / Classic + custom-theme API; colour-only,
 `T` toggles Light↔Dark): [`docs/ui-state/theming.md`](docs/ui-state/theming.md).
 Known residuals (all SameBoy-FAIL/floored, NOT regressions): DS mid-dot render floor,
-halt-wake/HDMA levers.
+halt-wake/HDMA levers. The FF41 read-law arm table
+(`ppu/stat_irq/read_laws{,_exit}.rs`) is a compensating layer being retired arm
+by arm: the window-Y group is gone, replaced by SameBoy's `wy_check` in the
+render ([`docs/hardware-state/ppu-window-wy.md`](docs/hardware-state/ppu-window-wy.md)).
 

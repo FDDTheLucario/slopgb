@@ -310,153 +310,12 @@ impl Ppu {
             0xFF43 => self.scx = value,
             0xFF44 => {} // LY is read-only.
             0xFF4A => {
-                let old_wy = self.wy;
+                // SameBoy `memory.c:1459`: the write lands architecturally and
+                // schedules the window-Y compare (`Ppu::wy_check`) for the next
+                // 4-dot boundary, which is how a mid-line WY write can still
+                // trigger — or un-trigger — this line's window.
                 self.wy = value;
-                // The boundary-WY cross-line latch (see `Ppu::wy_xline_trig`):
-                // a tail/head write matching the current line, window enabled at
-                // the commit (DMG too — the DMG arm-7 twin reads the same latch).
-                // The arch commit runs at the M-cycle END, so the boundary window
-                // catches the tail-write class (`late_wy_FFto0/FFto1/10to0/1toFF`)
-                // the read-frame WY laws pair with.
-                // The write dot the tail/head boundary classifies against.
-                // Under the DMG line-153 emission decouple the
-                // shared LYC=153 ISR — and every WY write it times — fires one
-                // M-cycle (4 dots SS) EARLIER than the stale dot-6/dot-8
-                // recognition these 452/4 boundaries were tuned against, so a
-                // boundary write that landed at `ly N dot 4` (base: past the
-                // head → bare) now commits at `ly N dot 0` (inside the head →
-                // spurious cross-line extend). Re-map by the +4 read-debt so the
-                // moved write classifies on the calibrated frame: `FFto0_ly2_3`
-                // ly1 dot0 → xdot 4 (NOT head → bare); its `_2` ly0 dot452 →
-                // xdot 456 (still tail → extend). The SS twin of the DS lyfc
-                // wake re-derivation. DMG only (the CGB emission is unmoved).
-                let xdot = self.dot + if !self.model.is_cgb() { 4 } else { 0 };
-                if self.enabled
-                    && !(4..452).contains(&xdot)
-                    && self.line < 144
-                    && value == self.ly
-                    && self.eff.lcdc & LCDC_WIN_ENABLE != 0
-                {
-                    self.wy_xline_trig = true;
-                }
-                // DMG — a HEAD write (dot < 4) matching the JUST-FINISHED
-                // line: slopgb's deferred frame lands a line-boundary WY write
-                // a full line late (SameBoy applies it at `ly N−1 cfl0` and its
-                // continuous `wy_check` triggers on line N−1; slopgb commits at
-                // `ly N dot0`, past that line's weMaster sample). If the value
-                // matches the previous line (`value + 1 == line`), SameBoy
-                // triggered there → the window is sticky-active for every later
-                // line → set the cross-line latch. `late_wy_10to0/FFto0/FFto1`
-                // `_2` (commit ly1/ly2 dot0) extend; the `_3` siblings commit
-                // at dot 4 (past the head) → no trigger, bare.
-                if !self.model.is_cgb()
-                    && self.enabled
-                    && xdot < 4
-                    && self.line >= 1
-                    && self.line < 144
-                    && u16::from(value) + 1 == u16::from(self.line)
-                    && self.eff.lcdc & LCDC_WIN_ENABLE != 0
-                {
-                    self.wy_xline_trig = true;
-                }
-                // The DS trigger-line WY un-latch: SameBoy's per-line
-                // `wy_check` for line N runs ~dot 2-5, but slopgb's
-                // production `wy_latch` pre-latches at the PREVIOUS line's
-                // dot-450/454 samples — so an un-matching WY write landing
-                // before the hardware check (commit dot <= 4 of the fresh
-                // trigger line) must release the latch the check would never
-                // have acquired (`late_wy_1toFF_ds_1` renders bare on
-                // hardware AND SameBoy; its `_2` sibling commits at dot 5
-                // and keeps the trigger). CGB + DS only (`late_wy_ds`/
-                // `late_wy_1toFF_ds`).
-                if self.model.is_cgb()
-                    && self.ds
-                    && self.enabled
-                    && self.wy_latch
-                    && !self.render.win_active
-                    && self.line < 144
-                    // The un-latch deadline is PER-TRIGGER-LINE:
-                    // lines >= 1 run the lyfc-path check at the mode-2 entry
-                    // (~internal dot 3-4) → a commit <= 2 beats it
-                    // (`late_wy_1toFF_ds_1` dot 2 bare / `_ds_2` dot 4 keeps
-                    // the latch, extended); line 0's check sits ~4 dots later
-                    // (lyfc becomes 0 only at dot 3) → commit <= 6
-                    // (`late_wy_ds_1` dot 6 bare on HARDWARE — SameBoy
-                    // mis-times the line-0 check and fails that row itself /
-                    // `_ds_2` dot 8 keeps). A single `<= 4` split brackets both
-                    // wrong.
-                    && self.dot <= if self.ly == 0 { 6 } else { 2 }
-                    && old_wy == self.ly
-                    && value != self.ly
-                {
-                    self.wy_latch = false;
-                    // The shadow latched the same pre-check compare
-                    // (wy2 still old at line start) — release it with the
-                    // render latch so the read law's extend arm follows, and
-                    // commit the wy2 copy immediately (the write BEAT the
-                    // hardware check: every later compare this line reads the
-                    // new value; the stale copy re-latched the shadow at the
-                    // next dot, measured).
-                    if self.wy_trig_sb && self.wy_trig_sb_line == self.ly {
-                        self.wy_trig_sb = false;
-                    }
-                    self.wy2 = value;
-                    self.wy2_delay = 0;
-                }
-                // The DMG SS trigger-line WY→(non-LY) un-latch: a
-                // WY write that MATCHED at the line's mode-2 compare then
-                // flips away by dot 4 un-triggers the window on SameBoy
-                // (`wy_check` reads the settled WY) while slopgb's raw sticky
-                // latch (`wy_trig_sb_raw`, set at dot ≥ 4) already caught the
-                // brief match. Releasing it lets the D6 un-trigger arm fire.
-                // `late_wy_1toFF_2`/`2toFF_2` (FF at dot 4 → bare) vs `_3`
-                // (FF at dot 8, past the compare → the window drew, extends).
-                // SS + DMG only; the CGB path is the DS block above
-                // (`wy_latch`/`wy_trig_sb`).
-                if !self.model.is_cgb()
-                    && !self.ds
-                    && self.enabled
-                    && self.line < 144
-                    && self.dot <= 4
-                    && old_wy == self.ly
-                    && value != self.ly
-                {
-                    self.wy_trig_sb_raw = false;
-                    // The dot-0/dot-<4 un-trigger write ALSO spuriously latched
-                    // the wy2-lagged SHADOW (`wy_trig_sb`) at line start (wy2
-                    // still = old_wy = ly before this write's delayed copy
-                    // propagates). When the write lands BEFORE the render draws
-                    // the window (the `_1` variant, WY→FF at dot 0 → `win_active`
-                    // never rises, so the D6 arm cannot fire), the sticky shadow
-                    // blocks the arm-8 emergent bare exit on every later line —
-                    // over-holding mode 3. Release it (mirror of the DS
-                    // `wy_latch` un-latch above) and commit wy2 immediately so
-                    // the next dot's compare does not re-set it. `late_wy_1toFF_1`
-                    // / `2toFF_1` recover; the `_2` siblings (render drew) keep D6.
-                    if self.wy_trig_sb && self.wy_trig_sb_line == self.ly {
-                        self.wy_trig_sb = false;
-                    }
-                    self.wy2 = value;
-                    self.wy2_delay = 0;
-                }
-                // The live window-trigger comparison uses a delayed WY
-                // copy — see `wy2`.
-                if self.enabled {
-                    // CGB: ~6 dots after the architectural commit (5 in
-                    // double speed); DMG: 2 (gambatte wyChange: wy2 at
-                    // cc+6-ds on CGB with the LCD on, cc+2 otherwise,
-                    // one cycle later than the wx commit; calibrated
-                    // against the gambatte window/arg/late_wy_* rounds).
-                    self.wy2_delay = if !self.model.is_cgb() {
-                        2
-                    } else if self.staged_ds {
-                        5
-                    } else {
-                        6
-                    };
-                } else {
-                    self.wy2 = value;
-                }
+                self.schedule_wy_check();
             }
             0xFF45 => {
                 let old = self.lyc;
@@ -547,6 +406,16 @@ impl Ppu {
     fn write_lcdc(&mut self, value: u8) {
         let was_on = self.lcdc & LCDC_ENABLE != 0;
         self.lcdc = value;
+        // An LCDC write schedules the window-Y compare exactly like a WY one
+        // (SameBoy `memory.c:1570`): enabling the window mid-line re-runs the
+        // WY == comparison test, so the window can still catch this line.
+        // An LCDC write's compare lands one dot later than a WY write's:
+        // dual-traced on `window/late_enable_afterVblank_2`, where SameBoy
+        // takes the bit-5 enable at the line boundary (`ly0 cfl0`) and its
+        // compare falls on the NEXT line (miss, window never draws) while the
+        // same write reaches slopgb at `ly0 dot452`, whose compare would still
+        // see line 0 and latch.
+        self.schedule_wy_check_at(2);
         let now_on = value & LCDC_ENABLE != 0;
         if was_on && !now_on {
             // LCD off: LY=0, mode 0, instantly; the comparison clock stops
@@ -622,7 +491,8 @@ impl Ppu {
             self.hdma_lead = false;
             self.flush_stat_copies();
             self.render.active = false;
-            self.wy_latch = false;
+            self.wy_triggered = false;
+            self.wy_check_in = 0;
             self.win_line = 0xFF;
             self.win_start_pending = false;
             self.legacy_level_edge();

@@ -199,7 +199,7 @@ const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// tail exists only when a coprocessor is installed, not per model; v11 adds the
 /// PPU's pure-LYC STAT halt mask; v12 adds the renderer's object-fetch abort
 /// countdown; v13 adds the OAM scan's one-dot-lagged LCDC.2 snapshot.
-const STATE_VERSION: u16 = 13;
+const STATE_VERSION: u16 = 14;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/

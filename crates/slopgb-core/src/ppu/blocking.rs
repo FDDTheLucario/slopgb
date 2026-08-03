@@ -65,8 +65,7 @@ impl Ppu {
             && !self.render.win_stalled
             && !self.render.win_aborted
             && self.render.n_sprites == 0
-            && !self.wy_latch
-            && self.wy2 != self.ly
+            && !self.wy_triggered
             && self.read_pos_hd() >= 2 * i32::from(self.projected_flip_dot()) + 6
     }
 

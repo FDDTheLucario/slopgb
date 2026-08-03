@@ -169,19 +169,13 @@ impl Ppu {
         w.bool(self.hdma_lead);
         w.u16(self.pal_open_dot);
 
-        w.bool(self.wy_latch);
-        w.u8(self.wy2);
-        w.u8(self.wy2_delay);
-        w.bool(self.wy_trig_sb);
-        w.u8(self.wy_trig_sb_line);
-        w.u16(self.wy_trig_sb_dot);
+        w.bool(self.wy_triggered);
+        w.u8(self.wy_check_in);
         w.bool(self.stop_anchor_set);
         w.bool(self.stop_anchor_midframe);
         w.bool(self.stop_leave_lcd_on);
         w.u8(self.stop_leave_k);
         w.bool(self.lcd_enable_in_ds);
-        w.bool(self.wy_trig_sb_raw);
-        w.bool(self.wy_xline_trig);
         w.u8(self.vram_wr_line);
         w.u16(self.vram_wr_dot);
         w.bool(self.staged_ds);
@@ -317,19 +311,13 @@ impl Ppu {
         self.hdma_lead = r.bool()?;
         self.pal_open_dot = r.u16()?;
 
-        self.wy_latch = r.bool()?;
-        self.wy2 = r.u8()?;
-        self.wy2_delay = r.u8()?;
-        self.wy_trig_sb = r.bool()?;
-        self.wy_trig_sb_line = r.u8()?;
-        self.wy_trig_sb_dot = r.u16()?;
+        self.wy_triggered = r.bool()?;
+        self.wy_check_in = r.u8()?;
         self.stop_anchor_set = r.bool()?;
         self.stop_anchor_midframe = r.bool()?;
         self.stop_leave_lcd_on = r.bool()?;
         self.stop_leave_k = r.u8()?;
         self.lcd_enable_in_ds = r.bool()?;
-        self.wy_trig_sb_raw = r.bool()?;
-        self.wy_xline_trig = r.bool()?;
         self.vram_wr_line = r.u8()?;
         self.vram_wr_dot = r.u16()?;
         self.staged_ds = r.bool()?;

@@ -572,35 +572,111 @@ fn vis_hold_extends_visible_mode3_past_the_dispatch() {
     );
 }
 
-/// The shadow WY trigger has to beat the WX comparator match plus the
-/// fine-scroll discard the window's own fetch waits out — but only a WX >= 7
-/// window fetches after that discard. Pinned by the gambatte
-/// `arg/late_wy_FFto2_ly2{,_scx2,_scx3,_scx5}` sweep (the split moves one rung
-/// later at SCX 5 and stays put at SCX 2 and 3) and by
-/// `arg/late_scx_late_wy_FFto4_ly4_wx00`, which writes SCX 4 under a WX 0
-/// window and keeps the SCX-0 split.
+/// A WY write schedules its window-Y compare 1-8 half-dots out, on a fixed
+/// 4-dot phase per model (SameBoy `wy_check_scheduled`,
+/// `display.c:1557-1578`: `8 - ((wy_check_modulo + K) & 7)`; measured against
+/// slopgb's write frame as K = 0 CGB single speed / 0 DMG / 2 double speed). That deferred compare is what lets a
+/// mid-line write still trigger — or miss — this line's window, which a fixed
+/// per-line sample cannot express.
 #[test]
-fn window_extend_deadline_tracks_the_fine_scroll_only_above_wx7() {
-    fn deadline(model: Model, ds: bool, wx: u8, hunt_fine: u8, wx_match_dot: u16) -> i32 {
+fn scheduled_wy_check_lands_on_the_model_phase() {
+    fn check_dot(model: Model, ds: bool, write_dot: u16) -> u16 {
         let mut p = Ppu::new(model);
+        p.enabled = true;
         p.ds = ds;
-        p.eff.wx = wx;
-        p.render.hunt_fine = hunt_fine;
-        p.render.wx_match_dot = wx_match_dot;
-        p.win_extend_deadline()
+        p.lcdc = LCDC_ENABLE | LCDC_WIN_ENABLE;
+        p.line = 40;
+        p.ly = 40;
+        p.dot = write_dot;
+        p.wy = 40;
+        p.schedule_wy_check();
+        for _ in 0..64 {
+            p.dhalf ^= 1;
+            if p.dhalf == 0 {
+                p.dot += 1;
+            }
+            p.wy_check_scheduled_tick();
+            if p.wy_triggered {
+                return p.dot;
+            }
+        }
+        panic!("scheduled wy_check never fired");
     }
-    // CGB single speed: match + discard + 1.
-    assert_eq!(deadline(Model::Cgb, false, 7, 0, 97), 98);
-    assert_eq!(deadline(Model::Cgb, false, 7, 2, 97), 100);
-    assert_eq!(deadline(Model::Cgb, false, 7, 3, 97), 101);
-    assert_eq!(deadline(Model::Cgb, false, 7, 5, 97), 103);
-    // Double speed carries one dot more.
-    assert_eq!(deadline(Model::Cgb, true, 7, 0, 97), 99);
-    assert_eq!(deadline(Model::Cgb, true, 7, 5, 97), 104);
-    // The DMG family's shared LYC=153 ISR times its WY write 4 dots ahead.
-    assert_eq!(deadline(Model::Dmg, false, 7, 0, 97), 94);
-    assert_eq!(deadline(Model::Dmg, false, 7, 5, 97), 99);
-    // A WX < 7 window is already fetching through the prefill: no discard term.
-    assert_eq!(deadline(Model::Cgb, false, 0, 4, 90), 91);
-    assert_eq!(deadline(Model::Cgb, false, 6, 5, 90), 91);
+    // CGB single speed: the compare lands on dot = 0 (mod 4), never on the
+    // write's own dot.
+    assert_eq!(check_dot(Model::Cgb, false, 96), 100);
+    assert_eq!(check_dot(Model::Cgb, false, 97), 100);
+    // Double speed sits a dot earlier on the same 4-dot grid; DMG measures to
+    // the same phase as CGB single speed on slopgb's write frame.
+    assert_eq!(check_dot(Model::Dmg, false, 96), 100);
+    assert_eq!(check_dot(Model::Cgb, true, 96), 99);
+}
+
+/// The compare reads the ARCHITECTURAL WY (SameBoy `io_registers[GB_IO_WY]`),
+/// so a write that moves WY away before the scheduled compare runs leaves the
+/// window un-triggered for the whole frame — the `late_wy_*toFF` un-trigger.
+#[test]
+fn scheduled_wy_check_reads_the_settled_wy() {
+    let mut p = Ppu::new(Model::Cgb);
+    p.enabled = true;
+    p.lcdc = LCDC_ENABLE | LCDC_WIN_ENABLE;
+    p.line = 40;
+    p.ly = 40;
+    p.dot = 96;
+    p.wy = 40;
+    p.schedule_wy_check();
+    // A second write lands before the compare's 4-dot boundary.
+    p.wy = 0xFF;
+    for _ in 0..16 {
+        p.dhalf ^= 1;
+        if p.dhalf == 0 {
+            p.dot += 1;
+        }
+        p.wy_check_scheduled_tick();
+    }
+    assert!(
+        !p.wy_triggered,
+        "WY moved away before the compare: no trigger"
+    );
+}
+
+/// slopgb's WX comparator matches ahead of SameBoy's activation test by the
+/// SCX fine-scroll discard for a WX <= 7 window (the prefill match is fixed at
+/// `pos_dot == WX + 6` here while SameBoy's `position_in_line` waits the
+/// discard out), so the window-Y latch is sampled that far ahead. Dual-traced
+/// on `gambatte/window/arg/late_wy_FFto2_ly2{,_scx2,_scx3,_scx5}`.
+#[test]
+fn window_activation_samples_wy_at_the_fine_scroll_shifted_instant() {
+    fn acts(scx: u8, write_dot: u16) -> bool {
+        let mut p = Ppu::new(Model::Cgb);
+        p.enabled = true;
+        p.lcdc = LCDC_ENABLE | LCDC_WIN_ENABLE;
+        p.line = 2;
+        p.ly = 2;
+        p.eff.wx = 7;
+        p.eff.scx = scx;
+        p.render.hunt_fine = scx;
+        p.dot = write_dot;
+        p.wy = 2;
+        p.schedule_wy_check();
+        // Advance to the WX comparator match at dot 97.
+        while p.dot < 97 {
+            p.dhalf ^= 1;
+            if p.dhalf == 0 {
+                p.dot += 1;
+            }
+            p.wy_check_scheduled_tick();
+        }
+        p.wy_triggered_for_activation()
+    }
+    // Write at dot 96 -> compare due at dot 100. SameBoy activates at
+    // 97 + SCX&7, so the compare makes it only above SCX&7 = 3.
+    assert!(!acts(0, 96), "SCX 0: activation at 97, compare at 100");
+    assert!(
+        !acts(3, 96),
+        "SCX 3: compare lands ON the activation dot 100"
+    );
+    assert!(acts(5, 96), "SCX 5: activation at 102, compare at 100");
+    // A write a boundary earlier is already latched at the match.
+    assert!(acts(0, 92), "compare at 96 latches before the match");
 }

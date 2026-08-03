@@ -173,14 +173,14 @@ impl Ppu {
                     // (`m3_scx_low_3_bits`). The `6` render-frame debt re-aligns to
                     // the post-lock dot. The excluded cases ARE genuinely length-
                     // coupled: `glitch_line` (SCX re-open, `ly0_late_scx7`) and
-                    // `wy_trig_sb` (a WINDOW line masks the discard, `late_scx_late_
+                    // `wy_triggered` (a WINDOW line masks the discard, `late_scx_late_
                     // disable`); the m2int length rows write at dot 152 with
                     // `hunt_done` → the post-match arm above, never here.
                     0xFF43
                         if !self.ds
                             && !self.render.hunt_done
                             && !self.glitch_line
-                            && !self.wy_trig_sb =>
+                            && !self.wy_triggered =>
                     {
                         6
                     }

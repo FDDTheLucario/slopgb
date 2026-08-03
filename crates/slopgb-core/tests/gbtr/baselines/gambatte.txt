@@ -460,11 +460,28 @@ gambatte/sprites/space/1pos8_8pos9_wx08_m3stat_ds_1_cgb04c_out3.gbc [Cgb]
 # Interconnect::apply_post_boot_state.)
 gambatte/vram_m3/preread_lcdoffset2_1_cgb04c_out0.gbc [Cgb]
 gambatte/vram_m3/prewrite_lcdoffset2_1_cgb04c_out1.gbc [Cgb]
+# Class W (window-Y), added with the SameBoy `wy_check` port that retired the
+# read-law shadow latches — see docs/hardware-state/ppu-window-wy.md.
+#
+# The first three are SameBoy-FAIL: SameBoy's own FF41 read disagrees with the
+# ROM, and slopgb only passed them before by over-fitting past SameBoy in the
+# `vis_exit_hd` arms. `late_wy_ds_1` is dual-traced end to end — both emulators
+# latch at ly0 and activate at ly0 cfl97, and SameBoy reads mode 3 at cfl262
+# where the ROM wants 0. Lifts with the DS half-dot read frame, not with any
+# WY model.
+gambatte/window/late_wy_ds_1_cgb04c_out0.gbc [Cgb]
+gambatte/window/late_wy_ds_lcdoffset1_1_cgb04c_out0.gbc [Cgb]
+gambatte/window/arg/late_wy_1toFF_ds_lcdoffset1_2_cgb04c_out3.gbc [Cgb]
+# `..._wx00_2` is SameBoy-PASS but its cause is OUTSIDE the window machinery:
+# slopgb's kernel runs 4 dots early on the mid-line-SCX-rewrite path (traced —
+# SCX write at line dot 76 against SameBoy's 80, WY write 88 against 92), so the
+# scheduled window-Y compare beats an activation instant SameBoy's misses. The
+# read-law arms used to mask that; its `_wx20_2` sibling below was already
+# floored for the same phase. Lifts when the mid-line-SCX kernel phase is
+# corrected — the anomaly `Render::scx_write_dot` documents.
+gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx00_2_dmg08_out3_cgb04c_out0.gbc [Cgb]
 gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx20_2_dmg08_out3_cgb04c_out0.gbc [Cgb]
-gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx20_3_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/window/late_disable_scx5_ds_2_cgb04c_out3.gbc [Cgb]
-gambatte/window/late_enable_afterVblank_ds_1_cgb04c_out3.gbc [Cgb]
-gambatte/window/late_enable_afterVblank_ds_lcdoffset1_1_cgb04c_out3.gbc [Cgb]
 gambatte/window/late_enable_afterVblank_lcdoffset1_1_cgb04c_out3.gbc [Cgb]
 gambatte/window/late_reenable_scx5_2_dmg08_out3_cgb04c_out0.gbc [Dmg]
 gambatte/window/late_reenable_scx5_ds_1_cgb04c_out3.gbc [Cgb]

@@ -88,19 +88,13 @@ impl Ppu {
             render_finished: true,
             hdma_lead: false,
             pal_open_dot: 0,
-            wy_latch: false,
-            wy2: 0,
-            wy2_delay: 0,
-            wy_trig_sb: false,
-            wy_trig_sb_line: 0,
-            wy_trig_sb_dot: 0,
-            wy_trig_sb_raw: false,
+            wy_triggered: false,
+            wy_check_in: 0,
             stop_anchor_set: false,
             stop_anchor_midframe: false,
             stop_leave_lcd_on: false,
             stop_leave_k: 2,
             lcd_enable_in_ds: false,
-            wy_xline_trig: false,
             vram_wr_line: 0xFF,
             vram_wr_dot: 0,
             staged_ds: false,
@@ -174,12 +168,6 @@ impl Ppu {
                 }
             }
         }
-        if self.wy2_delay > 0 {
-            self.wy2_delay -= 1;
-            if self.wy2_delay == 0 {
-                self.wy2 = self.wy;
-            }
-        }
         if !self.enabled {
             // With the LCD off `GB_STAT_update` returns early
             // (`display.c:525`) and the interrupt line is held low, so a
@@ -207,6 +195,13 @@ impl Ppu {
         // The SameBoy `double_speed_alignment` shadow (see `sb_dsa8`).
         self.sb_dsa8 = (self.sb_dsa8 + 2) & 7;
         self.dot += 1;
+        // A pending write-scheduled compare runs BEFORE the line wrap, like
+        // SameBoy's (`display.c:1553-1579` sits at the top of
+        // `GB_display_run`, ahead of the line-length rollover): a WY write in
+        // a line's tail therefore compares against the OLD line and latches
+        // there (`late_wy_FFto0_ly2_1` — SameBoy hits at `ly0 cmp=0`, then
+        // line 1's own compares miss but the latch is already sticky).
+        self.wy_check_scheduled_tick();
         let len = self.line_len();
         if self.dot == len {
             self.dot = 0;
@@ -254,6 +249,8 @@ impl Ppu {
     pub(crate) fn tick_half(&mut self) -> u8 {
         if self.dhalf == 0 {
             self.dhalf = 1;
+            // The odd half-dot's position; the even one is taken by `tick`.
+            self.wy_check_scheduled_tick();
             // Advance the write STROBE on the non-completing half too, so a
             // staged mid-mode-3 register commit lands at its true half-dot, not
             // only at whole-dot boundaries (`stage_write` doubles `dots_left`
@@ -268,6 +265,122 @@ impl Ppu {
         }
         self.dhalf = 0;
         self.tick()
+    }
+
+    /// SameBoy `wy_check` (`display.c:508`): latch the frame-sticky
+    /// [`Self::wy_triggered`] when the window is enabled and WY equals the
+    /// PPU's comparison line. The comparison is the raw line on CGB single
+    /// speed and `ly_for_comparison` otherwise (DMG and double speed), which
+    /// is what makes a line-boundary WY write land on the OLD line there.
+    /// Both operands are architectural (SameBoy reads `io_registers`), so a
+    /// write is visible to the very next compare.
+    fn wy_check(&mut self) {
+        if !self.enabled || self.lcdc & LCDC_WIN_ENABLE == 0 {
+            return;
+        }
+        if i16::from(self.wy) == self.wy_comparison() {
+            self.wy_triggered = true;
+        }
+    }
+
+    /// The line [`Self::wy_check`] compares WY against: the raw line on CGB
+    /// single speed, `ly_for_comparison` otherwise (DMG and double speed),
+    /// which is what lets a line-boundary WY write land on the old line there.
+    fn wy_comparison(&self) -> i16 {
+        if !self.model.is_cgb() || self.ds {
+            let lyfc = self.ly_for_comparison();
+            if lyfc != -1 {
+                return lyfc;
+            }
+        }
+        i16::from(self.line)
+    }
+
+    /// The half-dot phase a write-scheduled [`Self::wy_check`] lands on:
+    /// SameBoy's `K` in `8 - ((wy_check_modulo + K) & 7)`
+    /// (`display.c:1560-1569`) — 0 on CGB single speed, 2 on DMG, 6 in double
+    /// speed.
+    fn wy_check_phase_hd(&self) -> i32 {
+        match (self.model.is_cgb(), self.ds) {
+            (true, false) => 0,
+            (true, true) => 2,
+            (false, _) => 0,
+        }
+    }
+
+    /// Schedule a WY/LCDC write's deferred [`Self::wy_check`]: 1-8 half-dots
+    /// out, landing on the model's 4-dot phase. The write commits at the
+    /// M-cycle END while SameBoy's display coroutine has only run to the
+    /// write's own T, so the schedule counts from `write_debt_hd` half-dots
+    /// back.
+    pub(in crate::ppu) fn schedule_wy_check_at(&mut self, extra_hd: u8) {
+        self.schedule_wy_check();
+        self.wy_check_in = self.wy_check_in.saturating_add(extra_hd);
+    }
+
+    pub(in crate::ppu) fn schedule_wy_check(&mut self) {
+        let pos = 2 * i32::from(self.dot) + i32::from(self.dhalf);
+        self.wy_check_in = (8 - ((pos + self.wy_check_phase_hd()).rem_euclid(8))) as u8;
+    }
+
+    /// Dots slopgb's WX comparator match leads SameBoy's window activation.
+    /// A WX <= 7 window matches during the prefill, and SameBoy's
+    /// `position_in_line` only reaches that position after the SCX fine-scroll
+    /// discard has been waited out, so its activation sits `SCX & 7` dots later
+    /// than slopgb's fixed `pos_dot == WX + 6` match. Dual-traced on
+    /// `gambatte/window/arg/late_wy_FFto2_ly2{,_scx2,_scx3,_scx5}`: SameBoy
+    /// activates a WX=7 window at dot 97, 99, 100, 102 for SCX&7 = 0, 2, 3, 5
+    /// where slopgb matches at 97 throughout. A WX >= 8 window matches on the
+    /// output position `lx`, which has already absorbed the discard, so it
+    /// leads by nothing (`..._wx0f`: both activate at 105).
+    pub(in crate::ppu) fn win_activation_lead(&self) -> u16 {
+        if self.eff.wx <= 7 {
+            // The discard the fine-scroll comparator actually locked in, not
+            // the read-time SCX: a mid-line SCX rewrite that missed the hunt
+            // does not move the window's fetch
+            // (`late_scx_late_wy_FFto4_ly4_wx00`).
+            u16::from(self.render.hunt_fine & 7)
+        } else {
+            0
+        }
+    }
+
+    /// The window-Y latch as SameBoy's activation test sees it: already
+    /// latched, or a write-scheduled compare ([`Self::wy_check_in`]) that comes
+    /// due strictly before SameBoy's activation instant, which trails slopgb's
+    /// WX match by [`Self::win_activation_lead`] (a compare landing ON that
+    /// instant does not make it — `late_wy_FFto2_ly2_scx3_2`, write dot 96,
+    /// compare dot 100, SameBoy activation dot 100, renders bare). Both compare operands are settled at
+    /// the match, so resolving the pending compare here evaluates SameBoy's
+    /// predicate at SameBoy's instant without moving slopgb's — the fine-scroll
+    /// delay is spent as a pixel discard here, not as a later activation.
+    pub(super) fn wy_triggered_for_activation(&self) -> bool {
+        if self.wy_triggered {
+            return true;
+        }
+        if self.wy_check_in == 0 || !self.enabled || self.lcdc & LCDC_WIN_ENABLE == 0 {
+            return false;
+        }
+        u16::from(self.wy_check_in) < 2 * self.win_activation_lead()
+            && i16::from(self.wy) == self.wy_comparison()
+    }
+
+    /// Count a pending write-scheduled [`Self::wy_check`] down one half-dot
+    /// and run it when it comes due.
+    pub(super) fn wy_check_scheduled_tick(&mut self) {
+        if self.wy_check_in == 0 {
+            return;
+        }
+        if self.wy_triggered {
+            // Already latched: SameBoy drops the pending check outright
+            // (`display.c:1554`).
+            self.wy_check_in = 0;
+            return;
+        }
+        self.wy_check_in -= 1;
+        if self.wy_check_in == 0 {
+            self.wy_check();
+        }
     }
 
     /// Whether the half-dot just advanced by [`Self::tick_half`] completed a
@@ -401,58 +514,24 @@ impl Ppu {
                 self.lyc_event = self.lyc;
             }
         }
-        // Frame-sticky WY condition (gambatte weMaster): sampled at
-        // discrete dots, not compared continuously — see `wy_latch`.
-        // gambatte's line-cycle anchors translate to our dot convention
-        // with a +1 shift on DMG (m3StartLineCycle is 83+cgb against our
-        // model-independent mode-3 start at dot 84).
-        let win_en = self.eff.lcdc & LCDC_WIN_ENABLE != 0;
-        let late = u16::from(!self.model.is_cgb());
         if self.dot == 4 {
             // The mode-0 IRQ source level (raised by the previous line's
             // `m0_flip_events`) drops when the mode-2 window becomes
             // visible.
             self.m0_src = false;
         }
-        // Shadow WY-trigger. SameBoy's `wy_triggered` is a continuous
-        // `WY == LY` latch, sticky for the frame; reset it at the frame top
-        // (line 0 dot 0) and set it the first dot the compare holds on any
-        // visible line. See `wy_trig_sb`. Both models: the arms in
-        // `read_laws.rs` read the same latches.
+        // The frame-sticky window-Y latch clears at the frame top
+        // (`display.c:1686`, the VBlank exit) and is compared at the two
+        // per-line points SameBoy runs `wy_check` from: the line's start
+        // (`display.c:1755`, before mode 2, against `current_line`) and the
+        // mode-2 rise (`display.c:1815`, once `ly_for_comparison` holds the
+        // line). The dot-4 rise is `ly_for_comparison`'s own latch dot
+        // (`ly_for_comparison_at`).
         if self.line == 0 && self.dot == 0 {
-            self.wy_trig_sb = false;
-            self.wy_trig_sb_raw = false;
-            self.wy_xline_trig = false;
+            self.wy_triggered = false;
         }
-        // The raw-WY sticky latch (immediate `self.wy`, SameBoy's
-        // `wy_check` input), the un-trigger discriminator. Gated `dot >= 4`
-        // (the mode-2 OAM-scan compare window SameBoy runs `wy_check` in):
-        // a line-start (dot 0) WY write commits AFTER slopgb's dot-0 PPU tick
-        // (the tick runs before `write_no_tick`), so a dot-0 compare would
-        // read the OLD WY and mis-latch; `dot >= 4` samples the settled WY,
-        // matching SameBoy's post-write compare (`late_wy_1toFF_1` WY→FF at
-        // dot 0 → WY=FF by dot 4 → never latches → SameBoy-bare).
-        if self.line < 144 && self.dot >= 4 && !self.wy_trig_sb_raw && win_en && self.wy == self.ly
-        {
-            self.wy_trig_sb_raw = true;
-        }
-        if self.line < 144 && !self.wy_trig_sb && win_en && self.wy2 == self.ly {
-            self.wy_trig_sb = true;
-            self.wy_trig_sb_line = self.ly;
-            self.wy_trig_sb_dot = self.dot;
-        }
-        if self.line == 0 && self.dot == 2 {
-            // Line 0: assignment, not OR — this is the frame reset
-            // (gambatte M2_Ly0::f0).
-            self.wy_latch = win_en && self.eff.wy == 0;
-        } else if self.line < 143 && !self.glitch_line {
-            if self.dot == 450 + late {
-                self.wy_latch |= win_en && self.ly == self.eff.wy;
-            } else if self.dot == 454 + late {
-                // Just before the LY increment the comparison already
-                // sees the upcoming line (gambatte M2_LyNon0::f1).
-                self.wy_latch |= win_en && self.ly + 1 == self.eff.wy;
-            }
+        if self.dot == 4 {
+            self.wy_check();
         }
         if self.line <= 143 {
             if self.glitch_line {

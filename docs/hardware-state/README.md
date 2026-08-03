@@ -11,6 +11,7 @@ State date: 2026-07-30.
 | [dma.md](dma.md) | OAM DMA bus conflicts, OAM×VRAM DMA composition, CGB VRAM (HBlank) DMA |
 | [ppu-timing.md](ppu-timing.md) | mode-3 write strobe, SCX hunt, STAT IRQ events, post-boot LCD phase, CGB-C LY/STAT timeline, mode-0 end-of-line grid |
 | [ppu-render.md](ppu-render.md) | OAM scan, window machine, mode-3 fetch, mealybug, DMG OAM bug, boot VRAM, frame skip, IRQ drain, mid-mode-3 SCX / BG map column |
+| [ppu-window-wy.md](ppu-window-wy.md) | The window-Y trigger (SameBoy `wy_check` + its write-scheduled compare), what each FF41 read-law arm compensates for, and the state of the port that deletes them |
 | [apu.md](apu.md) | post-boot warmup, SameBoy countdown model, ch1 sweep |
 | [io-misc.md](io-misc.md) | serial clock, SGB joypad, MBC30, MBC6 (+flash), public API facade, audio frontend |
 | [sgb.md](sgb.md) | SGB presentation: palette/attr/mask commands (PAL01-12, ATTR_BLK, MASK_EN), colorization wiring, deferred commands |

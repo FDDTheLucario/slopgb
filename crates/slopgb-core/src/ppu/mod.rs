@@ -770,41 +770,25 @@ pub struct Ppu {
     pal_open_dot: u16,
 
     // Window state.
-    /// The frame-sticky WY condition (gambatte ppu.cpp weMaster). NOT a
-    /// continuous comparison: hardware samples `win_en && WY == LY` at
-    /// three discrete points — assigned at line 0 dot 2, OR-ed at dots
-    /// 450/454 (+1 on DMG) of every visible line against the current and
-    /// the upcoming LY (gambatte weMasterCheck{Ly0,PriorToLyInc,
-    /// AfterLyInc}LineCycle; the gambatte window/arg/late_wy_* family
-    /// pins the sample points). The trigger additionally accepts a *live*
-    /// `wy2 == LY` match (see [`Self::wy2`]).
-    wy_latch: bool,
-    /// Delayed copy of WY used by the live window-trigger comparison
-    /// (gambatte video.cpp wyChange: wy2 lags the write — modelled as
-    /// the architectural commit plus 2 dots on DMG, 6 on CGB, 5 in
-    /// double speed, via `wy2_delay`; immediate with the LCD off).
-    wy2: u8,
-    /// Dots until `wy2` catches up with the architectural WY (CGB only).
-    wy2_delay: u8,
-    /// Shadow WY-trigger (CGB only). SameBoy latches `wy_triggered` from a
-    /// *continuous* `WY == LY` compare during the visible frame (`display.c`
-    /// `wy_check`), whereas slopgb's production `wy_latch` samples only at the
-    /// three gambatte weMaster dots (line 0 dot 2, dots 450/454) — so a
-    /// mid-line late-WY write that SameBoy catches is missed by slopgb's
-    /// discrete sampler. This sticky latch re-derives SameBoy's decision for
-    /// the FF41-read window-length law ([`Self::vis_mode_read`]) without
-    /// touching `line_render_done` / the render. Reset at line 0; set the
-    /// first dot `win_en && wy2 == ly`. Live: consulted by `vis_exit_hd`'s
-    /// bare-exit arm and by `win_extends_sb` (`stat_irq/read_laws_exit.rs`),
-    /// and by the FF43 write-strobe debt selection in `stage_write`
-    /// (`regs/stage.rs`) — forcing it off changes `golden_fingerprint`
-    /// (confirmed by probe).
-    wy_trig_sb: bool,
-    /// The (line, dot) the shadow latch was set — the window extends mode 3 on
-    /// a line iff the latch was set on an earlier line OR on this line at/before
-    /// the WX-activation dot ([`Render::wx_match_dot`]). See `wy_trig_sb`.
-    wy_trig_sb_line: u8,
-    wy_trig_sb_dot: u16,
+    /// The frame-sticky window-Y condition (SameBoy `wy_triggered`,
+    /// `display.c` `wy_check`): set whenever the window is enabled and WY
+    /// equals the PPU's comparison line, cleared at the frame top and at LCD
+    /// off. Every window activation gates on it (`window_trigger_step`,
+    /// `flip_projection`), so the mode-3 length it produces is the render's
+    /// own — there is no separate read-time shadow.
+    ///
+    /// The compare is not continuous: it runs at the line's start, again at
+    /// the mode-2 rise once `ly_for_comparison` holds the line, and — after a
+    /// WY or LCDC write — once more at the next 4-dot boundary
+    /// ([`Self::wy_check_sched`]). That third, write-scheduled compare is what
+    /// catches a mid-line WY write, which a fixed per-line sample cannot.
+    wy_triggered: bool,
+    /// Half-dots until a WY/LCDC write's deferred compare runs, 0 = none
+    /// pending. SameBoy schedules it (`display.c:1557-1578`,
+    /// `wy_check_scheduled`) for `8 - ((wy_check_modulo + K) & 7)` half-dots
+    /// after the write — 1 to 8, landing on a fixed 4-dot phase per model
+    /// ([`Self::wy_check_phase_hd`]).
+    wy_check_in: u8,
     /// The POST-SWITCH bare-exit law latches. The speedchange m3stat
     /// 4-variable exit table collapses to per-class rp-frame exits
     /// `E = C + 2*(SCX&7)` consumed by [`Self::vis_exit_hd`]:
@@ -839,33 +823,6 @@ pub struct Ppu {
     /// re-anchors the PPU frame where a run-through LCD keeps the SS
     /// boot phase).
     lcd_enable_in_ds: bool,
-    /// The IMMEDIATE-WY twin of [`Self::wy_trig_sb`]. SameBoy's
-    /// `wy_check` compares LY against the immediate WY register
-    /// (`io_registers[GB_IO_WY]`), NOT the 6-dot-lagged `wy2` copy slopgb's
-    /// render (and `wy_trig_sb`) use. A late WY→(non-LY) write (`late_wy_1toFF`)
-    /// UN-triggers SameBoy's window (raw WY != LY at the line-start compare)
-    /// while slopgb — comparing the still-lagged `wy2` — triggers it and renders
-    /// the window (`win_active`). This sticky latch (set the first dot
-    /// `win_en && self.wy == ly`, immediate WY) re-derives SameBoy's trigger;
-    /// when slopgb's render triggered (`win_active`) but this did NOT
-    /// (`!wy_trig_sb_raw`), the line is SameBoy-bare and the FF41 read law
-    /// ([`Self::vis_mode_read`]) forces mode 0. Reset at line 0; maintained
-    /// for both models. Live: read by `vis_exit_hd`'s DMG arm D6 and CGB
-    /// arm 6 (`stat_irq/read_laws_exit.rs`) — forcing it off changes
-    /// `golden_fingerprint` on both models (confirmed by probe).
-    wy_trig_sb_raw: bool,
-    /// The BOUNDARY-WY cross-line trigger: a WY write
-    /// committing in a line's tail (dot >= 452) or head (dot < 4) whose
-    /// value matches the CURRENT (old) line latches SameBoy's
-    /// `wy_triggered` (its scheduled `wy_check` still compares the old
-    /// `current_line`), while slopgb's render (`wy_latch`) and the
-    /// wy2-lagged shadow both miss it — every later line renders bare
-    /// where SameBoy draws the window. Frame-sticky like `wy_triggered`;
-    /// reset at the frame top; maintained for both models. Live: read by
-    /// `vis_exit_hd`'s DMG arm D1 and arm 7 (`stat_irq/read_laws_exit.rs`),
-    /// gating the FF41 mode-3 exit — forcing it off changes
-    /// `golden_fingerprint` (confirmed by probe).
-    wy_xline_trig: bool,
     /// The last CPU VRAM write ATTEMPT's (line, dot), for the
     /// DS line-end VRAM read release: a readback following a same-line write
     /// within ~2 DS M-cycles keeps the SS view (SameBoy spreads the write's

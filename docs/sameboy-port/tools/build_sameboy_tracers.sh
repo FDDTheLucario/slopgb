@@ -44,7 +44,10 @@ if [ -x "$TESTER" ] && grep -q 'SBMODE ly=%d cfl=%d dc=%d vis=%d fp=' "$DIR/Core
    && grep -q SBWRITE "$DIR/Core/memory.c" 2>/dev/null \
    && grep -q SBACK "$DIR/Core/sm83_cpu.c" 2>/dev/null \
    && grep -q 'SBREAD ff0f.*fp=' "$DIR/Core/memory.c" 2>/dev/null \
-   && grep -q SBIF "$DIR/Core/display.c" 2>/dev/null; then
+   && grep -q SBIF "$DIR/Core/display.c" 2>/dev/null \
+   && grep -q SBWYCHK "$DIR/Core/display.c" 2>/dev/null \
+   && grep -q SBWINACT "$DIR/Core/display.c" 2>/dev/null \
+   && grep -q SBWWY "$DIR/Core/memory.c" 2>/dev/null; then
   echo "tester already built + patched: $TESTER"; exit 0
 fi
 
@@ -378,6 +381,53 @@ if 'SBDISP ly=%d cfl=%d dc=%d bit=%d stat=%02x mfi=%d\\n' in cpu:
 '"SBDISP ly=%d cfl=%d dc=%d bit=%d stat=%02x mfi=%d fp=%lld\\n",\n                gb->current_line, gb->cycles_for_line, gb->display_cycles, interrupt_bit,\n                gb->io_registers[GB_IO_STAT]&0x7f, (int8_t)gb->mode_for_interrupt, (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }')
     open(d+"/Core/sm83_cpu.c","w").write(cpu)
     print("patched sm83_cpu.c (SBDISP fp)")
+# --- window-Y tracers: the wy_check schedule, its compare, and every window
+# --- activation (the `late_wy` / `late_enable` family's ground truth).
+disp=open(d+"/Core/display.c").read()
+if "SBWYCHK" not in disp:
+    disp=disp.replace("""    if ((gb->io_registers[GB_IO_LCDC] & GB_LCDC_WIN_ENABLE) &&
+        gb->io_registers[GB_IO_WY] == comparison) {
+        gb->wy_triggered = true;
+    }
+}""","""    { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+      if(trc) fprintf(stderr,"SBWYCHK ly=%d cfl=%d dc=%d wy=%d cmp=%d en=%d hit=%d fp=%lld\\n",
+        gb->current_line, gb->cycles_for_line, gb->display_cycles,
+        gb->io_registers[GB_IO_WY], comparison,
+        !!(gb->io_registers[GB_IO_LCDC] & GB_LCDC_WIN_ENABLE),
+        (gb->io_registers[GB_IO_LCDC] & GB_LCDC_WIN_ENABLE) && gb->io_registers[GB_IO_WY] == comparison,
+        (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+    if ((gb->io_registers[GB_IO_LCDC] & GB_LCDC_WIN_ENABLE) &&
+        gb->io_registers[GB_IO_WY] == comparison) {
+        gb->wy_triggered = true;
+    }
+}""",1)
+if "SBWINACT" not in disp:
+    disp=disp.replace("""                    if (should_activate_window) {
+                        gb->window_y++;""","""                    if (should_activate_window) {
+                        { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                          if(trc) fprintf(stderr,"SBWINACT ly=%d cfl=%d dc=%d pil=%d wx=%d fp=%lld\\n",
+                            gb->current_line, gb->cycles_for_line, gb->display_cycles,
+                            (int)(int8_t)gb->position_in_line, gb->io_registers[GB_IO_WX],
+                            (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+                        gb->window_y++;""",1)
+open(d+"/Core/display.c","w").write(disp)
+
+mem=open(d+"/Core/memory.c").read()
+if "SBWWY" not in mem:
+    mem=mem.replace("""            case GB_IO_WY:
+                gb->io_registers[addr & 0xFF] = value;
+                gb->wy_check_scheduled = true;
+                return;""","""            case GB_IO_WY:
+                { static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0;
+                  if(trc) fprintf(stderr,"SBWWY ly=%d cfl=%d dc=%d val=%d mod=%d ds=%d fp=%lld\\n",
+                    gb->current_line, gb->cycles_for_line, gb->display_cycles, value,
+                    gb->wy_check_modulo, gb->cgb_double_speed,
+                    (long long)((long long)gb->absolute_debugger_ticks - gb->display_cycles)); }
+                gb->io_registers[addr & 0xFF] = value;
+                gb->wy_check_scheduled = true;
+                return;""",1)
+    open(d+"/Core/memory.c","w").write(mem)
+
 PY
 
 # #11bg -- SBWRITE: FF41 (STAT) + FF45 (LYC) write instants with lyfc + fp (synced:
