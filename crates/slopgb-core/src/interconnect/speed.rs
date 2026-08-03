@@ -229,6 +229,10 @@ impl Interconnect {
         if entering_ds {
             self.double_speed = true;
             self.ppu.set_double_speed(true);
+            // The APU's divider re-paces one machine cycle after the CPU and
+            // PPU, so the first cycle of the pause below still divides for
+            // single speed (`Apu::set_double_speed_lag`).
+            self.apu.set_double_speed_lag(true);
         }
         // Mode-0 entries seen by the two cycles above never flag a block:
         // gambatte defers all LCD events into the pause, where the halted
@@ -258,6 +262,9 @@ impl Interconnect {
         while self.cycles < target && self.intf & self.ie & IF_MASK == 0 {
             self.tick_machine();
         }
+        // The APU's re-pace lag covers the pause's first cycle only; a pause
+        // that never ticked (IE & IF already raised) leaves none behind.
+        self.apu.set_double_speed_lag(false);
         // Post-switch CPU↔PPU realignment, K = 2 half-dots per switching STOP.
         // SameBoy's STOP withholds 5 T from the PPU feed (`speed_switch_freeze`,
         // sm83_cpu.c:435/timing.c:469) while slopgb's gambatte-modeled pause runs

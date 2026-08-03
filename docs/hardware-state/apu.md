@@ -185,3 +185,47 @@ The completed-addend negate-clear kill uses the **E form** of the old-negate bit
   is the sub-M-cycle phase the pause end lands on, which the whole-M-cycle pause
   quantises per configuration. All six are bucketed EXCEED; SameBoy misses them
   too.
+
+### Entering double speed re-paces the APU one machine cycle late (2026-08-02)
+
+`Apu::set_double_speed_lag`, raised by `Interconnect::stop_impl` on a switching
+STOP that **enters** double speed: the frequency units keep dividing for single
+speed across the first machine cycle of the pause, so that pause hands the 2 MHz
+grid one extra cycle. The CPU and PPU switch on the cycle before, unchanged —
+the pause length, the leave direction and the deep (non-switching) STOP are all
+untouched, so this moves audio only. Scores **+6/−0**; unit test
+`entering_double_speed_lags_the_frequency_units_one_machine_cycle`.
+
+`gambatte/{sound,speedchange}/*ch1_duty0_pos6_to_pos7_timing*` pins it. The
+kernel powers the APU off and on (which resets the duty position to 0), sets
+duty 0 and `NR13 = $C0`/`$E0`, triggers `NR14 = $87` (frequency `$7C0`/`$7E0`),
+runs a `dec b` delay across zero or more `ldh (4D),a; stop` speed switches, then
+retriggers `NR14 = $80` in a loop. `$80` drops the frequency high bits, so the
+reloaded period is far longer than the ~272-machine-cycle loop and the duty
+position **freezes** at whatever the delay left it on. Duty 0 is high on
+position 7 only, so `_outaudio1` ⇔ frozen on 7 and `_outaudio0` ⇔ frozen on 6.
+
+The rungs come in `_1`/`_2` pairs one machine cycle apart, and the whole family
+reduces to one invariant: **the duty step's expiry must fall in the machine
+cycle immediately after the `_1` rung's retrigger write.** (In single speed that
+is 1-2 2 MHz cycles after the write, in double speed exactly 1 — the same
+statement either way.) Measured over all 44 ROMs before the fix, the expiry sat
+one 2 MHz cycle late per *entering* switch and correct otherwise.
+
+Residual: 12 rows, measured, do **not** re-sweep per-switch pause corrections.
+Writing each ROM's error as a sum of per-switch corrections keyed on direction
+plus the APU's 2 MHz phase (and the leave's `k`) is **refuted two-sided**:
+`speedchange2_..._nop` and `speedchange_..._nop_ds` demand opposite-sign
+corrections from leaves that are identical in both keys, while
+`speedchange3_nop_ch1` and `speedchange2_nop_ch1_ds` demand 2 and 0 from the
+same enter/leave pair. A full sweep of pause length (whole machine cycles and
+odd dots, both directions, phase-keyed) tops out at 14 of the 22 pairs, and
+every configuration past that regresses an `_1` rung. The lever left is finer
+than one dot.
+
+Refuted separately: re-reading the inactive pulse trigger's delay as `base + 4 +
+lf_div` (or the flat `base + 5`) instead of `base + 6 - lf_div`. Both are forced
+by the *zero-switch* rungs `ch1_duty0_pos6_to_pos7_timing_ds_{5,6}` and
+`speedchange_ch1_nr4init_...`, which have no pause between trigger and
+retrigger, and both score `+6/−6` and `+10/−5` on the corpus: they take
+same-suite `channel_1/2_align{,_cpu}` with them. The `- lf_div` term stays.

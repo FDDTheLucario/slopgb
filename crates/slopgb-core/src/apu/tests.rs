@@ -137,3 +137,27 @@ fn leaving_double_speed_restarts_div_without_a_frame_event() {
         assert_eq!(a.prev_div, 0, "prev {prev:04X}: counter restarted");
     }
 }
+
+/// A STOP that ENTERS double speed re-paces the frequency units one machine
+/// cycle after the CPU and PPU, so the first cycle of its pause still divides
+/// for single speed and the 2 MHz grid gains one cycle over that pause (see
+/// [`Apu::set_double_speed_lag`]).
+#[test]
+fn entering_double_speed_lags_the_frequency_units_one_machine_cycle() {
+    for (lag, want) in [(false, 1u16), (true, 2)] {
+        let mut a = Apu::new(true);
+        a.write(0xFF26, 0x80); // power on
+        a.write(0xFF12, 0xF0); // NR12: DAC on
+        a.write(0xFF14, 0x80); // NR14: trigger, frequency 0 (longest period)
+        if lag {
+            a.set_double_speed_lag(true);
+        }
+        let before = a.ch1.sample_countdown;
+        a.tick(0, true);
+        assert_eq!(
+            before - a.ch1.sample_countdown,
+            want,
+            "lag {lag}: 2 MHz cycles per double-speed machine cycle"
+        );
+    }
+}

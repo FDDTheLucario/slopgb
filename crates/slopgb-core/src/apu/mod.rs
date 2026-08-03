@@ -78,6 +78,10 @@ pub struct Apu {
     /// lands between ticks) must test the DIV-APU bit the machine is
     /// currently running on.
     last_double_speed: bool,
+    /// One-shot: the next [`Self::tick`] keeps the single-speed pace
+    /// ([`Self::set_double_speed_lag`]). Raised and dropped inside one
+    /// switching STOP, so no save state can observe it set.
+    speed_lag: bool,
     // Output stage.
     cycles_per_sample: f64,
     sample_frac: f64,
@@ -202,6 +206,7 @@ impl Apu {
             phase: 2,
             prev_div: 0,
             last_double_speed: false,
+            speed_lag: false,
             cycles_per_sample: 0.0,
             sample_frac: 0.0,
             sum_l: 0.0,
@@ -276,8 +281,12 @@ impl Apu {
                 self.ch4.envelope.arm(self.ch4.enabled);
             }
         }
-        // One CPU M-cycle is 4 dots of APU time, 2 in double speed.
-        let dots = if double_speed { 2 } else { 4 };
+        // One CPU M-cycle is 4 dots of APU time, 2 in double speed — but the
+        // first machine cycle after a switching STOP entered double speed
+        // still runs at the single-speed pace (see
+        // [`Self::set_double_speed_lag`]).
+        let lag = std::mem::take(&mut self.speed_lag);
+        let dots = if double_speed && !lag { 2 } else { 4 };
         for _ in 0..dots {
             if self.power {
                 self.phase = (self.phase + 1) & 3;
@@ -303,6 +312,21 @@ impl Apu {
             }
             self.output_cycle();
         }
+    }
+
+    /// A switching STOP that ENTERS double speed re-paces the frequency
+    /// units one machine cycle after the CPU and PPU: the APU's divider is
+    /// still dividing for single speed across the first cycle of the pause,
+    /// so the pause hands the 2 MHz grid one extra cycle. Pinned by the
+    /// gambatte `speedchange{2,4,5}*_ch1_duty0_pos6_to_pos7_timing_2`
+    /// rungs, whose frozen duty position lands one step short without it;
+    /// their `_1` siblings bracket it to a single 2 MHz cycle.
+    ///
+    /// The caller raises it for the pause and drops it afterwards: a pause
+    /// that exits before ticking (IE & IF raised by the cycles ahead of it)
+    /// must leave nothing behind for the next instruction.
+    pub fn set_double_speed_lag(&mut self, lag: bool) {
+        self.speed_lag = lag;
     }
 
     /// SameBoy's `lf_div`: the 2 MHz phase bit within the machine's 1 MHz
