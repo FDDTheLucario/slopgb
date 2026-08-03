@@ -131,7 +131,17 @@ Both port `lycRegChangeTriggersStatIrq` (held-compare target tables, m0/m1 block
 
 ### LCD-enable glitch line
 
-- Starts its pipe at **dot 82** (blocking still 78): flip/IRQ at **252+SCX%8**.
+- Starts its pipe at **dot 82** (VRAM/OAM blocking still 78): flip/IRQ at **252+SCX%8**.
+- **CGB palette RAM locks at 81, not 78** (2026-08-02) — the anchor plus the same
+  `PAL_M3START_OPEN` grace the normal dot-84 anchor gets on shifted frames
+  (`Ppu::pal_ram_blocked`). `enable_display/ly0_late_cgbp{r,w}{,_ds}_1` access at
+  dot 80 and want the palettes OPEN (read `$55` / write landed); their `_2`
+  siblings access at 84 single speed and 82 double speed and want them locked.
+  That brackets the lock to **81..=82** and only 81 is a derived value; a ROM
+  accessing at exactly 81 would split it. Scores **+4/−0**; unit test
+  `cgb_glitch_line_palette_lock_trails_the_anchor`. The VRAM and
+  OAM predicates keep 78 — `ly0_late_vramr_{1,2,3}` and `ly0_late_oamw_{1,2}`
+  pass on both speeds with the unchanged anchor, so the grace is palette-only.
 
 ### IF rise timing
 

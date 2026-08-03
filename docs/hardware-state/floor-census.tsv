@@ -116,10 +116,6 @@ gambatte/enable_display/frame1_m1stat_ds_2_cgb04c_out81.gbc [Cgb]	gambatte	gamba
 gambatte/enable_display/frame1_m2irq_count_ds_2_cgb04c_out91.gbc [Cgb]	gambatte	gambatte/enable_display	Cgb	00	91	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/enable_display/frame1_m2stat_count_1_dmg08_cgb04c_out91.gbc [Cgb]	gambatte	gambatte/enable_display	Cgb	00	91	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/enable_display/frame1_m2stat_count_ds_2_cgb04c_out90.gbc [Cgb]	gambatte	gambatte/enable_display	Cgb	00	90	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/enable_display/ly0_late_cgbpr_1_cgb04c_out55.gbc [Cgb]	gambatte	gambatte/enable_display	Cgb	FF	55	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/enable_display/ly0_late_cgbpr_ds_1_cgb04c_out55.gbc [Cgb]	gambatte	gambatte/enable_display	Cgb	FF	55	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/enable_display/ly0_late_cgbpw_1_cgb04c_outAA.gbc [Cgb]	gambatte	gambatte/enable_display	Cgb	55	AA	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/enable_display/ly0_late_cgbpw_ds_1_cgb04c_outAA.gbc [Cgb]	gambatte	gambatte/enable_display	Cgb	55	AA	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/enable_display/ly0_late_scx7_m3stat_scx1_2_dmg08_cgb04c_out84.gbc [Cgb]	gambatte	gambatte/enable_display	Cgb	87	84	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/enable_display/ly0_late_scx7_m3stat_scx1_2_dmg08_cgb04c_out84.gbc [Dmg]	gambatte	gambatte/enable_display	Dmg	87	84	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/enable_display/ly0_late_vramr_ds_2_cgb04c_outFF.gbc [Cgb]	gambatte	gambatte/enable_display	Cgb	55	FF	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not

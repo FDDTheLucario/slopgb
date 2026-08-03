@@ -375,3 +375,24 @@ fn eager_offscreen_wx166_window_exit_and_stalled_access() {
     );
     assert!(!p.vram_read_blocked(), "dot 265 VRAM readback releases too");
 }
+
+/// The LCD-enable (glitch) line locks palette RAM later than its dot-78
+/// mode-3 anchor: `enable_display/ly0_late_cgbp{r,w}{,_ds}_1` access at dot 80
+/// and want the palettes open (read `$55` / write landed), their `_2` siblings
+/// at 82 (double speed) and 84 want them locked.
+#[test]
+fn cgb_glitch_line_palette_lock_trails_the_anchor() {
+    let mut p = cgb();
+    p.write(0xFF40, 0x81); // enable the LCD: line 0 is the glitch line
+    run_to(&mut p, 0, 80);
+    assert!(p.glitch_line, "line 0 after enable is the glitch line");
+    assert!(
+        !p.pal_ram_blocked(),
+        "the `_1` rungs' dot-80 palette access is open"
+    );
+    run_to(&mut p, 0, 82);
+    assert!(
+        p.pal_ram_blocked(),
+        "the `_ds_2` rung's dot-82 palette access is locked"
+    );
+}

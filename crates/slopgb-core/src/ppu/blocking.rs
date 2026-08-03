@@ -365,7 +365,14 @@ impl Ppu {
                 && self.dot < self.pal_open_dot + u16::from(!self.ds);
         }
         let lock = if self.glitch_line {
-            GLITCH_MODE3_START
+            // The LCD-enable line's palette lock trails its own mode-3
+            // anchor by the same grace the shifted-frame arm below applies
+            // to the normal anchor: `enable_display/ly0_late_cgbp{r,w}{,_ds}_1`
+            // access at dot 80 and want the palettes OPEN (read $55 /
+            // write landed), while their `_2` siblings at dot 84 single
+            // speed and 82 double speed want them locked — a bracket of
+            // 81..=82, of which only the anchor + grace is a derived value.
+            GLITCH_MODE3_START + PAL_M3START_OPEN
         } else if self.model.is_cgb() && !self.ds {
             // The SS mode-3 entry lock is the mode-3 anchor 84 itself: the
             // `*_m3start_2` triplet (SameBoy-pass) accesses at dot 84 and wants
