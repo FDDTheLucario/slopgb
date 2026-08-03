@@ -4837,11 +4837,11 @@ gambatte/sound/ch2_div_write_reset_length_counter_timing_nr52_2_dmg08_cgb04c_out
 gambatte/sound/ch2_init_env_counter_timing_1_dmg08_cgb04c_outaudio0.gbc [Cgb] | 9ab4e008dd5a4325 | b6b0632d997517d6
 gambatte/sound/ch2_init_env_counter_timing_1_dmg08_cgb04c_outaudio0.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/sound/ch2_init_env_counter_timing_2_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb] | 9ab4e008dd5a4325 | b6b0632d997517d6
-gambatte/sound/ch2_init_env_counter_timing_2_dmg08_outaudio1_cgb04c_outaudio0.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
+gambatte/sound/ch2_init_env_counter_timing_2_dmg08_outaudio1_cgb04c_outaudio0.gbc [Dmg] | 00e9c7f1d1b2b325 | 768feb1b9a49a7d6
 gambatte/sound/ch2_init_env_counter_timing_3_dmg08_outaudio1_cgb04c_outaudio0.gbc [Cgb] | 9ab4e008dd5a4325 | b6b0632d997517d6
-gambatte/sound/ch2_init_env_counter_timing_3_dmg08_outaudio1_cgb04c_outaudio0.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
+gambatte/sound/ch2_init_env_counter_timing_3_dmg08_outaudio1_cgb04c_outaudio0.gbc [Dmg] | 00e9c7f1d1b2b325 | cc2efb0a1e01a7d6
 gambatte/sound/ch2_init_env_counter_timing_4_dmg08_cgb04c_outaudio1.gbc [Cgb] | 9ab4e008dd5a4325 | 768feb1b9a49a7d6
-gambatte/sound/ch2_init_env_counter_timing_4_dmg08_cgb04c_outaudio1.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
+gambatte/sound/ch2_init_env_counter_timing_4_dmg08_cgb04c_outaudio1.gbc [Dmg] | 00e9c7f1d1b2b325 | 768feb1b9a49a7d6
 gambatte/sound/ch2_init_pos_1_dmg08_cgb04c_outaudio0.gbc [Cgb] | 9ab4e008dd5a4325 | b6b0632d997517d6
 gambatte/sound/ch2_init_pos_1_dmg08_cgb04c_outaudio0.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/sound/ch2_init_pos_2_dmg08_cgb04c_outaudio0.gbc [Cgb] | 9ab4e008dd5a4325 | b6b0632d997517d6

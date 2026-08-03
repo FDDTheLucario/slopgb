@@ -148,6 +148,11 @@ impl Interconnect {
         // the remainder is applied to channel 1's frequency unit alone.
         self.apu
             .advance_beep_duty(s.beep_duty_advance - (cgb_cart_cut / 2) as u16);
+        // The warmup's synthetic DIV runs a whole number of frame-sequencer
+        // rounds, so it leaves the divider where the hwio replay's NR52
+        // power-on put it: step 0. Hardware has been counting since the boot
+        // ROM's own NR52 write.
+        self.apu.set_post_boot_div_step(s.apu_div_step);
         let mut sink = Vec::new();
         self.apu.drain_samples(&mut sink);
     }

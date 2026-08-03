@@ -216,3 +216,16 @@ fn post_boot_beep_frequency_and_duty_phase() {
     assert_eq!(Model::Dmg.post_boot_state().beep_duty_advance, 860);
     assert_eq!(Model::Cgb.post_boot_state().beep_duty_advance, 1298);
 }
+
+/// The DIV-APU divider has been running since the boot ROM's NR52 write, so
+/// hand-off lands mid-round. Pinned two-sided by gambatte
+/// `sound/ch2_init_env_counter_timing_1..4`; see docs/hardware-state/apu.md.
+#[test]
+fn post_boot_frame_sequencer_step() {
+    for m in ALL {
+        assert!(m.post_boot_state().apu_div_step < 8, "{m:?}: a 3-bit step");
+    }
+    assert_eq!(Model::Dmg.post_boot_state().apu_div_step, 1);
+    assert_eq!(Model::Cgb.post_boot_state().apu_div_step, 0);
+    assert_eq!(Model::Agb.post_boot_state().apu_div_step, 0);
+}

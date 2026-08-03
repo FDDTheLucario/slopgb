@@ -77,6 +77,17 @@ pub struct PostBootState {
     /// rung pairs is one machine cycle wide, and DMG wants sound on rungs
     /// 2-5 where CGB wants it on 8-3.
     pub beep_duty_advance: u16,
+    /// Frame-sequencer step (`Apu::div_divider`) at hand-off. The DIV-APU
+    /// divider has been counting since the boot ROM powered the APU on, so it
+    /// is not 0 at PC=$0100 and the phase decides every envelope/length/sweep
+    /// race a game sets up in its first frame.
+    ///
+    /// Pinned two-sided by gambatte `sound/ch2_init_env_counter_timing_1..4`,
+    /// whose four one-machine-cycle rungs straddle the volume step of a
+    /// period-1 envelope: DMG wants the step before rung 2 and CGB before
+    /// rung 4, and on each model the neighbouring step values fail on
+    /// opposite sides.
+    pub apu_div_step: u8,
     /// PPU position at hand-off, in dots from the start of a steady frame
     /// (line = dots / 456, dot-in-line = dots % 456). The boot ROM enabled
     /// the LCD long before PC=0x100, so the machine starts mid-frame; the
@@ -232,6 +243,7 @@ impl Model {
             hwio: HWIO_DMG,
             lcd_phase_dots: 70164,
             beep_duty_advance: 860,
+            apu_div_step: 1,
         };
         match self {
             // boot_regs-dmg0, boot_div-dmg0, boot_hwio-dmg0.
@@ -322,6 +334,7 @@ impl Model {
                 hwio: HWIO_CGB,
                 lcd_phase_dots: 67836,
                 beep_duty_advance: 1298,
+                apu_div_step: 0,
                 ..base
             },
             // misc/boot_regs-A, misc/boot_div-A.
@@ -338,6 +351,7 @@ impl Model {
                 hwio: HWIO_CGB,
                 lcd_phase_dots: 67840,
                 beep_duty_advance: 1298,
+                apu_div_step: 0,
                 ..base
             },
         }

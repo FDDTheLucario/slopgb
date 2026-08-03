@@ -50,9 +50,35 @@ Both spans are 252 M-cycles — four duty steps, which is what fixes the step at
 
 Do **not** carry the advance by lengthening the warmup instead: that also moves
 the frame sequencer's hand-off phase, which the `ch2_init_env_counter_timing`
-rows pin separately. Measured — a warmup long enough to place the duty phase
-scores +11/−3, winning three `ch2_init_env_counter_timing` rows on DMG and
+rows pin separately (below). Measured — a warmup long enough to place the duty
+phase scores +11/−3, winning three `ch2_init_env_counter_timing` rows on DMG and
 losing the same three on CGB; advancing channel 1 alone scores **+8/−0**.
+
+### The frame sequencer is mid-round at hand-off (2026-08-02)
+
+`PostBootState::apu_div_step` — DMG-family **1**, CGB/AGB **0**. The DIV-APU
+divider counts from the boot ROM's own NR52 power-on write, so the hand-off step
+is not 0, and the warmup cannot supply it: its synthetic DIV runs 512 falling
+edges, a whole number of eight-step rounds, leaving the divider exactly where the
+hwio replay's NR52 write put it.
+
+`gambatte/sound/ch2_init_env_counter_timing_1..4` pins it two-sided on each
+model. The kernel triggers channel 2 with `NR22 = $09` (volume 0, *increasing*,
+period 1), runs a nested `dec b`/`dec c` delay, then writes `NR22 = $08` —
+period 0, which locks the envelope where it stands — and spins forever. Volume 0
+gives a constant stream, volume 1 a varying one, so `_outaudio1` ⇔ the envelope's
+step beat the locking write. The four rungs are one machine cycle apart, and the
+period-1 envelope's step lands between two frame-sequencer events (`divider & 7
+== 7` decrements the countdown, the next event applies the volume), so a
+step-value error of one moves the whole race a full 8192 T:
+
+| model | step | sound rungs | neighbouring step values |
+|---|---|---|---|
+| DMG | 1 | 2-4 | 0 → no rung sounds · 2 → rung 1 sounds too |
+| CGB | 0 | 4 | 1 → rungs 1-3 sound, 4 does not · 7 → none sound |
+
+Only the two values above satisfy their model, and each is bracketed on both
+sides. Scores **+3/−0** (the DMG rungs; CGB was already right at 0).
 
 ## SameBoy countdown model
 

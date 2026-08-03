@@ -600,6 +600,14 @@ impl Apu {
         matches!(channel, 1..=4) && self.mute_mask & (1 << (channel - 1)) != 0
     }
 
+    /// Install the frame-sequencer step the boot ROM left behind
+    /// ([`crate::PostBootState::apu_div_step`]). The DIV-APU divider counts
+    /// from the NR52 power-on write, which the boot ROM does in its first
+    /// dozen machine cycles, so hand-off lands mid-sequence.
+    pub(crate) fn set_post_boot_div_step(&mut self, step: u8) {
+        self.div_divider = step & 7;
+    }
+
     /// Advance channel 1's frequency unit by `cycles` 2 MHz cycles without
     /// running the rest of the APU: the post-boot install's beep tail
     /// ([`crate::PostBootState::beep_duty_advance`]). An unenabled channel
