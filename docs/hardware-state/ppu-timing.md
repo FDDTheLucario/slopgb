@@ -67,6 +67,23 @@ want mode 0 (excluded by `line == 144`). Scores **+2/−0**; unit test
 `cgb_line144_hold_reads_vblank_at_both_speeds`, which also asserts the raw
 `vis_mode` stays 0 so the back-date remains read-scoped.
 
+**Refuted, measured — do not retry:** giving the *line-0* OAM-entry back-date the
+same treatment. Its `dot + debt >= 4` guard looks identically vacuous, and the
+DMG analogue carries no debt term at all, but dropping it scores **0/−1**:
+`ly0/lycint152_ly0stat_ds_2` (want `C1`) reads a double-speed line-0 dot 0/1 and
+pins it to the raw VBlank mode **1**, so that hold is genuinely still 4 dots
+wide on the read grid at both speeds. The line-144 and line-0 arms are not
+mirror images. The visible-line arm (lines 1..143) was left alone for the same
+reason — its `_1`-rung siblings poll dot 0 of every line and currently pass.
+
+The `enable_display/frame{0,1}_*_count_ds_2` rows are NOT this lever: probed,
+`frame1_m2stat_count_ds_2` issues only two FF41 reads in the whole run (line 0
+dots 0 and 2, reading modes 1 then 2) and then leaves its loop, where the
+passing `_1` sibling polls a dot-454/dot-0 pair on every line. The count
+collapses because the loop exits after one iteration, not because a mode read is
+misclassified — start from the loop's exit condition in the disassembly, not the
+read laws.
+
 ### FF41 writes — DMG vs CGB
 
 | Model | FF41-write behavior |
