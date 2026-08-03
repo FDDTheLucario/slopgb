@@ -9,6 +9,19 @@
 use super::*;
 
 impl Ppu {
+    /// The post-switch mode-3 exit offset, in half-dots, off the render's own
+    /// flip. A mid-frame-anchored speed dance leaves the projection long by a
+    /// fixed amount per (speed, leave-advance) class — derived per class over
+    /// all 50 rows the old 4-variable table covered: every class is feasible,
+    /// `leave_k = 6` classes sit 4 half-dots above `leave_k = 2` ones, and
+    /// within a `leave_k` the dances that end in double speed sit 4 below those
+    /// that end in single. The table's `SCX&7` term is gone — the render's flip
+    /// carries it — and so is `lcd_enable_in_ds`.
+    fn post_switch_exit_hd(&self) -> i32 {
+        let speed = if self.ds { -6 } else { -2 };
+        speed + i32::from(self.stop_leave_k) - 2
+    }
+
     /// A visible (line 1–143), non-glitch, sprite-free line currently in
     /// mode 3 — the bare window-exit precondition shared by the DMG/CGB
     /// window arms of [`Self::vis_exit_hd`].
@@ -519,7 +532,10 @@ impl Ppu {
                     // dances (lcdoffds — `lcd_enable_in_ds`, sits exactly
                     // on the emergent exit) are excluded.
                     if self.stop_anchor_midframe && !self.lcd_enable_in_ds {
-                        fold(&mut exit, 502 + i32::from(self.stop_leave_k) + 2 * scx7);
+                        fold(
+                            &mut exit,
+                            2 * i32::from(flip) + self.post_switch_exit_hd() - carry,
+                        );
                     } else {
                         fold(
                             &mut exit,
@@ -586,10 +602,9 @@ impl Ppu {
                 // scx1_1`, VBlank-anchored) stays the pre-seeded
                 // rebaseline joiner.
                 if self.stop_anchor_midframe && self.stop_leave_lcd_on {
-                    let en = if self.lcd_enable_in_ds { 4 } else { 0 };
                     fold(
                         &mut exit,
-                        504 + i32::from(self.stop_leave_k) - en + 2 * scx7,
+                        2 * i32::from(flip) + self.post_switch_exit_hd() - carry,
                     );
                 } else {
                     let phase = i32::from(self.lcd_phase_hd);

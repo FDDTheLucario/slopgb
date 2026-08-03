@@ -520,31 +520,36 @@ off-screen (WX >= 0xA0) arming case keeps its closed form — it renders nothing
 and is read before it HBlank-activates. gbtr 221/221 with
 `golden_fingerprint` byte-identical, so this is a pure representation change.
 
-## The post-switch table does NOT collapse — and why
+## The post-switch table collapses too (after one wrong turn)
 
-Same derivation applied to the two `stop_anchor_midframe` branches (the
-4-variable post-switch exit `E = 504 + leave_k - 4*[lcd_enable_in_ds] + 2*(SCX&7)`
-and its DS twin). Disabling them leaves exactly **32 rows**, and every one is
-one-sided — all want mode 0 / C0 — bounding the offset at `k <= -6`. Applied as a
-single `POST_SWITCH_EXIT_HD = -6` on top of the emergent exit, those 32 pass.
+First attempt applied a single offset. Disabling the two `stop_anchor_midframe`
+branches leaves exactly **32 rows, every one one-sided** (all want mode 0 / C0),
+bounding the offset at `k <= -6`; `-6` passes all 32 and then breaks the `_1`
+siblings, which supply the lower bound the one-sided set could not.
+**A one-sided constraint set cannot pin a threshold — pull the want-opposite
+siblings in before trusting any interval.**
 
-But the one-sidedness was the trap: the `_1` siblings then fail, and they supply
-the lower bound the first set could not. The binding pair, both **carried**, both
-reading at **rphd 506**:
+The second reading was also wrong: comparing `..._lcdoff_nop_..._scx1_1` against
+`..._lcdoff_..._scx2_2` looked like the render tracked SCX with an inverted sign,
+but those are two different dances. Within a dance the direction is right
+(`speedchange2_ly44_m3_m3stat` scx2_2 needs `x <= -2`, scx3_1 needs `x > -4`;
+`x = -2` serves both).
 
-| row | scx | 2*flip | want | needs |
-|---|---|---|---|---|
-| `speedchange2_lcdoff_nop_m2int_m3stat_scx1_1` | 1 | 510 | 3 | `k > 0` |
-| `speedchange2_lcdoff_m2int_m3stat_scx2_2` | 2 | 512 | 0 | `k <= -2` |
+Derived per class over all 50 rows, **every class is feasible (0/26 infeasible)**,
+and the classes fit two terms already in slopgb's state:
 
-Infeasible by one grid step — and the interesting part is *why*. The render does
-separate the two, by exactly the SCX step (510 vs 512), but in the **wrong
-direction**: the row that needs the LATER exit has the EARLIER flip. So the
-post-switch projection tracks SCX with the wrong sign relative to what the ROMs
-require, and the table's `leave_k` / `lcd_enable_in_ds` / `SCX&7` variables are
-compensating for that, not for a missing read constant.
+* `leave_k = 6` classes sit 4 half-dots above `leave_k = 2` ones → a
+  `+ (leave_k - 2)` term;
+* within a `leave_k`, the dances ending in **double speed** (speedchange 1/3/5)
+  sit 4 below those ending in single (2/4) → a `ds ? -6 : -2` base.
 
-This is therefore NOT the same shape as arms 1/D1, which collapsed cleanly. It
-needs the post-switch render re-pace investigated on its own — the sign of the
-SCX term in the projection after a speed dance — before any read-side form can
-be fitted. Reverted; nothing landed from this attempt.
+```rust
+fn post_switch_exit_hd(&self) -> i32 {
+    let speed = if self.ds { -6 } else { -2 };
+    speed + i32::from(self.stop_leave_k) - 2
+}
+```
+
+against the old `E = 504 + leave_k - 4*[lcd_enable_in_ds] + 2*(SCX&7)` and its DS
+twin. The `SCX&7` term is gone — the render's flip carries it — and so is
+`lcd_enable_in_ds`. gbtr 221/221 with `golden_fingerprint` byte-identical.
