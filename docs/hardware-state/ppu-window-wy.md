@@ -159,3 +159,44 @@ citations, and it lives in the render where the hardware puts it. This was the
 first of the three deletions that retire the arm table; the window
 enable/disable/WX-rewrite arms (3, 4, 5, D3, D5, D-wx, 3b) are the next
 whole-dot-fixable group, and arms 8/8-spr wait on the half-dot render FSM.
+
+## Next group: the window abort / re-enable / WX-rewrite arms (3, 4, 5, 3b, D3, D5, D-wx)
+
+Measured by deleting them and running the matrix: they hold **31 rows** in three
+families — `late_disable_*` (20), `late_reenable_*` (6), `late_wx_*` (3).
+
+Dual-traced `late_disable_{early,late}_scx03_wx0f` (CGB, WX=15, SCX&7=3):
+
+| | SameBoy | slopgb |
+|---|---|---|
+| window activation, ly0 | cfl 105 | never activates |
+| window activation, ly1 | cfl 108 | never activates |
+| LCDC.5 clear, `_1` / `_2` | cfl 108 / 112 | same |
+| mode-3 exit, `_1` / `_2` | cfl 260 / 266 | 254 / 254 (bare) |
+
+So SameBoy's exit moves +6 dots as the clear moves +4 (the clear lands in
+different fetcher slots: at the activation dot the window ships nothing, four
+dots later its first tile is committed), while slopgb never draws the window at
+all on these lines and both legs collapse onto the bare exit. The arms patch the
+read verdict on top of that.
+
+Why slopgb misses the window here: `wy_triggered` latches only ONCE across 16
+frames. These ROMs clear LCDC.5 mid-line and leave it clear across the frame
+boundary, so line 0's dot-4 compare sees the window disabled and returns early;
+no later compare can latch it, because `WY == comparison` only holds at line 0.
+SameBoy latches anyway, so one of its compares sees LCDC.5 still set where
+slopgb's does not.
+
+Probed and rejected:
+
+* **Adding back the line-start (dot 0) compare** — SameBoy runs `wy_check` at
+  both the line start and the mode-2 rise, but enabling both takes the arms-cut
+  failure count from 31 to **37**. Dot 4 alone stays the measured optimum.
+* **Moving the frame reset ahead of the wrap's scheduled compare** — correct in
+  itself (landed, see below) but changes none of the 31.
+
+Still untested, and the next thing to try: the activation gate reads the
+PIPELINE LCDC (`eff.lcdc`) where SameBoy's `check_window` reads the
+architectural `io_registers[GB_IO_LCDC]`. On the traced line `eff.lcdc` has the
+window disabled at dot 105 while the architectural clear is at 112. `wy_check`
+already uses the architectural view; the activation gate does not.

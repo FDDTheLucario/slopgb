@@ -16,6 +16,13 @@ impl Ppu {
                 // gambatte M2_Ly0::f0: winYPos = 0xFF — the first
                 // activation of the frame increments it to row 0.
                 self.win_line = 0xFF;
+                // SameBoy clears `wy_triggered` at the VBlank exit
+                // (`display.c:1686`) — BEFORE line 0's own compares, including
+                // the one a line-boundary WY/LCDC write scheduled. Clearing it
+                // later would wipe that write's latch and leave the whole frame
+                // windowless (`window/late_disable_*`, which re-enable LCDC.5
+                // per line and rely on the line-0 write's compare).
+                self.wy_triggered = false;
                 self.clear_line_flip_state();
             }
             1..=143 => {

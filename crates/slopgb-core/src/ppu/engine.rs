@@ -527,9 +527,6 @@ impl Ppu {
         // mode-2 rise (`display.c:1815`, once `ly_for_comparison` holds the
         // line). The dot-4 rise is `ly_for_comparison`'s own latch dot
         // (`ly_for_comparison_at`).
-        if self.line == 0 && self.dot == 0 {
-            self.wy_triggered = false;
-        }
         if self.dot == 4 {
             self.wy_check();
         }
