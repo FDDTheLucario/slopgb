@@ -519,3 +519,32 @@ flip carries the whole mode-3 cost, and one read-frame constant remains. The
 off-screen (WX >= 0xA0) arming case keeps its closed form — it renders nothing
 and is read before it HBlank-activates. gbtr 221/221 with
 `golden_fingerprint` byte-identical, so this is a pure representation change.
+
+## The post-switch table does NOT collapse — and why
+
+Same derivation applied to the two `stop_anchor_midframe` branches (the
+4-variable post-switch exit `E = 504 + leave_k - 4*[lcd_enable_in_ds] + 2*(SCX&7)`
+and its DS twin). Disabling them leaves exactly **32 rows**, and every one is
+one-sided — all want mode 0 / C0 — bounding the offset at `k <= -6`. Applied as a
+single `POST_SWITCH_EXIT_HD = -6` on top of the emergent exit, those 32 pass.
+
+But the one-sidedness was the trap: the `_1` siblings then fail, and they supply
+the lower bound the first set could not. The binding pair, both **carried**, both
+reading at **rphd 506**:
+
+| row | scx | 2*flip | want | needs |
+|---|---|---|---|---|
+| `speedchange2_lcdoff_nop_m2int_m3stat_scx1_1` | 1 | 510 | 3 | `k > 0` |
+| `speedchange2_lcdoff_m2int_m3stat_scx2_2` | 2 | 512 | 0 | `k <= -2` |
+
+Infeasible by one grid step — and the interesting part is *why*. The render does
+separate the two, by exactly the SCX step (510 vs 512), but in the **wrong
+direction**: the row that needs the LATER exit has the EARLIER flip. So the
+post-switch projection tracks SCX with the wrong sign relative to what the ROMs
+require, and the table's `leave_k` / `lcd_enable_in_ds` / `SCX&7` variables are
+compensating for that, not for a missing read constant.
+
+This is therefore NOT the same shape as arms 1/D1, which collapsed cleanly. It
+needs the post-switch render re-pace investigated on its own — the sign of the
+SCX term in the projection after a speed dance — before any read-side form can
+be fitted. Reverted; nothing landed from this attempt.
