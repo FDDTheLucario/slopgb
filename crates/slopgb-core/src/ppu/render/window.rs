@@ -404,6 +404,20 @@ impl Ppu {
         // lx 0, SCX&7 5 and one pixel still to drop, giving a boundary of lx 3;
         // `late_disable_scx{2,3}_2` abort at the same phase with the discard
         // already spent and keep their full line.
+        // The clear landing before the window's first tile-number read leaves
+        // nothing of it at all: the fetch it was about to make never happens, so
+        // the pending fine-scroll discard is dropped and output resumes at the
+        // next tile boundary — the same §WIN_EN re-anchor as the mid-fetch case
+        // below, one phase earlier. CGB only: the DMG leg of each pair wants the
+        // window's cost kept (`late_disable_scx{2,3,5}_1` want 0 on CGB and 3 on
+        // DMG from one ROM).
+        if cgb && tileno_pending && r.discard > 0 && r.lx == 0 {
+            let fine = self.eff.scx & 7;
+            let to_boundary = (8 - (fine.wrapping_add(r.lx) & 7)) & 7;
+            r.lx = r.lx.saturating_add(to_boundary);
+            r.discard = 0;
+            r.win_stalled = false;
+        }
         if !tileno_pending && !matches!(r.phase, FetchPhase::Push | FetchPhase::Hi) && r.discard > 0
         {
             let fine = self.eff.scx & 7;
