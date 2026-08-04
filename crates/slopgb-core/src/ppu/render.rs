@@ -465,6 +465,17 @@ impl Ppu {
         // M3Start::f1 discards scx % 8 regardless of the window state).
         if std::mem::take(&mut self.win_start_pending) && self.eff.lcdc & LCDC_WIN_ENABLE != 0 {
             self.win_line = self.win_line.wrapping_add(1);
+            if self.render.win_disabled_line {
+                // TWO starts on this line, so the row counter moves twice: the
+                // carried request above, and the re-enable that put LCDC.5 back
+                // on before mode 3 began. A line that never switched the window
+                // off has only the one.
+                // Pins gambatte/window/on_screen/wxA6_late_we_reenable_{1,2,3}
+                // [Dmg], which toggle LCDC.5 off and on again during mode 2 of
+                // every line and draw their staircase one window row per two
+                // lines as a result.
+                self.win_line = self.win_line.wrapping_add(1);
+            }
             let r = &mut self.render;
             // Counts as this line's activation: the line's own WX match
             // must not increment the counter again.

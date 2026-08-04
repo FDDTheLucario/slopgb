@@ -7235,11 +7235,11 @@ gambatte/window/on_screen/wxA5_weoff_at_xposA5.gbc [Dmg] | 9ab4e008dd5a4325 | b6
 gambatte/window/on_screen/wxA6_3.gbc [Cgb] | 6b1600988c530325 | b6b0632d997517d6
 gambatte/window/on_screen/wxA6_3.gbc [Dmg] | 3d139da3d45b0b65 | b6b0632d997517d6
 gambatte/window/on_screen/wxA6_late_we_reenable_1.gbc [Cgb] | 049e0a5bd72cab25 | b6b0632d997517d6
-gambatte/window/on_screen/wxA6_late_we_reenable_1.gbc [Dmg] | c3ea4f4f12101165 | b6b0632d997517d6
+gambatte/window/on_screen/wxA6_late_we_reenable_1.gbc [Dmg] | c2e264935071a925 | b6b0632d997517d6
 gambatte/window/on_screen/wxA6_late_we_reenable_2.gbc [Cgb] | 049e0a5bd72cab25 | b6b0632d997517d6
-gambatte/window/on_screen/wxA6_late_we_reenable_2.gbc [Dmg] | c3ea4f4f12101165 | b6b0632d997517d6
+gambatte/window/on_screen/wxA6_late_we_reenable_2.gbc [Dmg] | c2e264935071a925 | b6b0632d997517d6
 gambatte/window/on_screen/wxA6_late_we_reenable_3.gbc [Cgb] | 049e0a5bd72cab25 | b6b0632d997517d6
-gambatte/window/on_screen/wxA6_late_we_reenable_3.gbc [Dmg] | 562ddcdb49a17025 | b6b0632d997517d6
+gambatte/window/on_screen/wxA6_late_we_reenable_3.gbc [Dmg] | f4575937dfd5b025 | b6b0632d997517d6
 gambatte/window/on_screen/wxA6_late_we_reenable_4.gbc [Cgb] | 049e0a5bd72cab25 | b6b0632d997517d6
 gambatte/window/on_screen/wxA6_late_we_reenable_4.gbc [Dmg] | 9ab4e008dd5a4325 | b6b0632d997517d6
 gambatte/window/on_screen/wxA6_scx7.gbc [Cgb] | 6b1600988c530325 | b6b0632d997517d6
