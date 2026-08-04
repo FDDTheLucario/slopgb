@@ -553,3 +553,36 @@ fn post_switch_exit_hd(&self) -> i32 {
 against the old `E = 504 + leave_k - 4*[lcd_enable_in_ds] + 2*(SCX&7)` and its DS
 twin. The `SCX&7` term is gone — the render's flip carries it — and so is
 `lcd_enable_in_ds`. gbtr 221/221 with `golden_fingerprint` byte-identical.
+
+## The abort group does NOT collapse — measured, not assumed
+
+The same per-class derivation was run on the last group (arms 3, 4, 5, 3b, D3,
+D5, D-wx — 29 rows). Keyed by (family, model, `SCX&7`, `abort_dot - wx_match_dot`)
+the discriminator is clearly the abort position: `late_disable_early|dmg` flips
+from `x <= 2` at `d <= -6` to `x > 2` at `d = -5`, and `late_wx|cgb|scx5` from
+`x <= -8` at `d = -1` to `x > -8` at `d = 3`. So the arms are thresholding on the
+right quantity.
+
+But the fit does not close. Over the full two-sided constraint set (all 168
+`late_disable*` / `late_reenable*` / `late_wx*` / `late_scx_late_disable*` rows,
+passing ones included), the key yields **129 classes for 168 rows** — barely more
+than one row per class — and 7 of them are still infeasible. Compare the two
+groups that did collapse:
+
+| group | rows | classes | outcome |
+|---|---|---|---|
+| arms 1 / D1 | 33 | 2 (polled / carried) | one constant each |
+| post-switch | 50 | 26 | 2 terms, both tracked state |
+| **abort / re-enable / WX-rewrite** | **168** | **129** | **no fit** |
+
+One row per class is not a law, it is the table written differently. That matches
+the disassembly result: this group is patching a **4-dot ISR frame offset**
+(2 dots of STAT dispatch + 2 of ISR path, `late_disable_early_scx03_wx10` traced
+`ACK` against `SBACK`) per configuration, so a read-side re-expression needs as
+many parameters as the arms already have — it would be fitting to a frame error
+rather than modelling a mechanism.
+
+**Retiring this group needs the dispatch frame, not a better read law.** slopgb
+dispatches STAT at dot 16 where SameBoy dispatches at 18, and mooneye is green at
+439/439 on 16 with the dispatch counter-pinned. That is the work; nothing on the
+window side reaches it.
