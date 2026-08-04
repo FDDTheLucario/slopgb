@@ -251,6 +251,22 @@ impl Ppu {
             // the match dot cannot separate them and the phase can. CGB only:
             // the DMG legs of the same ladder still need their own arm.
             let incomplete = !matches!(self.render.phase_of(), FetchPhase::Push | FetchPhase::Hi);
+            // A clear landing after the WX match while a SPRITE fetch holds the
+            // fetcher cannot take the window's start back: the object fetch
+            // occupies the slot the abort would have used, so the start stays
+            // committed and the line still pays the window's 6-dot restart
+            // instead of re-anchoring to a tile boundary.
+            // Pins gambatte/window/late_disable_spx10_wx0f_2 (object at the
+            // window's screen X, clear one dot past the match) against its `_1`
+            // sibling, which clears before the match and genuinely aborts.
+            if self.model.is_cgb()
+                && self.render.obj_abort != 0
+                && self.render.wx_match_dot != 0
+                && self.dot > self.render.wx_match_dot
+            {
+                self.render.add_stall(6);
+                return;
+            }
             if self.model.is_cgb() {
                 if self.render.active && incomplete {
                     let hf = self.render.hunt_fine & 7;
