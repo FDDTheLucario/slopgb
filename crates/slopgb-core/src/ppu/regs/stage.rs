@@ -263,6 +263,17 @@ impl Ppu {
                 // (gambatte ppu.cpp setLcdc clears win_draw_started
                 // immediately; the tile data already latched still ships
                 // — see `window_abort`).
+                // Any LCDC.5 clear on a live line arms the re-enable redraw
+                // deadline (`window_trigger_step`): a window re-enabled after
+                // being switched off has to catch its own redraw start, where a
+                // first enable starts freely.
+                if old & LCDC_WIN_ENABLE != 0
+                    && value & LCDC_WIN_ENABLE == 0
+                    && self.line < 144
+                    && (self.render.active || self.vis_mode() >= 2)
+                {
+                    self.render.win_disabled_line = true;
+                }
                 if old & LCDC_WIN_ENABLE != 0 && value & LCDC_WIN_ENABLE == 0 && self.render.active
                 {
                     // A mid-mode-3 LCDC.5 clear: the read-law FLAG half

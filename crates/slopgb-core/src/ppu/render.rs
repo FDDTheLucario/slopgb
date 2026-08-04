@@ -232,6 +232,11 @@ pub(super) struct Render {
     /// slopgb's whole-dot render collapses the re-enable-dot dependence. Reset
     /// per line. `pub(super)` for the read law.
     pub(super) win_reenable_dot: u16,
+    /// LCDC.5 was cleared somewhere on this line (mode 2 or mode 3), so a later
+    /// re-enable is a REDRAW and must beat the redraw deadline rather than
+    /// starting freely like a first enable. Cleared with the rest of the
+    /// per-line render state.
+    pub(super) win_disabled_line: bool,
     /// The dot a mid-line LCDC.5 FIRST enable landed (0 if
     /// none this line; distinct from [`Self::win_reenable_dot`]: latched only
     /// when the window was neither active nor aborted, i.e. the enable IS the
@@ -352,6 +357,7 @@ impl Render {
             win_predraw_abort: false,
             win_predraw_abort_dot: 0,
             win_reenable_dot: 0,
+            win_disabled_line: false,
             win_enable_dot: 0,
             wx_write_dot: 0,
             scx_write_dot: 0,
@@ -824,6 +830,7 @@ impl Render {
         w.bool(self.win_predraw_abort);
         w.u16(self.win_predraw_abort_dot);
         w.u16(self.win_reenable_dot);
+        w.bool(self.win_disabled_line);
         w.u16(self.win_enable_dot);
         w.u16(self.wx_write_dot);
         w.u16(self.scx_write_dot);
@@ -876,6 +883,7 @@ impl Render {
         self.win_predraw_abort = r.bool()?;
         self.win_predraw_abort_dot = r.u16()?;
         self.win_reenable_dot = r.u16()?;
+        self.win_disabled_line = r.bool()?;
         self.win_enable_dot = r.u16()?;
         self.wx_write_dot = r.u16()?;
         self.scx_write_dot = r.u16()?;

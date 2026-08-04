@@ -22,17 +22,6 @@ impl Ppu {
         speed + i32::from(self.stop_leave_k) - 2
     }
 
-    /// A visible (line 1–143), non-glitch, sprite-free line currently in
-    /// mode 3 — the bare window-exit precondition shared by the DMG/CGB
-    /// window arms of [`Self::vis_exit_hd`].
-    fn bare_m3_visible(&self, m: u8) -> bool {
-        self.line >= 1
-            && self.line < 144
-            && m == 3
-            && !self.glitch_line
-            && self.render.n_sprites == 0
-    }
-
     /// A non-glitch, sprite-free line — the [`Self::bare_m3_visible`] sub-pair
     /// reused where the surrounding arm supplies its own mode/line guards.
     fn bare_sprite_free(&self) -> bool {
@@ -268,50 +257,6 @@ impl Ppu {
                 .any(|s| u16::from(s.x) == u16::from(self.eff.wx) + 1)
         {
             fold(&mut exit, 2 * 270);
-        }
-        // Arm 5 — the CGB window-REENABLE length, SS. A window
-        // disabled then RE-enabled mid-mode-3 redraws from the re-enable
-        // point; mode 3 extends past the read iff the re-enable beat the WX
-        // redraw start (`reen <= wx_match − 3`, uniform — base wxmatch97:
-        // reen92 extend / reen96 bare; wx0f wxmatch105: 100/104). The LATE
-        // re-enable renders the tail BARE (exit 253); slopgb collapses both
-        // to mode 3. SCX&7 <= 3 only (the fine-scroll shifts the redraw
-        // deadline at high SCX — scx5 boundary 98 not 94; scx5+
-        // pass natively).
-        if self.model.is_cgb()
-            && !self.ds
-            && self.render.win_reenable_dot != 0
-            && self.render.wx_match_dot != 0
-            && self.render.win_reenable_dot + 3 > self.render.wx_match_dot
-            && self.scx & 7 <= 3
-            && self.eff.lcdc & LCDC_WIN_ENABLE != 0
-            && self.render.win_active
-            && self.bare_m3_visible(m)
-        {
-            fold(&mut exit, 2 * 253);
-        }
-        // Arm D5 — the DMG window-REENABLE-too-late bare exit, the
-        // arm-5 port. The redraw deadline carries an SCX term absent on CGB:
-        // bare iff `reen + K > wx_match + SCX&7` (the fine-scroll delays the
-        // redraw start, so a higher-SCX re-enable at the same dot still
-        // catches the tile); K = 4 on the cc+0 read frame, which records
-        // `win_reenable_dot` one M-cycle earlier than the frame the CGB arm's
-        // +3 above was calibrated against (`late_reenable_2` reen 94 —
-        // mirroring the arm-D3 +4). `late_reenable_2` reen 94 /
-        // match 97 / scx0 → bare (94+4 > 97); `scx2_2` reen 94 / scx2 → extend
-        // (98 ≯ 99); `wx0f_2` reen 102 / match 105 → bare. The CGB arm above
-        // keeps +3 — it is SCX-flat there (scx ≤ 3), the ±1 fetch phase again.
-        if !self.model.is_cgb()
-            && !self.ds
-            && self.render.win_reenable_dot != 0
-            && self.render.wx_match_dot != 0
-            && i32::from(self.render.win_reenable_dot) + 4
-                > i32::from(self.render.wx_match_dot) + scx7
-            && self.eff.lcdc & LCDC_WIN_ENABLE != 0
-            && self.render.win_active
-            && self.bare_m3_visible(m)
-        {
-            fold(&mut exit, 2 * 253);
         }
         // Arm 8-spr — the DS WINDOW+SPRITE mode-3 exit (CGB). Arm 1 (the
         // triggering-window length law) EXCLUDES sprite-laden DS lines

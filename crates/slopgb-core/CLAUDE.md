@@ -21,7 +21,7 @@ authoritative — **read `docs/ARCHITECTURE.md` before touching timing.**
   starts `None` on every model and only `set_audio_coprocessor` (SGB/SGB2 only)
   fills. SGB border, palettes and the ATTR/PAL packet handling (`ppu/sgb/`) ARE
   core PPU HLE and stay. Save states carry a SNES tail only when a coprocessor is
-  installed (`STATE_VERSION` 10; older states are rejected, there is no migration).
+  installed (`STATE_VERSION` 15; older states are rejected, there is no migration).
 - **No new deps, ever.** No god files (<1000 lines): split into `foo.rs` + `foo/`
   (second `impl` via `use super::*`), externalize tests to `#[path] *_tests.rs`;
   `tests/source_size.rs` (`LIMIT = 1000`) enforces it.

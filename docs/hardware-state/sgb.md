@@ -291,7 +291,7 @@ its own load, so the pair re-syncs on the first poll. `pending_cmd` (in
 **packet tee** beside it *is* serialized (bounded at `SGB_PACKET_QUEUE_CAP` = 16;
 queued packets may still await delivery).
 
-The whole-machine stream is `STATE_VERSION` 10, and an older state is rejected
+The whole-machine stream is `STATE_VERSION` 15, and an older state is rejected
 outright (`StateError::BadVersion`) — there is no migration. The SNES tail is
 appended only when a coprocessor fills the slot, so a pluginless SGB state (like
 `Dmg`/`Cgb`) carries none.

@@ -121,7 +121,7 @@ with *host*-side effects (`$6003` reset bit) are capture-only.
   mid-command packets included) is queued on the joypad's SGB state and
   drained via `SgbCommandSource::take_packet` (`sgb::SGB_PACKET_LEN`);
   bounded at `SGB_PACKET_QUEUE_CAP` = 16, serialized (the machine stream is
-  `STATE_VERSION` 10; older states are rejected, there is no migration). The HLE
+  `STATE_VERSION` 15; older states are rejected, there is no migration). The HLE
   presentation path is untouched — a tee, not a takeover.
 - **Core joypad return seam** (landed): `AudioCoprocessor::joypad_feed()
   -> Option<[u8; 4]>`, polled on `GameBoy::step`; `Some` installs the ICD2

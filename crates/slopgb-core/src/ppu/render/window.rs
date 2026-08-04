@@ -83,6 +83,23 @@ impl Ppu {
             self.win_start_pending = true;
         }
         if win_match && wy_ok && win_en_now {
+            // A window disabled and RE-enabled mid-mode-3 redraws from the
+            // re-enable point, but the fetcher needs 5 dots to get that redraw
+            // moving: a re-enable landing later than that misses the redraw
+            // start — the WX match, pushed out by the SCX fine scroll — and the
+            // window never draws, leaving the line bare for the rest of mode 3.
+            // Pins gambatte/window/late_reenable{,_scx2,_scx3,_wx0f}_{1,2} on
+            // both models. Single speed only: the double-speed re-enable rows
+            // are floored (see the gambatte baseline class W).
+            if !self.ds
+                && self.render.win_reenable_dot != 0
+                && self.render.win_disabled_line
+                && i32::from(self.render.win_reenable_dot) + 5
+                    > i32::from(self.dot) + i32::from(self.eff.scx & 7)
+            {
+                self.render.win_pending_until = 0;
+                return false;
+            }
             self.render.win_pending_until = 0;
             if !self.render.win_active {
                 // Activation: the window line counter advances *here*

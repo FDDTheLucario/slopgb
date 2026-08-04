@@ -210,6 +210,10 @@ impl Ppu {
             // (see `win_line`), not at line end.
             self.render.win_active = false;
             self.line = if self.line == 153 { 0 } else { self.line + 1 };
+            // Lives across the whole line: a mode-2 clear has to still be
+            // visible to the mode-3 re-enable deadline, which `render_init`
+            // (mode-3 start) would otherwise wipe.
+            self.render.win_disabled_line = false;
             self.start_line();
         }
         // One dot of LCDC.1 history for the object fetcher's delayed view,
