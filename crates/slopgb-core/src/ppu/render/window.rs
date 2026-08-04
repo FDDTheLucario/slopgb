@@ -219,6 +219,19 @@ impl Ppu {
     /// 2 pixels early). Idempotent: a no-op if the window already left
     /// `win_mode` (a natural end in the defer gap).
     pub(in crate::ppu) fn window_abort_render(&mut self) {
+        if std::env::var("SW_T").is_ok() && !self.render.win_mode && self.render.active {
+            let r = &self.render;
+            eprintln!(
+                "PD dot={} wxm={} d={} phase={:?} hf={} ns={} scxw={}",
+                self.dot,
+                r.wx_match_dot,
+                i32::from(self.dot) - i32::from(r.wx_match_dot),
+                r.phase_of(),
+                r.hunt_fine,
+                r.n_sprites,
+                r.scx_write_dot
+            );
+        }
         if !self.render.win_mode {
             // PRE-DRAW abort. Same rule as the drawn case below: a clear
             // landing while the fetch holds no latched row abandons it, and the

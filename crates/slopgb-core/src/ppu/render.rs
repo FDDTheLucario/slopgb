@@ -86,7 +86,7 @@ fn obj_fetch_base(cgb: bool, fetched: u16) -> u16 {
 /// before each read. The push into the FIFO retries every dot until the
 /// FIFO drains (Pan Docs "Push": "this state is executed only if [the
 /// FIFO] is empty").
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::ppu) enum FetchPhase {
     /// First dot of the tile-number read.
     TileNoWait,

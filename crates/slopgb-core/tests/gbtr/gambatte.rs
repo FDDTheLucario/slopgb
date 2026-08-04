@@ -545,26 +545,45 @@ fn gambatte_matrix() {
         common::skip_or_fail_gbtr("gambatte", "game-boy-test-roms collection not present");
         return;
     };
-    let mut results: Vec<CaseResult> = Vec::new();
-    for rom_path in suite_roms(&root) {
-        let cases = rom_cases(&rom_path);
-        if cases.is_empty() {
-            continue; // exempt; pinned by gambatte_inventory_is_exact
-        }
-        let rel = harness::rel_unix(&root, &rom_path);
+    let roms: Vec<_> = suite_roms(&root)
+        .into_iter()
+        .filter(|p| !rom_cases(p).is_empty()) // exempt; pinned by gambatte_inventory_is_exact
+        .collect();
+    let full = roms.len();
+    // `SLOPGB_GBTR_FILTER=<substring>` narrows the run to matching paths — a
+    // developer loop over one family instead of the whole 5272-case matrix. The
+    // count pin below is skipped when it is set, so a filtered run can never be
+    // mistaken for a clean matrix.
+    let filter = std::env::var("SLOPGB_GBTR_FILTER").ok();
+    let roms: Vec<_> = match &filter {
+        Some(f) => roms
+            .into_iter()
+            .filter(|p| harness::rel_unix(&root, p).contains(f.as_str()))
+            .collect(),
+        None => roms,
+    };
+    let results = harness::run_cases_parallel(&roms, |rom_path| {
+        let rel = harness::rel_unix(&root, rom_path);
         let rom =
-            std::fs::read(&rom_path).unwrap_or_else(|e| panic!("read {}: {e}", rom_path.display()));
-        for (model, check) in cases {
-            let result = harness::catch_case(|| run_case(&rom, model, &check, &rom_path));
-            results.push(CaseResult {
+            std::fs::read(rom_path).unwrap_or_else(|e| panic!("read {}: {e}", rom_path.display()));
+        rom_cases(rom_path)
+            .into_iter()
+            .map(|(model, check)| CaseResult {
                 key: harness::case_key(&rel, model),
-                result,
-            });
-        }
+                result: harness::catch_case(|| run_case(&rom, model, &check, rom_path)),
+            })
+            .collect()
+    });
+    if let Some(f) = &filter {
+        println!(
+            "gambatte: FILTERED to {f:?} — {}/{full} roms, count pin skipped",
+            roms.len()
+        );
+    } else {
+        // Routing pin: 5272 cases = 4674 hex + 374 png + 220 audio + 4 blank
+        // over 3474 claimed ROMs (see module docs for the per-rule census).
+        assert_eq!(results.len(), 5272, "case-matrix drift");
     }
-    // Routing pin: 5272 cases = 4674 hex + 374 png + 220 audio + 4 blank
-    // over 3474 claimed ROMs (see module docs for the per-rule census).
-    assert_eq!(results.len(), 5272, "case-matrix drift");
     let passed = results.iter().filter(|c| c.result.is_ok()).count();
     println!("gambatte: {passed}/{} cases pass", results.len());
     harness::assert_against_baseline("gambatte", &results, &harness::parse_baseline(BASELINE_TXT));

@@ -154,6 +154,36 @@ pub fn catch_panic<R>(f: impl FnOnce() -> R) -> Result<R, String> {
 /// One case body through [`catch_panic`]: a panicking case becomes a
 /// regular `Err("panicked: …")` [`CaseResult`] payload, so a core crash in
 /// one rom×model case can never abort a whole suite matrix.
+/// Run one closure per item across `min(cores, items)` scoped threads and
+/// concatenate the per-item results in input order. The suites' cases are
+/// independent (each builds its own `GameBoy`), so this is pure wall-clock:
+/// the gambatte matrix drops from minutes to well under one on a many-core box.
+/// Deterministic — the output order does not depend on completion order.
+pub fn run_cases_parallel<T: Sync>(
+    items: &[T],
+    run: impl Fn(&T) -> Vec<CaseResult> + Sync,
+) -> Vec<CaseResult> {
+    let n = std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(1)
+        .min(items.len().max(1));
+    if n <= 1 {
+        return items.iter().flat_map(&run).collect();
+    }
+    let chunk = items.len().div_ceil(n);
+    let run = &run;
+    std::thread::scope(|s| {
+        let handles: Vec<_> = items
+            .chunks(chunk)
+            .map(|c| s.spawn(move || c.iter().flat_map(run).collect::<Vec<_>>()))
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap_or_default())
+            .collect()
+    })
+}
+
 pub fn catch_case(f: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
     catch_panic(f).unwrap_or_else(|msg| Err(format!("panicked: {msg}")))
 }
@@ -215,6 +245,9 @@ pub fn case_key(rel: &str, model: Model) -> String {
 /// Failure output carries every offending case with its error detail.
 pub fn assert_against_baseline(suite: &str, results: &[CaseResult], baseline: &[&str]) {
     dump_census(suite, results);
+    // A filtered run executes a subset, so unexecuted baseline entries are not
+    // stale and missing keys are not orphans — only regressions are meaningful.
+    let filtered = std::env::var_os("SLOPGB_GBTR_FILTER").is_some();
     let mut regressions = Vec::new();
     let mut stale: Vec<&str> = Vec::new();
     for case in results {
@@ -229,7 +262,11 @@ pub fn assert_against_baseline(suite: &str, results: &[CaseResult], baseline: &[
     // (renamed ROM, changed model routing) — they would otherwise mask a
     // future regression under the old name.
     let executed: Vec<&str> = results.iter().map(|c| c.key.as_str()).collect();
-    let orphaned: Vec<&&str> = baseline.iter().filter(|b| !executed.contains(*b)).collect();
+    let orphaned: Vec<&&str> = if filtered {
+        Vec::new()
+    } else {
+        baseline.iter().filter(|b| !executed.contains(*b)).collect()
+    };
     if regressions.is_empty() && stale.is_empty() && orphaned.is_empty() {
         return;
     }
