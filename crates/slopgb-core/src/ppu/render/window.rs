@@ -89,8 +89,9 @@ impl Ppu {
             // start — the WX match, pushed out by the SCX fine scroll — and the
             // window never draws, leaving the line bare for the rest of mode 3.
             // Pins gambatte/window/late_reenable{,_scx2,_scx3,_wx0f}_{1,2} on
-            // both models. Single speed only: the double-speed re-enable rows
-            // are floored (see the gambatte baseline class W).
+            // both models and both speeds (`late_reenable_ds_2` too): the
+            // deadline is a fetcher cost, so it does not scale with the CPU
+            // clock.
             // A mid-line WX rewrite committing at or before the match dot
             // un-catches the window: the rewritten comparator value reaches the
             // fetcher before it acts on the match, so no window fetch starts and
@@ -111,8 +112,7 @@ impl Ppu {
                 self.render.win_pending_until = 0;
                 return false;
             }
-            if !self.ds
-                && self.render.win_reenable_dot != 0
+            if self.render.win_reenable_dot != 0
                 && self.render.win_disabled_line
                 && i32::from(self.render.win_reenable_dot) + 5
                     > i32::from(self.dot) + i32::from(self.eff.scx & 7)

@@ -600,7 +600,6 @@ gambatte/scy/scy_during_m3_ds_6.gbc [Cgb]
 gambatte/window/late_disable_ds_1_cgb04c_out0.gbc [Cgb]
 gambatte/window/late_disable_late_scx00_wx0f_ds_1_cgb04c_out0.gbc [Cgb]
 gambatte/window/late_disable_late_scx00_wx10_ds_1_cgb04c_out0.gbc [Cgb]
-gambatte/window/late_reenable_ds_2_cgb04c_out0.gbc [Cgb]
 gambatte/window/on_screen/late_wx_ds_2.gbc [Cgb]
 
 # --- mode-0 event-grid re-derivation: documented swaps (2026-06) ---
