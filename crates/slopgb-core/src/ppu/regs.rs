@@ -374,6 +374,7 @@ impl Ppu {
                 if self.render.active {
                     self.render.wx_write_dot = self.dot;
                 }
+                self.window_wx_uncatch();
                 self.wx = value;
             }
             0xFF4F if self.model.is_cgb() => self.vbk = value & 1,

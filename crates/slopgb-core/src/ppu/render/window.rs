@@ -91,6 +91,26 @@ impl Ppu {
             // Pins gambatte/window/late_reenable{,_scx2,_scx3,_wx0f}_{1,2} on
             // both models. Single speed only: the double-speed re-enable rows
             // are floored (see the gambatte baseline class W).
+            // A mid-line WX rewrite committing at or before the match dot
+            // un-catches the window: the rewritten comparator value reaches the
+            // fetcher before it acts on the match, so no window fetch starts and
+            // the line runs bare. Whether the rewrite wins that race is set by
+            // the BG fine-scroll phase — the fetch runs further ahead at high
+            // SCX&7 — and the phase boundary sits lower on DMG (3) than on CGB
+            // (5). Pins gambatte/window/late_wx{,_scx2,_scx3,_scx5}_{1,2}: the
+            // scx0/2 legs still catch the same write-before-match race.
+            // Single speed: in double speed the write lands after the match and
+            // withdraws the start instead (`window_wx_uncatch`).
+            let phase_bound = if self.model.is_cgb() { 5 } else { 3 };
+            if !self.ds
+                && self.eff.scx & 7 >= phase_bound
+                && self.render.wx_write_dot != 0
+                && self.render.wx_write_dot <= self.dot
+                && self.render.n_sprites == 0
+            {
+                self.render.win_pending_until = 0;
+                return false;
+            }
             if !self.ds
                 && self.render.win_reenable_dot != 0
                 && self.render.win_disabled_line
@@ -235,6 +255,31 @@ impl Ppu {
     /// (`m3_lcdc_win_en_change_multiple`: a cc+0 clear would end it 2 dots /
     /// 2 pixels early). Idempotent: a no-op if the window already left
     /// `win_mode` (a natural end in the defer gap).
+    /// A WX rewrite landing within a dot of the match withdraws a window start
+    /// the fetcher has not committed yet: the new WX no longer matches, so no
+    /// window fetch ever runs and the line finishes bare. Double speed only —
+    /// its 2-dot M-cycle puts the write one dot PAST the match, where single
+    /// speed lands before it and the comparator gate in `window_trigger_step`
+    /// catches it. Pins gambatte/window/late_wx_scx5_ds_1 (write 98, match 97)
+    /// against `_2` (write 100, fetch committed). Same SCX&7 >= 5 fine-scroll
+    /// phase bound as the single-speed comparator gate: below it the fetch has
+    /// not run far enough ahead for the rewrite to win the race.
+    pub(in crate::ppu) fn window_wx_uncatch(&mut self) {
+        if self.eff.scx & 7 < 5
+            || !self.ds
+            || !self.render.win_active
+            || !self.render.win_mode
+            || self.render.wx_match_dot == 0
+            || self.dot > self.render.wx_match_dot + 1
+        {
+            return;
+        }
+        self.render.win_active = false;
+        self.render.win_mode = false;
+        self.render.win_stalled = false;
+        self.window_abort_render();
+    }
+
     pub(in crate::ppu) fn window_abort_render(&mut self) {
         if !self.render.win_mode {
             // PRE-DRAW abort. Same rule as the drawn case below: a clear
