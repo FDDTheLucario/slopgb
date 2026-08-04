@@ -495,8 +495,6 @@ gambatte/window/on_screen/wx17_weoff_wxA5_weon.gbc [Cgb]
 gambatte/window/on_screen/wxA6_late_we_reenable_1.gbc [Dmg]
 gambatte/window/on_screen/wxA6_late_we_reenable_2.gbc [Dmg]
 gambatte/window/on_screen/wxA6_late_we_reenable_3.gbc [Dmg]
-gambatte/window/on_screen/wxA6_weoff_at_xposA6.gbc [Dmg]
-gambatte/window/on_screen/wxA6_wy01_weoff_ly02_weon_ly60.gbc [Dmg]
 
 # --- mode-3 write-effect wave swaps -------------------------------------
 # These entries regressed when the mode-3 write strobe, the SCX position-

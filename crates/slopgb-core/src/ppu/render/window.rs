@@ -95,6 +95,18 @@ impl Ppu {
             // on_screen/wxA6_weoff_at_xposA6). Honored at the next
             // mode-3 start only if the window is enabled by then.
             self.win_start_pending = true;
+            if self.render.win_disabled_line {
+                // The line still counts as STARTED when the window was enabled
+                // earlier in it and switched off before the match (gambatte
+                // keeps win_draw_started set), so the window row counter
+                // advances even though nothing drew — the next line that does
+                // draw shows the row after this one. A line where LCDC.5 was
+                // off throughout never started, and must not advance it.
+                // Pins gambatte/window/on_screen/wxA6_weoff_at_xposA6 and
+                // wxA6_wy01_weoff_ly02_weon_ly60 [Dmg], whose staircases sit one
+                // window row apart on exactly this distinction.
+                self.win_line = self.win_line.wrapping_add(1);
+            }
         }
         if win_match && wy_ok && win_en_now {
             // A window disabled and RE-enabled mid-mode-3 redraws from the

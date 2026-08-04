@@ -7245,7 +7245,7 @@ gambatte/window/on_screen/wxA6_late_we_reenable_4.gbc [Dmg] | 9ab4e008dd5a4325 |
 gambatte/window/on_screen/wxA6_scx7.gbc [Cgb] | 6b1600988c530325 | b6b0632d997517d6
 gambatte/window/on_screen/wxA6_scx7.gbc [Dmg] | 2035596fbf84dae5 | b6b0632d997517d6
 gambatte/window/on_screen/wxA6_weoff_at_xposA6.gbc [Cgb] | 9ab4e008dd5a4325 | b6b0632d997517d6
-gambatte/window/on_screen/wxA6_weoff_at_xposA6.gbc [Dmg] | fa80bf80d52e7b25 | b6b0632d997517d6
+gambatte/window/on_screen/wxA6_weoff_at_xposA6.gbc [Dmg] | bc31cd7ee669ed25 | b6b0632d997517d6
 gambatte/window/on_screen/wxA6_wy00.gbc [Cgb] | 5b54498df6eadb25 | b6b0632d997517d6
 gambatte/window/on_screen/wxA6_wy00.gbc [Dmg] | 6b25db7b6e55cd25 | b6b0632d997517d6
 gambatte/window/on_screen/wxA6_wy01.gbc [Cgb] | f82a967a7e063acc | b6b0632d997517d6
@@ -7253,7 +7253,7 @@ gambatte/window/on_screen/wxA6_wy01.gbc [Dmg] | cc32b5200de9be25 | b6b0632d99751
 gambatte/window/on_screen/wxA6_wy01_weoff_ly02.gbc [Cgb] | 9ab4e008dd5a4325 | dbf4ed74dc3dabca
 gambatte/window/on_screen/wxA6_wy01_weoff_ly02.gbc [Dmg] | 135ad547d1dc5225 | 467b801251c95cd2
 gambatte/window/on_screen/wxA6_wy01_weoff_ly02_weon_ly60.gbc [Cgb] | f65f53112c28e0cc | dbf4ed74dc3dabca
-gambatte/window/on_screen/wxA6_wy01_weoff_ly02_weon_ly60.gbc [Dmg] | d5b08f5893832ea5 | 467b801251c95cd2
+gambatte/window/on_screen/wxA6_wy01_weoff_ly02_weon_ly60.gbc [Dmg] | 18773d7fb09e8ae5 | 467b801251c95cd2
 gambatte/window/on_screen/wxA6_wy01_wxA5_ly02.gbc [Cgb] | 1361730a68641635 | dbf4ed74dc3dabca
 gambatte/window/on_screen/wxA6_wy01_wxA5_ly02.gbc [Dmg] | c83dcb0610ba2535 | 467b801251c95cd2
 gambatte/window/on_screen/wxA6_wy01_wxA7_ly02.gbc [Cgb] | 9ab4e008dd5a4325 | dbf4ed74dc3dabca
