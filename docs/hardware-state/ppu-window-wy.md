@@ -732,3 +732,27 @@ fetcher refill term when `bg_count == 0`. `_1` aborts with `bg_count = 4`, so
 has to change a term the projection actually reads (`stall`, `lx`, or
 `bg_count`), keyed on the fetch phase at the abort, and be checked against the
 mealybug `m3_lcdc_win_en_change*` photographs since those terms move pixels.
+
+### The flip on these lines is the PIPE END, not the projection
+
+The reason none of the fetcher levers mattered, measured directly: with
+`win_stalled` set on a double-speed line the flip `lead` computes to **0**
+(`2 + 0 - ds` = 1, minus `win_stalled`), so `m0_flip_events` never fires at all —
+`flip_dot` is set by `advance_lx` when `lx` reaches 160. The projection is not in
+play, which is why `phase`, `bg_count` and `discard` could not move it.
+
+Levers that DO move it, measured on the frame-3 ly1 flip:
+
+| mutation at the abort | `_1` flip | `_2` flip |
+|---|---|---|
+| none (today) | pipe end, projection never fires | pipe end |
+| clear `win_stalled` | 266 | 266 |
+| clear `win_stalled` + `discard` | **265** | **266** |
+
+So clearing both **does separate the pair** — the first thing found that does.
+It is still short: `_1` needs `<= 264` and `_2` needs `> 266`, so the split is
+right but sits 1-2 dots low on each side. Closing that needs the pipe itself
+shortened by ~3 dots for the incomplete-fetch leg, i.e. a change to the drawn
+column count, which the mealybug `m3_lcdc_win_en_change*` photographs pin. Not a
+read-law adjustment and not a lead adjustment — the `lead` route caps out at 1
+dot, since `lead` cannot exceed 1 in double speed.
