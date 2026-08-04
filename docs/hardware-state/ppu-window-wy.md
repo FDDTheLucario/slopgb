@@ -684,10 +684,29 @@ Setting `phase = TileNoWait`, clearing `bg_count`, both together, and even
 ROM output byte-identical. A `stall += 6` at dot 106 must push the pipe end six
 dots later, and does not.
 
-That inertness is the lead to chase next, not the charge value: either
-`window_abort_render` runs somewhere the render then overwrites, or the line's
-end is not coming from `flip_projection` on these lines at all. Resolve that
-first; the charge is only meaningful once the flip responds.
+Chasing that inertness one level further shows the charge is not the problem —
+the render **does** pay it, and the flip is simply not attached to the pipe end
+on these lines:
+
+* `stall += 6` in `window_abort_render` is applied and consumed exactly as
+  expected (traced dot by dot: `stall` 6 at dot 107 counting down to 0 at 113,
+  the pipeline frozen throughout);
+* yet **`PIPEEND` is at dot 273 while `FLIP` fires at dot 255**, with `lx = 159`
+  — an 18-dot gap — and BOTH are unchanged by the added stall.
+
+So on an aborted DS window line the mode-0 flip fires ~18 dots before the
+pipeline actually finishes, and the projection is insensitive to work added
+after the abort. That gap is the reason the read-law arms exist at all here: the
+render's flip is nowhere near the true mode-3 end, so no exit expressed off
+`flip` can be right.
+
+**Unresolved contradiction, and the thing to look at first:** the stall is
+demonstrably applied and consumed, but `lx` reaches 159 at the same dot either
+way. One of those two observations must be wrong. Do not build on either until
+that is settled — two earlier readings in this section were misdirected (the flip
+sampled from the wrong frame, and the passing sibling traced instead of the
+failing one), so the instrumentation itself needs re-checking before the next
+attempt.
 
 Note SameBoy fails `_1` itself (reads mode 3 where the ROM wants 0), so this one
 cannot be finished by matching SameBoy — the +12 figure is the mechanism to port,
