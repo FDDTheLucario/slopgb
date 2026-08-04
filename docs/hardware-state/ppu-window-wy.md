@@ -675,3 +675,28 @@ been shown to reach the measured read.
 gambatte ROM runs 16 frames; setup writes and the measured read routinely live in
 different ones, and any trace that does not filter on `frame_count` will silently
 compare across them.
+
+## Re-measured with the frame pinned: one weld, one fix
+
+Redoing the floored `_ds` rows with the read pinned by BOTH PC and
+`frame_count`, dumping every render-FSM and read-context field at the
+observable read:
+
+| pair | verdict |
+|---|---|
+| `late_disable_scx5_ds_1` / `_2` | **bit-identical in every tracked field**, opposite wants — a verified weld |
+| `late_wy_1toFF_ds_lcdoffset1_1` / `_2` | **bit-identical** — verified weld |
+| `late_wx_scx5_ds_1` / `_2` | **NOT welded**: `wx_write_dot` 98 vs 100 |
+
+The third was floored on the same suspicion as the other two and was simply
+wrong. Its discriminator is tracked state, and the fix is the existing CGB
+WX-rewrite un-catch arm extended to double speed: DS's M-cycle is 2 dots, so the
+write that still beats the fetch lands at `wx_match + 1` rather than at
+`wx_match` (both rows share `wx_match_dot = 97`, `rphd = 532`, `flip = 267`;
+only the write dot differs). No new constant — the arm's own exit form carries
+over. Zero regressions, golden re-captured for that one row.
+
+The two genuine welds now have a justification that survives scrutiny, unlike the
+retracted "SameBoy-FAIL" reasoning: their state is identical under a measurement
+that pins frame, PC and every field, so nothing the render carries can separate
+them.

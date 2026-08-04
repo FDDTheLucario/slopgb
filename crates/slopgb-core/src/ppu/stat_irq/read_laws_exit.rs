@@ -255,11 +255,15 @@ impl Ppu {
         // same write≤match race — `late_wx_2`/`_scx2_2`/`_scx3_2`/`_ff_*_1`
         // all want 3; the un-scoped arm dropped all 8. The scx5 fine-scroll
         // phase is what pushes the effective catch past the write.
-        if !self.ds
-            && scx7 == 5
+        // Double speed shifts the un-catch boundary one dot later: its M-cycle
+        // is 2 dots, so the write that still beats the fetch lands at
+        // `wx_match + 1` (`late_wx_scx5_ds_1` writes at 98 against a match at 97
+        // and un-catches; its `_2` sibling writes at 100 and does not).
+        let wx_slack = u16::from(self.ds);
+        if scx7 == 5
             && self.render.wx_write_dot != 0
             && self.render.wx_match_dot != 0
-            && self.render.wx_write_dot <= self.render.wx_match_dot
+            && self.render.wx_write_dot <= self.render.wx_match_dot + wx_slack
             && self.render.win_active
             && self.model.is_cgb()
             && self.render.n_sprites == 0
