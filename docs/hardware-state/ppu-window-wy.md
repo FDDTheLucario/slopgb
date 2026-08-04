@@ -890,3 +890,33 @@ carry — not another scope tweak on this lever.
 `for v in "" 1; do X=$v ...` sweep runs the lever ON in both arms and reports a
 false "no effect". Use `env -u X` for the off case. This cost one measurement
 here and is worth checking in any probe written the same way.
+
+## Why the pre-draw lever is not a mechanism: the threshold is irreducible
+
+Tracing the rows arms 3/D3 carry beyond the lever settles it. `wx_match_dot`
+does not separate them:
+
+| row | want | `wx_match_dot` | abort dot |
+|---|---|---|---|
+| `late_disable_wx0f_1` [Dmg] | 3 | 105 | 106 |
+| `late_disable_1` [Dmg] | 3 | 97 | 98 |
+| `late_disable_early_scx03_wx12_1` [Dmg] | 0 | 0 | 106 |
+| `late_disable_early_scx03_wx12_2` [Cgb] | **3** | 0 | 110 |
+
+The last two BOTH never matched (`wx_match_dot == 0`) and want opposite verdicts.
+The only thing between them is the abort dot, 106 against 110 — which is exactly
+the positional threshold arms 3 and D3 already encode
+(`win_predraw_abort_dot <= 105`).
+
+So the "never matched -> drop the fine-scroll penalty" rule is not a mechanism
+that replaces those arms; it is the same law with one of its terms, which is why
+it scores 30 -> 22 with the arms cut and regresses when it runs alongside them.
+
+**This closes the line of attack.** The abort group's behaviour genuinely is a
+threshold on where the clear lands relative to the window's fetch, per
+configuration. Every re-expression tried — emergent exits off the flip, the
+output re-anchor, the fine-scroll giveback — either needs the same threshold or
+covers a strict subset. The arms are that threshold written down. Retiring them
+needs a model of the fetcher slot the clear lands in, at a resolution the
+whole-dot render does not have, which is the one place in this file where the
+original "sub-dot" verdict still stands.
