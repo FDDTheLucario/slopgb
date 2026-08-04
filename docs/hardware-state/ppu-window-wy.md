@@ -660,12 +660,34 @@ the `_1`/`_2` pair collapses (their clears land 2 dots apart, at ly1 dot 104 and
 `late_disable_*` family — `window_abort_render` re-anchors `fetch_x` but bills no
 refetch.
 
-Probed and insufficient on its own: forcing the fetcher back to `TileNoWait` in
-`window_abort_render` moves the flip by nothing, so the cost is not a single
-restarted fetch at that point. The abort runs at the deferred render frame, by
-which time the pipeline has moved on; charging it properly needs the abort's
-effect modelled where the fetch is actually abandoned, with the mealybug
-`m3_lcdc_win_en_change*` photographs as the pixel oracle.
+### The discriminator is the fetch PHASE at the abort
+
+The `_1`/`_2` pair is NOT welded — an earlier note here said their traces were
+identical, but that compared the READ trace, not the abort state. The abort
+states differ exactly where the physics says they should:
+
+| leg | abort dot | lx | bg_count | discard | fetch phase | want |
+|---|---|---|---|---|---|---|
+| `_1` | 106 | 0 | 4 | 1 | `HiWait` — fetch INCOMPLETE | mode 0 (shorter) |
+| `_2` | 108 | 1 | 2 | 0 | `Push` — row already LATCHED | mode 3 (longer) |
+
+So `_1` abandons an in-flight fetch and `_2` abandons a completed one, and
+hardware charges them differently. `Render::phase` at the abort is a tracked
+quantity, so this is a representable discriminator — the `rom-diff-weld` shape,
+not a floor.
+
+### Open: the flip does not respond to abort-time state
+
+What blocks the fix is that **none** of the obvious charges move the flip at all.
+Setting `phase = TileNoWait`, clearing `bg_count`, both together, and even
+`stall += 6` in `window_abort_render` each leave the ly1 flip at dot 255 and the
+ROM output byte-identical. A `stall += 6` at dot 106 must push the pipe end six
+dots later, and does not.
+
+That inertness is the lead to chase next, not the charge value: either
+`window_abort_render` runs somewhere the render then overwrites, or the line's
+end is not coming from `flip_projection` on these lines at all. Resolve that
+first; the charge is only meaningful once the flip responds.
 
 Note SameBoy fails `_1` itself (reads mode 3 where the ROM wants 0), so this one
 cannot be finished by matching SameBoy — the +12 figure is the mechanism to port,
