@@ -486,6 +486,19 @@ gambatte/window/late_enable_afterVblank_lcdoffset1_1_cgb04c_out3.gbc [Cgb]
 gambatte/window/late_reenable_scx5_2_dmg08_out3_cgb04c_out0.gbc [Dmg]
 gambatte/window/late_reenable_scx5_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/window/late_wx_ds_2_cgb04c_out3.gbc [Cgb]
+# The four `m2int_wxA6_*_m0irq_2` rows are NOT a window-length question: the
+# sibling pair differs by one inserted NOP, and the instruction it shifts is
+# `LDH A,(FF0F)` — the ROM reads IF, and the wanted 2 is the STAT flag, not a
+# STAT mode. On `m2int_wxA6_m0irq` the two legs read IF at ly 1 dot 252 (`_1`,
+# wants the flag clear) and dot 256 (`_2`, wants it set), so the mode-0 STAT
+# raise belongs between them; slopgb's flip on that line is dot 261, where a
+# bare line would be ~254. The gap is the off-screen window's extension: it
+# renders nothing, so the IRQ latch should flip at the bare end while the
+# visible mode bits keep the extension `Ppu::vis_exit_hd` already models — the
+# two-latch split. Refuted placements: raising `m0_src`/`m0_rise_dot` early
+# changes nothing (the IRQ keys on `line_render_done`), moving
+# `line_render_done` early makes it worse (4 -> 6/7/9 rows at leads 6/7/8), and
+# dropping the off-screen window's activation stall entirely costs 14 rows.
 gambatte/window/m2int_wxA6_m0irq2_2_dmg08_cgb04c_out2.gbc [Cgb]
 gambatte/window/m2int_wxA6_m0irq_2_dmg08_cgb04c_out2.gbc [Cgb]
 gambatte/window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2.gbc [Dmg]
