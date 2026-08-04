@@ -823,3 +823,36 @@ Closing the remaining rows requires one of:
 
 There is no third option available from the PPU side. Which oracle wins on the
 dispatch dot is a project decision, not a measurement.
+
+## RETRACTED: there is no mooneye-vs-gambatte oracle conflict
+
+The section above framed the remaining abort rows as blocked on a choice between
+two hardware-derived oracles — mooneye pinning the STAT dispatch at dot 16,
+gambatte's `late_*` ROMs implying SameBoy's 18. **That was an untested
+assumption, and it is wrong.**
+
+Measured: delay the mode-2 line-start STAT IF and re-run the gambatte matrix with
+the abort arms cut.
+
+| dispatch delay | gambatte failures (arms cut) |
+|---|---|
+| 1 (the normal emission dot — probe control) | 33 |
+| 2 | 908 |
+| 3 | 911 |
+
+Moving the dispatch does not trade 2 mooneye tests for ~30 gambatte rows. It
+costs **~880 gambatte rows**. Both oracles agree the dispatch dot is right; there
+is nothing to decide.
+
+So the abort arms are NOT compensating a dispatch-frame error. The earlier
+observation that slopgb's LCDC.5 clear lands at dot 104/108 where SameBoy's lands
+at 108/112 stands as a fact, but the inference drawn from it — that slopgb's
+frame is the wrong one — does not follow, because gambatte's own expectations
+back slopgb's dispatch. On that axis SameBoy differs from hardware, not slopgb.
+
+**The cause of the remaining ~30 abort rows is therefore re-opened.** What is
+known: the discriminator is the abort position relative to the WX match, the
+group does not collapse to a per-class law (129 classes / 168 rows), and the
+tile-boundary output re-anchor — a genuine mechanism — recovered three of them
+without changing that ratio. The next attempt should not start from the
+dispatch.
