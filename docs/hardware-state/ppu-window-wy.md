@@ -1054,7 +1054,8 @@ that shrank is the part that was configuration.
 
 Two things moved that are worth naming rather than burying:
 
-* `Render::win_disabled_line` is new state (serialized; `STATE_VERSION` 14 → 15).
+* `Render::win_disabled_line` and `Ppu::wy_trig_dot` are new state (serialized;
+  `STATE_VERSION` 14 → 16).
   Telling a redraw from a first enable needs to know the line saw a disable at
   all, and no existing flag carried it — the abort flags are recorded only once
   the render is active, while these ROMs clear LCDC.5 during mode 2 or during the
@@ -1065,14 +1066,41 @@ Two things moved that are worth naming rather than burying:
   the one baselined row among them was already floored. Every other change in
   this group left `golden_fingerprint` byte-identical.
 
-### Still floored
+### Nothing floored
 
-* The double-speed window re-enable rows (`late_reenable_ds_*`). The single-speed
-  deadline does not carry to DS; the gate is `!ds`-scoped and those rows keep
-  their baseline entries.
-* `gambatte/window/on_screen/late_wx_ds_2` renders ~99% wrong against its
-  reference PNG and did so before any of this work. It is not in the PNG
-  comparison list, so nothing asserts it. Its sibling `late_wx_ds_1` passes.
+Baseline class W is **empty** — every window row it held has been recovered. The
+last four came from pinning the compare and the activation instant, not from any
+read law:
+
+* the window-Y compare runs one dot earlier in double speed on **every** line,
+  not just line 0 (`wy_check`: dot 8 on CGB line 0 / 4 elsewhere, minus one in
+  double speed) — `late_wy_1toFF_ds_lcdoffset1_2`;
+* the re-enable redraw deadline is the same 5 dots at both speeds, once
+  `win_disabled_line` tells a redraw from a first enable — `late_reenable_ds_2`;
+* a WX < 7 window's `7 - WX` cut columns eat that much of the discard the
+  activation waits out, so its lead is not a flat SCX&7
+  (`win_activation_lead`) — `late_scx_late_wy_FFto4_ly4_wx00_2`;
+* a mid-line SCX rewrite the fine-scroll hunt never absorbed leaves the window's
+  screen position ahead of slopgb's WX match, so a compare firing inside that gap
+  arrived after the real instant (`Ppu::wy_trig_dot`) —
+  `late_scx_late_wy_FFto4_ly4_wx20_2`.
+
+The last two are CGB-scoped: the same correction on DMG un-triggers those rows'
+DMG siblings, which pass today. Moving the WX >= 8 **match** by the skew instead
+of the instant is refuted — it costs 3 other rows.
+
+`late_scx_late_wy_FFto4_ly4_wx00_2` had been floored as a kernel-phase artefact,
+"slopgb's writes landing 4 dots ahead of SameBoy's". That was wrong: the SCX
+write sits at dot 76 in all three rungs and only the WY write moves. The lesson
+is the frame one — the verdict is decided on frame 2, and the tail frames every
+earlier trace sampled show a different, inert configuration.
+
+### Not floored, but not asserted either
+
+`gambatte/window/on_screen/late_wx_ds_2` renders ~99% wrong against its reference
+PNG, and did so before any of this work. It is not in the PNG comparison list, so
+nothing asserts it; its sibling `late_wx_ds_1` passes. Worth a look, but it is
+not a regression from this work.
 
 ### Method notes that paid for themselves
 

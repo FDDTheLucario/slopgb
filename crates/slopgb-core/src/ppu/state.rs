@@ -170,6 +170,7 @@ impl Ppu {
         w.u16(self.pal_open_dot);
 
         w.bool(self.wy_triggered);
+        w.u16(self.wy_trig_dot);
         w.u8(self.wy_check_in);
         w.bool(self.stop_anchor_set);
         w.bool(self.stop_anchor_midframe);
@@ -312,6 +313,7 @@ impl Ppu {
         self.pal_open_dot = r.u16()?;
 
         self.wy_triggered = r.bool()?;
+        self.wy_trig_dot = r.u16()?;
         self.wy_check_in = r.u8()?;
         self.stop_anchor_set = r.bool()?;
         self.stop_anchor_midframe = r.bool()?;

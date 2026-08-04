@@ -185,7 +185,7 @@ not part of the save state, so a linked session can diverge on replay — revers
 reliable for a self-contained machine. An installed SGB coprocessor is *not* such a
 case: `run_frame`/`run_frame_until_breakpoint` are loops of `step()`, which clocks
 the coprocessor itself, and its chip state rides in the save state's coprocessor
-tail (`STATE_VERSION` 15) — `load_state` moves the coprocessor into the restored
+tail (`STATE_VERSION` 16) — `load_state` moves the coprocessor into the restored
 machine instead of rebuilding its wasm, so a rewound frame doesn't re-instantiate
 it.
 

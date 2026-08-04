@@ -33,7 +33,21 @@ impl Ppu {
         };
         // The WY condition: the frame-sticky window-Y latch (SameBoy
         // `check_window = wy_triggered && LCDC.5`, display.c:1315).
-        let wy_ok = self.wy_triggered_for_activation();
+        let mut wy_ok = self.wy_triggered_for_activation();
+        if self.model.is_cgb() {
+            // The stale-hunt skew: a mid-line SCX rewrite the fine-scroll hunt
+            // never absorbed leaves the window's screen position that many dots
+            // ahead of slopgb's match, so a compare that fired inside the gap
+            // arrived after the real activation instant and does not count.
+            // Pins gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx20_{1,2,3}
+            // [Cgb]: WX 32, hunt_fine 0 against SCX&7 4, match dot 122, compares
+            // at 116 / 120 / 124 — hardware puts the boundary at 118, not 122.
+            // CGB only, as with the WX < 7 column cut in `win_activation_lead`.
+            let skew = u16::from((self.eff.scx & 7).saturating_sub(self.render.hunt_fine & 7));
+            if skew > 0 && self.wy_triggered && self.wy_trig_dot + skew > self.dot {
+                wy_ok = false;
+            }
+        }
         // Rising edge only: the match level holds while lx is frozen
         // through the start stall and must not re-fire.
         let prev_match = std::mem::replace(&mut self.render.win_match_prev, win_match);

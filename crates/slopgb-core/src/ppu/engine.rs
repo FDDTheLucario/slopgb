@@ -89,6 +89,7 @@ impl Ppu {
             hdma_lead: false,
             pal_open_dot: 0,
             wy_triggered: false,
+            wy_trig_dot: 0,
             wy_check_in: 0,
             stop_anchor_set: false,
             stop_anchor_midframe: false,
@@ -283,6 +284,9 @@ impl Ppu {
             return;
         }
         if i16::from(self.wy) == self.wy_comparison() {
+            if !self.wy_triggered {
+                self.wy_trig_dot = self.dot;
+            }
             self.wy_triggered = true;
         }
     }

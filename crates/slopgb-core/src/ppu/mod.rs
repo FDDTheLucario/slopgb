@@ -783,6 +783,11 @@ pub struct Ppu {
     /// ([`Self::wy_check_sched`]). That third, write-scheduled compare is what
     /// catches a mid-line WY write, which a fixed per-line sample cannot.
     wy_triggered: bool,
+    /// The dot [`Self::wy_triggered`] was latched on. A window activation whose
+    /// screen position runs ahead of slopgb's WX match (a mid-line SCX rewrite
+    /// the fine-scroll hunt never absorbed) needs to know whether the compare
+    /// beat the real instant or only the match.
+    wy_trig_dot: u16,
     /// Half-dots until a WY/LCDC write's deferred compare runs, 0 = none
     /// pending. SameBoy schedules it (`display.c:1557-1578`,
     /// `wy_check_scheduled`) for `8 - ((wy_check_modulo + K) & 7)` half-dots
