@@ -3,22 +3,30 @@
 The FF41 read-law engine (`ppu/stat_irq/read_laws.rs` + `read_laws_exit.rs`) is a
 compensating layer: it computes what a STAT read *should* observe because the
 render does not produce it. This file records what each part of it is actually
-compensating for, and the state of the work to delete it. The window-Y third is
-done; the other two are not.
+compensating for, and the state of the work to delete it.
+
+**Outcome: the compensating layer is gone.** Every configuration arm has been
+retired into the window machine and the renderer; what remains is not a config
+table at all. See [Where it landed](#where-it-landed) at the end — read that
+first, because several verdicts recorded mid-file ("the abort group does NOT
+collapse", "the pre-draw threshold is irreducible") were later overturned by
+measurement and are kept only for the method they teach.
 
 ## The two defects behind the arm table, separated
 
-The arms do not all have the same cause. They split cleanly:
+The arms did not all have the same cause. They split cleanly:
 
 | arms | compensating for | fixable at whole-dot? |
 |---|---|---|
 | ~~2, 6, 7, D6, D-wx0 + `win_extends_sb` / `win_extend_deadline`~~ **DELETED** | the window-Y trigger was sampled at fixed per-line dots instead of SameBoy's scheduled compare | **done** — it was a render fix, not a read fix |
-| 3, 4, 5, D3, D5, D-wx, 3b | the mid-line window enable / disable / WX-rewrite fetcher slot is not modelled | yes, in principle |
-| 8, 8-spr + `read_pos_hd` | the CPU-visible mode-3 exit sits at a half-dot the whole-dot render cannot represent | no — needs the half-dot render FSM |
+| ~~3, 4, 5, D3, D5, D-wx, 3b~~ **DELETED** | the mid-line window enable / disable / WX-rewrite fetcher slot is not modelled | **done** — every one was an ordinary render bug |
+| 8, 8-spr + `read_pos_hd` | where the READ sits relative to the render's flip | not a defect — this is the read frame, and it is one constant per scope |
 
-Only the third row is what the "sub-dot re-clock" fixes. The first two are
-ordinary render bugs wearing a read-law costume — the first is now fixed at the
-render, where it belonged.
+Only the third row ever touched the "sub-dot re-clock" premise, and it turned out
+not to need it either: once every arm's exit was anchored to the render's own
+flip, what was left was not a sub-dot render problem but a per-scope read offset.
+The reviewer's premise — "the sub-dot re-clock is the real fix" — applies to none
+of the table.
 
 ## What the window-Y trigger really is (SameBoy `wy_check`)
 
@@ -1003,3 +1011,82 @@ the way arm 3 was.
 **Status: arm 3 retired (CGB), D3 not.** The two halves above are real and
 measured — they are the right shape — but the third term is genuinely per
 configuration.
+
+## Where it landed
+
+Every configuration arm is gone. `vis_exit_hd` no longer reads `SCX` or the speed
+bit as configuration — the two locals that carried them (`scx7`, `ds1`) have no
+readers left. What survives is one shape, `2 * flip + frame`: the render's own
+recorded or projected mode-0 flip, plus a constant saying where the READ sits
+relative to it.
+
+| scope | read frame (half-dots) |
+|---|---|
+| CGB on-screen triggering window | −4 carried / +4 polled |
+| CGB off-screen window (WX >= 0xA0) | −2 SS / −4 DS |
+| DMG on-screen triggering window | −4 |
+| DMG off-screen window (WX == 0xA6) | −6 |
+| CGB DS window + sprites | +1 |
+| CGB DS pre-draw abort before the WX match | 0 |
+| bare line | +2 SS / −2 + 2*(SCX&1) DS |
+
+The flip carries the line's whole mode-3 cost — fine-scroll discard, window
+start, sprite penalty — because the behaviours that used to be read arms are now
+in the window machine, where they move pixels as well as the STAT read:
+
+| behaviour | where it lives now | retired |
+|---|---|---|
+| window-Y trigger (SameBoy `wy_check` + scheduled compare) | `engine.rs::wy_check`, `schedule_wy_check` | 2, 6, 7, D6, D-wx0 |
+| pre-draw abort, CGB SS — keyed on the fetch phase | `window.rs::window_abort_render` | 3 |
+| pre-draw abort, DMG — in-flight fetch kept, SCX rewrite invalidates it | same | D3 |
+| pre-draw abort, DS — never matched WX, so the line ends where a bare one does | same | 4 |
+| sprite fetch holds the slot a late abort would take | same | 3b |
+| re-enable redraw deadline (5 dots past the WX match + SCX fine scroll) | `window.rs::window_trigger_step` | 5, D5 |
+| WX-rewrite un-catch, SS — the rewrite beats the fetcher to the match | same | the CGB WX arm, D-wx |
+| WX-rewrite un-catch, DS — the write lands past the match and withdraws the start | `window.rs::window_wx_uncatch` | the DS half of the same |
+| late-ENABLE bare exit, DS | covered by the re-enable deadline | the DS late-enable arm |
+| off-screen window exits, both models | the render's flip already lands there | arm 1's and D1's closed forms |
+
+`read_laws_exit.rs` + `read_laws.rs` went from ~1050 lines to ~690, and the part
+that shrank is the part that was configuration.
+
+### What this cost
+
+Two things moved that are worth naming rather than burying:
+
+* `Render::win_disabled_line` is new state (serialized; `STATE_VERSION` 14 → 15).
+  Telling a redraw from a first enable needs to know the line saw a disable at
+  all, and no existing flag carried it — the abort flags are recorded only once
+  the render is active, while these ROMs clear LCDC.5 during mode 2 or during the
+  visible mode 3 that precedes the render's own start. It resets at the line
+  boundary, not in `render_init`, which runs too late to see a mode-2 clear.
+* The golden snapshot moved by 4 pixel entries, on `gbmicrotest/ppu_win_vs_wx`
+  and `mealybug m3_lcdc_win_en_change_multiple_wx`. Both suites stay green and
+  the one baselined row among them was already floored. Every other change in
+  this group left `golden_fingerprint` byte-identical.
+
+### Still floored
+
+* The double-speed window re-enable rows (`late_reenable_ds_*`). The single-speed
+  deadline does not carry to DS; the gate is `!ds`-scoped and those rows keep
+  their baseline entries.
+* `gambatte/window/on_screen/late_wx_ds_2` renders ~99% wrong against its
+  reference PNG and did so before any of this work. It is not in the PNG
+  comparison list, so nothing asserts it. Its sibling `late_wx_ds_1` passes.
+
+### Method notes that paid for themselves
+
+* **Pin the FRAME, not just the PC.** These ROMs run 16 frames and act on frame
+  3; measuring frame 16 invalidated three published findings at once.
+* **Sweep for the UNIQUE optimum, and say when there isn't one.** A plateau means
+  the rows bound the value on one side only — `late_disable_spx10_wx0f_2` accepts
+  any non-zero stall, so 6 is there because it is the restart the window
+  activation already pays, not because it scored best.
+* **Pull the want-opposite siblings in before trusting an interval.** A single
+  constant passed all 32 post-switch rows wanting mode 0 and broke their `_1`
+  siblings.
+* **Gambatte's `_outN` filename is hardware; SameBoy is a reference
+  implementation.** Treating a SameBoy-FAIL as a reason to floor a row hid the
+  line-0 compare dot for a whole round.
+* **`env::var("X").is_ok()` is true for `X=""`.** A `for v in "" 1` sweep ran the
+  lever on in both arms and reported a confident "no effect". Use `env -u X`.
