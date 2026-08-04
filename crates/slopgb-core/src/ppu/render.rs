@@ -306,6 +306,12 @@ pub(super) struct Render {
 }
 
 impl Render {
+    pub(in crate::ppu) fn add_stall(&mut self, n: u16) {
+        self.stall += n;
+    }
+    pub(in crate::ppu) fn lx_add(&mut self, n: u8) {
+        self.lx = self.lx.saturating_add(n);
+    }
     pub(in crate::ppu) fn phase_of(&self) -> FetchPhase {
         self.phase
     }

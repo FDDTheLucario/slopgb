@@ -246,13 +246,32 @@ impl Ppu {
             // `Push` and wants the long one — both with `wx_match_dot == 0`, so
             // the match dot cannot separate them and the phase can. CGB only:
             // the DMG legs of the same ladder still need their own arm.
-            if self.model.is_cgb()
-                && self.render.active
-                && !matches!(self.render.phase_of(), FetchPhase::Push | FetchPhase::Hi)
-            {
-                let r = &mut self.render;
-                let hf = r.hunt_fine & 7;
-                r.lx = r.lx.saturating_add(hf);
+            let incomplete = !matches!(self.render.phase_of(), FetchPhase::Push | FetchPhase::Hi);
+            if self.model.is_cgb() {
+                if self.render.active && incomplete {
+                    let hf = self.render.hunt_fine & 7;
+                    self.render.lx_add(hf);
+                }
+            } else if self.render.active {
+                // DMG: a pre-draw window abort re-anchors like CGB, but the BG
+                // fetcher keeps the fetch it already had in flight. A latched
+                // fetch (Push/Hi) or a tile-aligned hunt that had already matched
+                // WX pays the full 6-dot refetch; anything else only skips the
+                // fine-scroll discard it never consumed. A mid-line SCX rewrite
+                // invalidates the in-flight fetch's own fine scroll, so an
+                // unlatched fetch pays the refetch there too.
+                // Pins gambatte/window/late_scx_late_disable_{0,1,2},
+                // late_scx03_wx10_{1,2}, early_scx03_wx12_{1,2} on DMG.
+                let hf = self.render.hunt_fine & 7;
+                let latched = matches!(self.render.phase_of(), FetchPhase::Push | FetchPhase::Hi);
+                let rewritten = self.render.scx_write_dot != 0;
+                let extend = (self.render.wx_match_dot != 0 && (hf == 0 || latched))
+                    || (rewritten && !latched);
+                if extend {
+                    self.render.add_stall(6);
+                } else {
+                    self.render.lx_add(hf);
+                }
             }
             return;
         }
