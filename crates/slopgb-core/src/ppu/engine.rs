@@ -553,11 +553,17 @@ impl Ppu {
         // single, against dot 4 for lines 1-143. DMG keeps dot 4 on line 0 too:
         // its own pair puts the kill/no-kill boundary between a dot-0 and a
         // dot-4 write (`late_wy_{1,2}` [Dmg]).
-        let compare_dot = if self.line == 0 && self.model.is_cgb() {
-            if self.ds { 7 } else { 8 }
+        // Double speed runs the compare one dot earlier on EVERY line, not just
+        // line 0: `late_wy_1toFF_ds_lcdoffset1_{1,2}` write WY->FF at line-1
+        // dots 1 and 3, and only the dot-1 write may beat the compare, which
+        // puts it at dot 3. Dots 1/2 drop five other rows, dot 4 drops this
+        // pair — the bracket is exact.
+        let base = if self.line == 0 && self.model.is_cgb() {
+            8
         } else {
             4
         };
+        let compare_dot = base - u16::from(self.ds);
         if self.dot == compare_dot {
             self.wy_check();
         }

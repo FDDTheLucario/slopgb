@@ -466,15 +466,20 @@ gambatte/vram_m3/prewrite_lcdoffset2_1_cgb04c_out1.gbc [Cgb]
 # was right and slopgb had been matching it. The CGB line-0 window-Y compare
 # dot (`Ppu::wy_check`, dot 7 double speed / 8 single) recovers them, along with
 # `late_wy_1 [Cgb]` and `late_wy_lcdoffset1_1 [Cgb]` which predate this work.
-# Only `late_wy_1toFF_ds_lcdoffset1_2` remains open.
-gambatte/window/arg/late_wy_1toFF_ds_lcdoffset1_2_cgb04c_out3.gbc [Cgb]
 # `..._wx00_2` is GONE: it was never a kernel-phase artefact. The window's
 # activation lead (`Ppu::win_activation_lead`) was measured at WX = 7, where the
 # `7 - WX` column cut is zero; at WX = 0 those cut columns eat the discard the
 # activation waits out, so the lead is 0 and not SCX&7. The `_wx20_2` sibling
-# below is a DIFFERENT mechanism — WX >= 8 already leads by nothing, so the cut
-# does not reach it, and its activation instant is a single dot the scheduled
-# compare clears in every rung. Not yet derived.
+# below is a DIFFERENT mechanism, measured but not yet solved. Its verdict is
+# decided on FRAME 2 (not the tail frames), ly 4, read dot 256: the window
+# activates at the WX match, dot 122, and the three rungs differ only in whether
+# the scheduled window-Y compare has fired by then — `_3` still shows
+# `wy_check_in` 4 at the match and correctly misses, while `_1` and `_2` have
+# both already latched. Hardware puts that boundary one M-cycle earlier, between
+# `_1` and `_2`. The line's SCX is rewritten to 4 AFTER the fine-scroll hunt
+# resolved (`hunt_fine` 0), so the window's screen position and the live SCX
+# disagree by 4 dots on this path only. Shifting the WX >= 8 match by that
+# difference is REFUTED — it costs 3 other rows.
 gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx20_2_dmg08_out3_cgb04c_out0.gbc [Cgb]
 # Class W2: the window line now pays the SCX fine-scroll discard it activates
 # into (see docs/hardware-state/ppu-window-wy.md), which moves these `scx5_ds`
