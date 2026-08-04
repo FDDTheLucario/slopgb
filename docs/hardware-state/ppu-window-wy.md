@@ -948,3 +948,27 @@ covers a strict subset. The arms are that threshold written down. Retiring them
 needs a model of the fetcher slot the clear lands in, at a resolution the
 whole-dot render does not have, which is the one place in this file where the
 original "sub-dot" verdict still stands.
+
+## D3 (the DMG pre-draw arm) is not the same shape as arm 3
+
+Arm 3 fell to a single phase test. D3 does not, and the reason is that its rows
+want BOTH directions from similar states:
+
+* `late_disable_wx0f_1` [Dmg] wants 3 (extend) aborting at `LoWait`;
+* `late_disable_early_scx03_wx0f_1` [Dmg] wants 0 (short) aborting at `LoWait`
+  too.
+
+Same model, same phase, opposite wants — so no phase boundary can serve both.
+Moving the DMG boundary earlier (`TileNoWait`/`TileNo` only) scores **11**
+failures against the CGB boundary's **8**, so it is not a matter of finding the
+right cut point.
+
+That matches the code: arm 3 was ~15 lines and one dot threshold, D3 is ~40 with
+`scx_kills_early`, the `eager_scx` K split, and a sprite sub-case. The extra
+structure is real, not accreted — the DMG rows genuinely carry more distinctions
+than the CGB ones at the same phase.
+
+What separates those two rows is still unidentified. It is NOT the fetch phase,
+the match dot, or the abort dot alone; the next attempt should diff their full
+render state at the abort the way `late_disable_scx5_ds` was diffed, rather than
+trying another boundary.
