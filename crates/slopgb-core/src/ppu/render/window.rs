@@ -274,13 +274,6 @@ impl Ppu {
         }
     }
 
-    /// The RENDER half of a mid-mode-3 LCDC.5 clear: end the drawn window and
-    /// re-anchor the BG fetch to a tile boundary. Fires at the deferred render
-    /// frame (the `render_lcdc` bit5 1→0 catch-up, `ppu/mod.rs`), not the cc+0
-    /// control commit — so the window stops at the same column SameBoy draws
-    /// (`m3_lcdc_win_en_change_multiple`: a cc+0 clear would end it 2 dots /
-    /// 2 pixels early). Idempotent: a no-op if the window already left
-    /// `win_mode` (a natural end in the defer gap).
     /// A WX rewrite landing within a dot of the match withdraws a window start
     /// the fetcher has not committed yet: the new WX no longer matches, so no
     /// window fetch ever runs and the line finishes bare. Double speed only —
@@ -306,6 +299,13 @@ impl Ppu {
         self.window_abort_render();
     }
 
+    /// The RENDER half of a mid-mode-3 LCDC.5 clear: end the drawn window and
+    /// re-anchor the BG fetch to a tile boundary. Fires at the deferred render
+    /// frame (the `render_lcdc` bit5 1→0 catch-up, `ppu/mod.rs`), not the cc+0
+    /// control commit — so the window stops at the same column SameBoy draws
+    /// (`m3_lcdc_win_en_change_multiple`: a cc+0 clear would end it 2 dots /
+    /// 2 pixels early). Idempotent: a no-op if the window already left
+    /// `win_mode` (a natural end in the defer gap).
     pub(in crate::ppu) fn window_abort_render(&mut self) {
         if !self.render.win_mode {
             // PRE-DRAW abort. Same rule as the drawn case below: a clear

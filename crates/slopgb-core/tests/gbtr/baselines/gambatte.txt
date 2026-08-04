@@ -492,6 +492,14 @@ gambatte/window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2.gbc [Dmg]
 gambatte/window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2.gbc [Cgb]
 gambatte/window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3.gbc [Cgb]
 gambatte/window/on_screen/wx17_weoff_wxA5_weon.gbc [Cgb]
+# The three `wxA6_late_we_reenable` rows draw their staircase exactly one window
+# ROW behind the reference — the same signature as `wxA6_weoff_at_xposA6`, which
+# was fixed by counting an enabled-then-disabled line as started
+# (`Ppu::win_line`). These are the RE-enable half and do NOT come from the same
+# place: advancing the counter on a missed re-enable deadline leaves the set
+# unchanged (3 -> 3), and advancing it on a start request the next line drops
+# because LCDC.5 is off makes it worse (3 -> 4). Their verdict frame has not
+# been pinned yet — trace with the frame counter, not the tail frames.
 gambatte/window/on_screen/wxA6_late_we_reenable_1.gbc [Dmg]
 gambatte/window/on_screen/wxA6_late_we_reenable_2.gbc [Dmg]
 gambatte/window/on_screen/wxA6_late_we_reenable_3.gbc [Dmg]
