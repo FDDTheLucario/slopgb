@@ -343,7 +343,19 @@ impl Ppu {
             // the read-time SCX: a mid-line SCX rewrite that missed the hunt
             // does not move the window's fetch
             // (`late_scx_late_wy_FFto4_ly4_wx00`).
-            u16::from(self.render.hunt_fine & 7)
+            let hf = u16::from(self.render.hunt_fine & 7);
+            if self.model.is_cgb() {
+                // A WX < 7 window cuts its leading `7 - WX` columns, and those
+                // columns consume that much of the discard the activation is
+                // waiting out — so they come off the lead. The law above was
+                // measured at WX = 7, where the term is zero.
+                // Pins gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx00_2
+                // [Cgb] (hunt_fine 4, WX 0 → lead 0, not 4). CGB only: the same
+                // subtraction on DMG un-triggers that row's DMG sibling.
+                hf.saturating_sub(7 - u16::from(self.eff.wx))
+            } else {
+                hf
+            }
         } else {
             0
         }

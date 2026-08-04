@@ -468,14 +468,13 @@ gambatte/vram_m3/prewrite_lcdoffset2_1_cgb04c_out1.gbc [Cgb]
 # `late_wy_1 [Cgb]` and `late_wy_lcdoffset1_1 [Cgb]` which predate this work.
 # Only `late_wy_1toFF_ds_lcdoffset1_2` remains open.
 gambatte/window/arg/late_wy_1toFF_ds_lcdoffset1_2_cgb04c_out3.gbc [Cgb]
-# `..._wx00_2` is SameBoy-PASS but its cause is OUTSIDE the window machinery:
-# slopgb's kernel runs 4 dots early on the mid-line-SCX-rewrite path (traced —
-# SCX write at line dot 76 against SameBoy's 80, WY write 88 against 92), so the
-# scheduled window-Y compare beats an activation instant SameBoy's misses. The
-# read-law arms used to mask that; its `_wx20_2` sibling below was already
-# floored for the same phase. Lifts when the mid-line-SCX kernel phase is
-# corrected — the anomaly `Render::scx_write_dot` documents.
-gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx00_2_dmg08_out3_cgb04c_out0.gbc [Cgb]
+# `..._wx00_2` is GONE: it was never a kernel-phase artefact. The window's
+# activation lead (`Ppu::win_activation_lead`) was measured at WX = 7, where the
+# `7 - WX` column cut is zero; at WX = 0 those cut columns eat the discard the
+# activation waits out, so the lead is 0 and not SCX&7. The `_wx20_2` sibling
+# below is a DIFFERENT mechanism — WX >= 8 already leads by nothing, so the cut
+# does not reach it, and its activation instant is a single dot the scheduled
+# compare clears in every rung. Not yet derived.
 gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx20_2_dmg08_out3_cgb04c_out0.gbc [Cgb]
 # Class W2: the window line now pays the SCX fine-scroll discard it activates
 # into (see docs/hardware-state/ppu-window-wy.md), which moves these `scx5_ds`
