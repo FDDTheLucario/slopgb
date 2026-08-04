@@ -480,13 +480,6 @@ gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx20_2_dmg08_out3_cgb04c_out0.gbc
 # Class W2: the window line now pays the SCX fine-scroll discard it activates
 # into (see docs/hardware-state/ppu-window-wy.md), which moves these `scx5_ds`
 # pairs one rung. `late_disable_scx5_ds_1` is SameBoy-FAIL (sb=3, want=0) —
-# `late_disable_scx5_ds_1` is a VERIFIED weld: with the read pinned by PC and
-# frame, its state at the observable read is bit-identical to its `_2` sibling
-# in every tracked quantity, with opposite wants — so the discriminator is
-# outside everything the render carries. (`late_wx_scx5_ds_1` was floored here
-# on the same suspicion and turned out NOT to be welded — `wx_write_dot` 98 vs
-# 100 separates it — so it is gone.)
-gambatte/window/late_disable_scx5_ds_1_cgb04c_out0.gbc [Cgb]
 gambatte/window/late_enable_afterVblank_lcdoffset1_1_cgb04c_out3.gbc [Cgb]
 gambatte/window/late_reenable_scx5_2_dmg08_out3_cgb04c_out0.gbc [Dmg]
 gambatte/window/late_reenable_scx5_ds_1_cgb04c_out3.gbc [Cgb]

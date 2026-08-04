@@ -6930,7 +6930,7 @@ gambatte/window/late_disable_scx5_1_dmg08_out3_cgb04c_out0.gbc [Cgb] | 436064c86
 gambatte/window/late_disable_scx5_1_dmg08_out3_cgb04c_out0.gbc [Dmg] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/window/late_disable_scx5_2_dmg08_cgb04c_out3.gbc [Cgb] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/window/late_disable_scx5_2_dmg08_cgb04c_out3.gbc [Dmg] | 436064c86b6618d5 | b6b0632d997517d6
-gambatte/window/late_disable_scx5_ds_1_cgb04c_out0.gbc [Cgb] | 436064c86b6618d5 | b6b0632d997517d6
+gambatte/window/late_disable_scx5_ds_1_cgb04c_out0.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/window/late_disable_scx5_ds_1_cgb04c_out0.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/window/late_disable_scx5_ds_2_cgb04c_out3.gbc [Cgb] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/window/late_disable_scx5_ds_2_cgb04c_out3.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
@@ -8334,8 +8334,8 @@ mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change2.gb [Cgb] | 10568f1349057
 mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change2.gb [Dmg] | 6850c4e30aa0c3e2 | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb [Cgb] | 023d73f9e5c6528d | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple.gb [Dmg] | dc635bce8a413ead | b6b0632d997517d6
-mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Cgb] | 9c84bd668ca64f41 | b6b0632d997517d6
-mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Dmg] | cafcbe01d0accec5 | b6b0632d997517d6
+mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Cgb] | 5a294d71d7c2cc7e | b6b0632d997517d6
+mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Dmg] | 3c1c2cc1ac773747 | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Cgb] | 5d43ad53e48cdfc5 | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Dmg] | 8bf4244a34610345 | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change2.gb [Cgb] | be666b5d6e7500d1 | b6b0632d997517d6

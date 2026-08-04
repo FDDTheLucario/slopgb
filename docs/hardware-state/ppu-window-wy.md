@@ -756,3 +756,40 @@ shortened by ~3 dots for the incomplete-fetch leg, i.e. a change to the drawn
 column count, which the mealybug `m3_lcdc_win_en_change*` photographs pin. Not a
 read-law adjustment and not a lead adjustment — the `lead` route caps out at 1
 dot, since `lead` cannot exceed 1 in double speed.
+
+## FIXED: the abort re-anchors the OUTPUT position, not just the fetch column
+
+`late_disable_scx5_ds_1` is fixed, and the earlier "verified weld" call on it was
+wrong — the discriminator was in the abort state all along, one step upstream of
+the read where I had been looking.
+
+mattcurrie's §WIN_EN says the BG resumes "on a tile boundary — the low 3 bits of
+SCX have no effect". slopgb implemented half of that: `window_abort_render`
+re-anchored `fetch_x`, the fetch COLUMN, but never moved `lx`, the OUTPUT
+position. When the clear catches the window fetch mid-flight the abandoned row
+never ships, so output resumes at the next tile boundary:
+
+```rust
+if !tileno_pending && !matches!(r.phase, Push | Hi) && r.discard > 0 {
+    let fine = self.eff.scx & 7;
+    r.lx += (8 - (fine.wrapping_add(r.lx) & 7)) & 7;
+    r.win_stalled = false;
+    r.discard = 0;
+}
+```
+
+Two scopes, both derived from the rows rather than chosen:
+
+* `phase` excludes `Push` and `Hi` — the fetch COMPLETES at `Hi` (the high-byte
+  read pushes the row), so a row latched by then still ships;
+* `discard > 0` — the window had not begun putting its own tile out. All four
+  candidate rows abort at `HiWait` with `bg_count = 4`, and this is the field
+  that separates them: `late_disable_scx5_ds_1` has `disc = 1` (boundary at
+  lx 3, exactly the shortening its read needs) while `late_disable_scx{2,3}_2`
+  have `disc = 0` and keep their full line.
+
+Recovers 3 baselined rows with zero regressions. golden moved 3 rows including
+`mealybug m3_lcdc_win_en_change_multiple_wx` [Cgb]/[Dmg] — the [Cgb] leg still
+PASSES its reference photograph (the mealybug matrix is 10/10), so the pixel
+oracle is intact; the golden drift is frame 16, which the photo protocol does not
+read. [Dmg] was already baselined.

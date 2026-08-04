@@ -237,5 +237,28 @@ impl Ppu {
             + if tileno_pending { 0 } else { 8 };
         let col = (i32::from(self.eff.scx) + x.max(0) + 1 - i32::from(cgb)) >> 3;
         r.fetch_x = (col as u8).wrapping_sub(self.eff.scx >> 3) & 31;
+        // The BG resumes "on a tile boundary — the low 3 bits of SCX have no
+        // effect" (mattcurrie comprehensive-ppu-doc §WIN_EN). `fetch_x` above is
+        // one half of that re-anchor; the OUTPUT position is the other, and it
+        // was missing. When the clear catches the window fetch mid-flight (the
+        // tile-number read past but the row not yet latched) that fetch is
+        // abandoned, and output resumes at the next tile boundary rather than
+        // finishing the abandoned row. A latched row (`Push`) still ships, so
+        // its line is untouched.
+        //
+        // Scoped to a fetch still owing a discard: `discard > 0` means the
+        // window had not begun putting its own tile out, so nothing of it
+        // survives the clear. `late_disable_scx5_ds_1` aborts at `HiWait` with
+        // lx 0, SCX&7 5 and one pixel still to drop, giving a boundary of lx 3;
+        // `late_disable_scx{2,3}_2` abort at the same phase with the discard
+        // already spent and keep their full line.
+        if !tileno_pending && !matches!(r.phase, FetchPhase::Push | FetchPhase::Hi) && r.discard > 0
+        {
+            let fine = self.eff.scx & 7;
+            let to_boundary = (8 - (fine.wrapping_add(r.lx) & 7)) & 7;
+            r.lx = r.lx.saturating_add(to_boundary);
+            r.win_stalled = false;
+            r.discard = 0;
+        }
     }
 }
