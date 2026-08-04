@@ -527,7 +527,22 @@ impl Ppu {
         // mode-2 rise (`display.c:1815`, once `ly_for_comparison` holds the
         // line). The dot-4 rise is `ly_for_comparison`'s own latch dot
         // (`ly_for_comparison_at`).
-        if self.dot == 4 {
+        // Line 0's compare sits later than the visible-line one. Hardware
+        // pins it through the `late_wy{,_ds}{,_lcdoffset1}` pairs, whose only
+        // difference is one M-cycle in a WY->FF write that must either beat the
+        // compare (no window that frame) or miss it: writes at dot 6 / 5 kill
+        // the trigger while writes at 8 / 7 do not (double speed), and at
+        // single speed a dot-7 write kills it where a dot-11 write does not.
+        // That brackets the compare to dot 7 in double speed and 8..11 in
+        // single, against dot 4 for lines 1-143. DMG keeps dot 4 on line 0 too:
+        // its own pair puts the kill/no-kill boundary between a dot-0 and a
+        // dot-4 write (`late_wy_{1,2}` [Dmg]).
+        let compare_dot = if self.line == 0 && self.model.is_cgb() {
+            if self.ds { 7 } else { 8 }
+        } else {
+            4
+        };
+        if self.dot == compare_dot {
             self.wy_check();
         }
         if self.line <= 143 {

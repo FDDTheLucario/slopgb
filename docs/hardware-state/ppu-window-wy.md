@@ -607,3 +607,37 @@ representable consequence of a CPU frame that mooneye and gambatte disagree
 about. Retiring them means resolving that disagreement, which is a decision about
 which oracle wins on the dispatch dot — not a PPU change. Until then the arms are
 the correct place for it, and this file is the record of why.
+
+## Oracle correction: hardware over SameBoy, and the line-0 compare dot
+
+Three rows were floored earlier on the grounds that "SameBoy fails them too, so
+slopgb was over-fitting past SameBoy." **That reasoning was backwards.**
+gambatte's `_outN` expectations are captured from real hardware; SameBoy is a
+reference implementation. Where they disagree the ROM is the truth, so slopgb had
+been matching hardware and the flooring made it less accurate, not more.
+
+Taking the ROMs as the oracle pins a mechanism SameBoy gets wrong. Each
+`late_wy*` pair differs by one M-cycle in a `WY -> $FF` write that must either
+beat the frame's window-Y compare (no window that frame) or miss it:
+
+| row | WY write dot | want | ⇒ compare dot C |
+|---|---|---|---|
+| `late_wy_ds_1` / `_2` [Cgb] | 6 / 8 | none / window | `6 < C <= 8` |
+| `late_wy_ds_lcdoffset1_1` / `_2` [Cgb] | 5 / 7 | none / window | `5 < C <= 7` |
+| `late_wy_lcdoffset1_1` / `_2` [Cgb] | 7 / 11 | none / window | `7 < C <= 11` |
+| `late_wy_1` / `_2` [Dmg] | 0 / 4 | none / window | `0 < C <= 4` |
+
+So **line 0's compare is at dot 7 in CGB double speed and 8 in CGB single**,
+against dot 4 for lines 1-143 and for DMG throughout. slopgb (and SameBoy) had
+line 0 at dot 4, which is why the whole family collapsed: the latch was already
+set before the write could kill it.
+
+Recovers 5 baselined rows with zero regressions — the three wrongly floored ones
+plus `late_wy_1 [Cgb]` and `late_wy_lcdoffset1_1 [Cgb]`, which predate this work.
+golden re-captured for exactly those 5. Only `late_wy_1toFF_ds_lcdoffset1_2`
+remains open in this family.
+
+**Method note:** SameBoy is the right oracle for *mechanism* — it is a readable
+model of the hardware — but the ROM expectations are the right oracle for
+*verdicts*. A "SameBoy-FAIL" classification is a reason to look harder at the
+mechanism, never on its own a reason to floor a row.
