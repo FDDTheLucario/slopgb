@@ -641,3 +641,32 @@ remains open in this family.
 model of the hardware — but the ROM expectations are the right oracle for
 *verdicts*. A "SameBoy-FAIL" classification is a reason to look harder at the
 mechanism, never on its own a reason to floor a row.
+
+## The abort's render cost: measured, not yet modelled
+
+Attacking `late_disable_scx5_ds_1` (floored earlier on the SameBoy-FAIL reasoning
+that the section above retracts) turns up a concrete render mechanism slopgb is
+missing entirely.
+
+On `late_disable_scx5_ds`, SameBoy's mode 3 ends at **dot 258 on ly0**, where the
+window activates and draws, and at **dot 270 on ly1**, where the same window
+activates and is then aborted by a mid-line LCDC.5 clear. **An aborted window
+line runs ~12 dots LONGER than the same line left to draw** — the abandoned
+window fetch never ships, so the BG tile has to be fetched afresh.
+
+slopgb produces **255 on both lines**: it charges the abort nothing. That is why
+the `_1`/`_2` pair collapses (their clears land 2 dots apart, at ly1 dot 104 and
+106, and neither moves the length), and it is the same defect behind the CGB
+`late_disable_*` family — `window_abort_render` re-anchors `fetch_x` but bills no
+refetch.
+
+Probed and insufficient on its own: forcing the fetcher back to `TileNoWait` in
+`window_abort_render` moves the flip by nothing, so the cost is not a single
+restarted fetch at that point. The abort runs at the deferred render frame, by
+which time the pipeline has moved on; charging it properly needs the abort's
+effect modelled where the fetch is actually abandoned, with the mealybug
+`m3_lcdc_win_en_change*` photographs as the pixel oracle.
+
+Note SameBoy fails `_1` itself (reads mode 3 where the ROM wants 0), so this one
+cannot be finished by matching SameBoy — the +12 figure is the mechanism to port,
+and the ROM pair is the verdict oracle.
