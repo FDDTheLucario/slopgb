@@ -684,7 +684,7 @@ observable read:
 
 | pair | verdict |
 |---|---|
-| `late_disable_scx5_ds_1` / `_2` | **bit-identical in every tracked field**, opposite wants — a verified weld |
+| `late_disable_scx5_ds_1` / `_2` | identical at the READ — but see below, it is NOT a weld |
 | `late_wy_1toFF_ds_lcdoffset1_1` / `_2` | **bit-identical** — verified weld |
 | `late_wx_scx5_ds_1` / `_2` | **NOT welded**: `wx_write_dot` 98 vs 100 |
 
@@ -700,3 +700,35 @@ The two genuine welds now have a justification that survives scrutiny, unlike th
 retracted "SameBoy-FAIL" reasoning: their state is identical under a measurement
 that pins frame, PC and every field, so nothing the render carries can separate
 them.
+
+## `late_disable_scx5_ds` is not a weld — the abort state differs
+
+Correcting the entry above. The two legs are identical at the observable read,
+but that is the render having *absorbed* the difference, not an absent
+discriminator. Both the measurement and the mechanism are now pinned:
+
+* Both ROMs make exactly **two kernel reads, both in frame 3** — the same frame
+  as the abort. (The frame-16 chase in the retracted section was looking at reads
+  that do not exist.)
+* The abort states differ clearly:
+
+| leg | abort dot | lx | bg_count | discard | fetch phase | want |
+|---|---|---|---|---|---|---|
+| `_1` | 106 | 0 | 4 | 1 | `HiWait` — fetch INCOMPLETE | mode 0 |
+| `_2` | 108 | 1 | 2 | 0 | `Push` — row LATCHED | mode 3 |
+
+* The mutation point is live: a deliberate `lx = 100; bg_count = 0; stall = 60`
+  at the abort flips both outputs 3 -> 0, so `window_abort_render` does reach the
+  read.
+* Required delta: `_1` needs its flip at **<= 264** (reads rphd 528, wants mode
+  0) while `_2` must keep **> 266** (reads rphd 532, wants mode 3). Both sit at
+  267 today, so `_1` wants ~3 dots SHORTER — an earlier abort shortening the
+  line, the opposite of the retracted "+12 longer" reading.
+
+**Why every lever tried so far did nothing:** `flip_projection` only adds the
+fetcher refill term when `bg_count == 0`. `_1` aborts with `bg_count = 4`, so
+`phase` does not enter the projection at all — setting `phase` to `Hi` or
+`TileNoWait`, or clearing `discard`, cannot move its flip by construction. A fix
+has to change a term the projection actually reads (`stall`, `lx`, or
+`bg_count`), keyed on the fetch phase at the abort, and be checked against the
+mealybug `m3_lcdc_win_en_change*` photographs since those terms move pixels.
