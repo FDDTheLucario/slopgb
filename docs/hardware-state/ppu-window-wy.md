@@ -968,7 +968,38 @@ That matches the code: arm 3 was ~15 lines and one dot threshold, D3 is ~40 with
 structure is real, not accreted — the DMG rows genuinely carry more distinctions
 than the CGB ones at the same phase.
 
-What separates those two rows is still unidentified. It is NOT the fetch phase,
-the match dot, or the abort dot alone; the next attempt should diff their full
-render state at the abort the way `late_disable_scx5_ds` was diffed, rather than
-trying another boundary.
+What separates those two rows IS `wx_match_dot` — 105 against 0 — found by the
+full-state diff. But knowing that is not enough to retire D3, for the reason
+below.
+
+## D3 needs a threshold, not a predicate — measured both halves
+
+The full-state diff on the two same-phase DMG rows settles what separates them:
+
+| field | `late_disable_wx0f_1` (want 3) | `late_disable_early_scx03_wx0f_1` (want 0) |
+|---|---|---|
+| `wx_match_dot` | **105** | **0** |
+| lx / hunt_fine / hunt_match_dot | 10 / 0 / 89 | 7 / 3 / 92 |
+
+So: never matched -> shorten, matched -> extend. Both halves were then built in
+the render and measured with D3 removed:
+
+| render rule | failures |
+|---|---|
+| shorten only (`wxm == 0` + incomplete phase, `lx += hunt_fine`) | 8 |
+| shorten + extend (matched + incomplete -> `stall += 6`, D3's own 259-vs-253 price) | 8 (different set) |
+
+The shorten half fixes the four `late_disable_early_scx03_wx*_1` rows; the extend
+half fixes `late_disable_1`, `wx0f_1`, `spx10_wx0f_2` and
+`late_scx_late_disable_1`. But the extend then over-applies to the `_0` rungs
+(`late_disable_scx{2,3,5}_0`, want 0), which match and still must not extend.
+
+That is D3's `abd + K >= wxm` threshold — the extend is conditional on WHERE the
+clear lands relative to the match, not merely on having matched. Reproducing D3
+in the render therefore means reproducing its threshold and its `scx_kills_early`
+/ `eager_scx` / sprite terms; the arm is not a stand-in for a simpler mechanism
+the way arm 3 was.
+
+**Status: arm 3 retired (CGB), D3 not.** The two halves above are real and
+measured — they are the right shape — but the third term is genuinely per
+configuration.
