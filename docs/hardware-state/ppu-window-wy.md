@@ -856,3 +856,37 @@ group does not collapse to a per-class law (129 classes / 168 rows), and the
 tile-boundary output re-anchor — a genuine mechanism — recovered three of them
 without changing that ratio. The next attempt should not start from the
 dispatch.
+
+## The pre-draw class: a partial mechanism that cannot yet replace its arms
+
+Splitting the remaining abort rows by how the abort reaches the render
+(instrumenting `window_abort_render`'s early return):
+
+* the `_1` legs of `late_disable_early_scx03_wx*` abort **pre-draw with
+  `wx_match_dot == 0`** — the WX comparator never matched, so the window never
+  engaged at all;
+* `wx10_2` aborts pre-draw with `wx_match_dot = 109` against an abort at 110 —
+  matched one dot before, and still wants the extension;
+* `wx0f_2` aborts post-draw (`win_mode` set).
+
+For the never-matched case mattcurrie §WIN_EN says the line keeps nothing of the
+window, SCX fine-scroll penalty included. Giving that discard back
+(`lx += hunt_fine` when `wx_match_dot == 0 && hunt_done`) takes the arms-cut
+failure count **30 -> 22**, so it is a real mechanism covering 8 rows.
+
+It cannot land yet:
+
+| configuration | result |
+|---|---|
+| lever on, arms present | 3 regressions, 0 recoveries (arms already cover these) |
+| lever on, arms cut | 22 (vs 30 without) |
+| lever on, arms 3 + D3 removed | 7 regressions |
+
+So arms 3/D3 cover a strict superset of the lever, and removing them loses more
+than the lever gives back. The next step is finding what else those two arms
+carry — not another scope tweak on this lever.
+
+**Harness note:** `std::env::var("X").is_ok()` is TRUE for `X=""`, so a
+`for v in "" 1; do X=$v ...` sweep runs the lever ON in both arms and reports a
+false "no effect". Use `env -u X` for the off case. This cost one measurement
+here and is worth checking in any probe written the same way.
