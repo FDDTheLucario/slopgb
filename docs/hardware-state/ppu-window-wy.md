@@ -642,72 +642,36 @@ model of the hardware — but the ROM expectations are the right oracle for
 *verdicts*. A "SameBoy-FAIL" classification is a reason to look harder at the
 mechanism, never on its own a reason to floor a row.
 
-## The abort's render cost: measured, not yet modelled
+## RETRACTED: the abort-cost and flip-gap findings were frame-conflated
 
-Attacking `late_disable_scx5_ds_1` (floored earlier on the SameBoy-FAIL reasoning
-that the section above retracts) turns up a concrete render mechanism slopgb is
-missing entirely.
+Three claims made in this section about `late_disable_scx5_ds` are **wrong** and
+are retracted. The cause was a single instrumentation error repeated three ways:
+**the ROM performs its LCDC.5 clear once, in frame 3, while the gambatte protocol
+reads frame 16.** Every measurement below compared state from one frame against
+state from another.
 
-On `late_disable_scx5_ds`, SameBoy's mode 3 ends at **dot 258 on ly0**, where the
-window activates and draws, and at **dot 270 on ly1**, where the same window
-activates and is then aborted by a mid-line LCDC.5 clear. **An aborted window
-line runs ~12 dots LONGER than the same line left to draw** — the abandoned
-window fetch never ships, so the BG tile has to be fetched afresh.
+Retracted:
 
-slopgb produces **255 on both lines**: it charges the abort nothing. That is why
-the `_1`/`_2` pair collapses (their clears land 2 dots apart, at ly1 dot 104 and
-106, and neither moves the length), and it is the same defect behind the CGB
-`late_disable_*` family — `window_abort_render` re-anchors `fetch_x` but bills no
-refetch.
+* *"An aborted window line runs ~12 dots longer"* — this compared SameBoy's ly0
+  against ly1 in its own measured frame with slopgb's frame-3 abort. Not a
+  like-for-like comparison; the figure means nothing.
+* *"The flip fires 18 dots before the pipe end"* — `PIPEEND 273` / `FLIP 255`
+  came from different frames.
+* *"The stall is applied and consumed yet `lx` is unchanged"* — the apparent
+  contradiction that stalled the work. There was none: the stall was applied in
+  frame 3 and `lx` was measured in frame 16, which has no abort at all.
 
-### The discriminator is the fetch PHASE at the abort
+Confirmed by instrumenting `frame_count` at the abort: exactly **one** abort in
+the whole run, at `frame=3 ly=1 dot=106`, and frame 16's ly1 render is
+bit-identical with and without a 6-dot charge (172 steps, same `lx` trajectory).
 
-The `_1`/`_2` pair is NOT welded — an earlier note here said their traces were
-identical, but that compared the READ trace, not the abort state. The abort
-states differ exactly where the physics says they should:
+What survives: the `_1`/`_2` ROMs differ by one NOP shifting that frame-3 LCDC
+write, so the discriminator is a **persistent** effect carried out of the setup
+frame, not a same-frame render-length difference. The fetch-phase difference at
+the abort (`HiWait` vs `Push`) is real but was observed in frame 3 and has not
+been shown to reach the measured read.
 
-| leg | abort dot | lx | bg_count | discard | fetch phase | want |
-|---|---|---|---|---|---|---|
-| `_1` | 106 | 0 | 4 | 1 | `HiWait` — fetch INCOMPLETE | mode 0 (shorter) |
-| `_2` | 108 | 1 | 2 | 0 | `Push` — row already LATCHED | mode 3 (longer) |
-
-So `_1` abandons an in-flight fetch and `_2` abandons a completed one, and
-hardware charges them differently. `Render::phase` at the abort is a tracked
-quantity, so this is a representable discriminator — the `rom-diff-weld` shape,
-not a floor.
-
-### Open: the flip does not respond to abort-time state
-
-What blocks the fix is that **none** of the obvious charges move the flip at all.
-Setting `phase = TileNoWait`, clearing `bg_count`, both together, and even
-`stall += 6` in `window_abort_render` each leave the ly1 flip at dot 255 and the
-ROM output byte-identical. A `stall += 6` at dot 106 must push the pipe end six
-dots later, and does not.
-
-Chasing that inertness one level further shows the charge is not the problem —
-the render **does** pay it, and the flip is simply not attached to the pipe end
-on these lines:
-
-* `stall += 6` in `window_abort_render` is applied and consumed exactly as
-  expected (traced dot by dot: `stall` 6 at dot 107 counting down to 0 at 113,
-  the pipeline frozen throughout);
-* yet **`PIPEEND` is at dot 273 while `FLIP` fires at dot 255**, with `lx = 159`
-  — an 18-dot gap — and BOTH are unchanged by the added stall.
-
-So on an aborted DS window line the mode-0 flip fires ~18 dots before the
-pipeline actually finishes, and the projection is insensitive to work added
-after the abort. That gap is the reason the read-law arms exist at all here: the
-render's flip is nowhere near the true mode-3 end, so no exit expressed off
-`flip` can be right.
-
-**Unresolved contradiction, and the thing to look at first:** the stall is
-demonstrably applied and consumed, but `lx` reaches 159 at the same dot either
-way. One of those two observations must be wrong. Do not build on either until
-that is settled — two earlier readings in this section were misdirected (the flip
-sampled from the wrong frame, and the passing sibling traced instead of the
-failing one), so the instrumentation itself needs re-checking before the next
-attempt.
-
-Note SameBoy fails `_1` itself (reads mode 3 where the ROM wants 0), so this one
-cannot be finished by matching SameBoy — the +12 figure is the mechanism to port,
-and the ROM pair is the verdict oracle.
+**Method rule this cost several rounds: pin the FRAME, not just the PC.** A
+gambatte ROM runs 16 frames; setup writes and the measured read routinely live in
+different ones, and any trace that does not filter on `frame_count` will silently
+compare across them.
