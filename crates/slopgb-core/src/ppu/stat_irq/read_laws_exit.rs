@@ -36,25 +36,34 @@ impl Ppu {
     ///
     /// slopgb-frame constants relate to SameBoy's by the uniform +8 hd frame
     /// offset (slopgb dot D ↔ SameBoy cfl·2+dc = 2D+8, both speeds). A read can
-    /// match SEVERAL arms (e.g. a re-enabled triggering window matches the
-    /// length arm AND the reenable arm); the source laws were ordered
-    /// fall-through blocks, whose combined verdict folds to: `m == 3` arms
-    /// (force-0 past their exit) take the MINIMUM matching exit, `m == 0` arms
-    /// (hold-3 below their exit) the MAXIMUM. Each arm keeps its own guards:
+    /// match SEVERAL arms (e.g. a window line that is also sprite-laden); the
+    /// source laws were ordered fall-through blocks, whose combined verdict
+    /// folds to: `m == 3` arms (force-0 past their exit) take the MINIMUM
+    /// matching exit, `m == 0` arms (hold-3 below their exit) the MAXIMUM. Each
+    /// arm keeps its own guards.
     ///
-    /// | arm | config | exit (slopgb dots) |
-    /// |---|---|---|
-    /// | 1 | active triggering window | `259 + SCX&7 + ds` (SameBoy `SBex = 263 + SCX&7`, read offset +4) |
-    /// | 2 | shadow late-WY extend (render bare, SameBoy window) | `263 + SCX&7 + ds` (polled) |
-    /// | 3 | CGB pre-draw window-abort, SS | `253` (SCX penalty DROPPED, mattcurrie §WIN_EN) |
-    /// | 4 | CGB pre-draw window-abort, DS | `254`; abort boundary `(89+WX)&!1` |
-    /// | 5 | CGB window re-enable too late to redraw | `253` |
-    /// | 6 | CGB late-WY UN-trigger (SameBoy bare, slopgb window) | `253 + SCX&7` |
-    /// | 7 | boundary-WY cross-line extend | `263 + SCX&7 + ds` polled / `259 …` carried |
-    /// | 8 | bare line | SS: emergent `2*flip + 2` hd − carry − phase; DS: `508 + 2*(SCX&7) + 2*(SCX&1)` hd − carry |
+    /// Every exit here is EMERGENT — `2 * flip + frame`, anchored to the
+    /// render's own recorded or projected mode-0 flip. The render carries the
+    /// line's whole mode-3 cost (fine-scroll discard, window start, sprite
+    /// penalty), so all that is left per config is where the READ sits relative
+    /// to that flip:
+    ///
+    /// | scope | read frame (half-dots) |
+    /// |---|---|
+    /// | CGB on-screen triggering window | −4 carried / +4 polled |
+    /// | CGB off-screen window (WX >= 0xA0) | −2 SS / −4 DS |
+    /// | DMG on-screen triggering window | −4 |
+    /// | DMG off-screen window (WX == 0xA6) | −6 |
+    /// | CGB DS window + sprites | +1 |
+    /// | CGB DS pre-draw abort before the WX match | 0 |
+    /// | bare line | +2 SS / −2 + 2*(SCX&1) DS |
+    ///
+    /// The behaviours that once needed their own config arms — window-Y
+    /// triggering, the pre-draw and drawn aborts, the re-enable redraw
+    /// deadline, the WX-rewrite un-catch — live in the window machine and the
+    /// renderer now (`ppu/render/window.rs`), where they move pixels as well as
+    /// this read.
     pub(in crate::ppu) fn vis_exit_hd(&self, m: u8) -> Option<i32> {
-        let scx7 = i32::from(self.scx & 7);
-        let ds1 = i32::from(self.ds);
         let mut exit: Option<i32> = None;
         // Fold a matching arm's exit: min for the m==3 (force-0) class, max
         // for the m==0 (hold-3) class — the source laws' fall-through order.
@@ -92,7 +101,20 @@ impl Ppu {
             // before it HBlank-activates, so its arming exit stays the closed
             // form the read lands on an M-cycle later either way.
             if self.eff.wx >= 0xA0 {
-                fold(&mut exit, 2 * (259 + scx7 + ds1));
+                // The off-screen (WX >= 0xA0) window renders nothing, and the
+                // render's flip already lands where the line ends — so this is
+                // the same emergent exit as the on-screen branch below, only the
+                // read frame differs. Double speed reads a dot earlier than
+                // single, its M-cycle being half as long.
+                let flip = if self.line_render_done && self.flip_dot != 0 {
+                    self.flip_dot
+                } else {
+                    self.projected_flip_dot()
+                };
+                fold(
+                    &mut exit,
+                    2 * i32::from(flip) + if self.ds { -4 } else { -2 },
+                );
             } else {
                 // EMERGENT: an on-screen active window's whole mode-3 cost —
                 // including the fine-scroll discard it activates into — is in
