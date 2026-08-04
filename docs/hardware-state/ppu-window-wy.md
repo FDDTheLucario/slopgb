@@ -793,3 +793,33 @@ Recovers 3 baselined rows with zero regressions. golden moved 3 rows including
 PASSES its reference photograph (the mealybug matrix is 10/10), so the pixel
 oracle is intact; the golden drift is frame 16, which the photo protocol does not
 read. [Dmg] was already baselined.
+
+## Re-measured after the output re-anchor: the abort group still does not collapse
+
+With the tile-boundary output re-anchor in, the abort arms were re-measured the
+same way: cut them, derive per class over the full two-sided constraint set (all
+168 `late_disable*` / `late_reenable*` / `late_wx*` / `late_scx_late_disable*`
+rows).
+
+**Unchanged: 129 classes for 168 rows**, 6 still infeasible. The render fix
+recovered three rows outright but did not make the group collapsible — roughly
+one row per class remains the table rewritten, not a law.
+
+That is consistent with the dispatch finding rather than in tension with it: the
+group compensates a 4-dot ISR frame offset per configuration, and a render fix
+that is genuinely correct (as the re-anchor is — it recovered rows and kept the
+mealybug photo) does not touch that offset.
+
+### The limit, stated plainly
+
+Closing the remaining rows requires one of:
+
+1. **Moving the STAT dispatch dot** from 16 to SameBoy's 18. Directly tested:
+   delaying the mode-2 line-start STAT IF by 2, 3 or 4 dots takes mooneye from
+   93/93 to 91/93 every time, breaking `intr_2_*` — the tests that pin that dot.
+   mooneye and the gambatte `late_*` ROMs disagree about it, and both are
+   hardware-derived.
+2. **Keeping per-configuration arms**, which is what exists today.
+
+There is no third option available from the PPU side. Which oracle wins on the
+dispatch dot is a project decision, not a measurement.
