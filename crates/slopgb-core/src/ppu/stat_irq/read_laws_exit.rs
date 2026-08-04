@@ -312,30 +312,6 @@ impl Ppu {
         {
             fold(&mut exit, 508 + 2 * scx7 + 2 * i32::from(self.scx & 1));
         }
-        // Arm 3 — the CGB PRE-DRAW window-abort bare exit, SS. A
-        // window disabled by an LCDC.5 clear BEFORE its first fetch renders
-        // BARE on SameBoy with the SCX fine-scroll penalty DROPPED
-        // (mattcurrie §WIN_EN) → exit cfl257 = slopgb 253, NOT 257+SCX&7;
-        // slopgb's whole-dot render over-extends. Boundary: the abort must
-        // land before the window's first tile ships (~dot 106 for the scx03
-        // early setup — `_1` abort104 bare / `_2` abort108 extend, ALL
-        // wx0f-12; wx-INDEPENDENT, a `wx_match+1`-relative form REFUTED). A
-        // later abort catches the first tile and EXTENDS (a per-config length
-        // not modelled on the whole-dot grid). Currently-DISABLED window only
-        // (excludes late_reenable); bare non-sprite non-glitch CGB lines.
-        if self.model.is_cgb()
-            && !self.ds
-            && self.render.win_predraw_abort
-            && self.render.win_predraw_abort_dot <= 105
-            && self.eff.lcdc & LCDC_WIN_ENABLE == 0
-            && self.line >= 1
-            && self.line < 144
-            && m == 3
-            && !self.render.win_active
-            && self.bare_sprite_free()
-        {
-            fold(&mut exit, 2 * 253);
-        }
         // Arm 3b — the sprite-at-window-X abort-slot removal, SS CGB
         // (asm_window_gdma Row 4). With an object at the window's screen X
         // (OAM X = WX+1) the window activation precedes the object fetch and

@@ -891,7 +891,35 @@ carry — not another scope tweak on this lever.
 false "no effect". Use `env -u X` for the off case. This cost one measurement
 here and is worth checking in any probe written the same way.
 
-## Why the pre-draw lever is not a mechanism: the threshold is irreducible
+## RETRACTED then FIXED: the pre-draw threshold IS the fetch phase
+
+The previous note called the pre-draw threshold irreducible because
+`wx_match_dot` failed to separate `late_disable_early_scx03_wx12_1` from `_2`.
+That was the wrong field. Tracing the FETCH PHASE at the abort separates the
+whole ladder, cleanly, on every leg:
+
+| leg | phase at abort | lx | bg | want |
+|---|---|---|---|---|
+| `wx{0f,10,11,12}_1` (Dmg + Cgb) | `LoWait` | 7 | 6 | 0 (short) |
+| `wx{10,11,12}_2` (Dmg + Cgb) | `Push` | 11 | 2 | 3 (long) |
+
+Both `_1` and `_2` have `wx_match_dot == 0`, so the match dot cannot tell them
+apart and the phase can — and it is the SAME `Push`-vs-incomplete distinction the
+drawn-abort re-anchor already uses. The dot threshold arm 3 carried
+(`win_predraw_abort_dot <= 105`) was that phase boundary expressed in dots.
+
+**Arm 3 is retired.** A pre-draw abort with no latched row now gives back the
+fine-scroll discard in the render (`lx += hunt_fine`), CGB-scoped, and arm 3's
+closed form is deleted with zero regressions. The DMG legs of the same ladder
+still need arm D3: applying the rule to both models leaves 8 failures, all
+`[Dmg]`, so the DMG fetch phase runs on a different offset — the same one-dot
+model split seen throughout this file.
+
+golden moved one row, `cgb-acid-hell` — worth flagging since that is a
+rendering-correctness ROM. Its own reference comparison still passes (acid 4/4,
+mealybug 10/10); the drift is at frame 16, past the checked frame.
+
+## Superseded: "the pre-draw threshold is irreducible"
 
 Tracing the rows arms 3/D3 carry beyond the lever settles it. `wx_match_dot`
 does not separate them:

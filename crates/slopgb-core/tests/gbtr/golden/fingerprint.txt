@@ -210,7 +210,7 @@ blargg/oam_bug/rom_singles/8-instr_effect.gb [Cgb] | e8cc0f317780f205 | 36ff3359
 blargg/oam_bug/rom_singles/8-instr_effect.gb [Dmg] | e8cc0f317780f205 | 36ff33597507eb4a
 bully/bully.gb [Cgb] | 9ab4e008dd5a4325 | b6b0632d997517d6
 bully/bully.gb [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
-cgb-acid-hell/cgb-acid-hell.gbc [Cgb] | 9405725ef6a8aa0f | b6b0632d997517d6
+cgb-acid-hell/cgb-acid-hell.gbc [Cgb] | 6b612b12fe4c680f | b6b0632d997517d6
 cgb-acid-hell/cgb-acid-hell.gbc [Dmg] | 2f49f45dd8cee525 | b6b0632d997517d6
 cgb-acid2/cgb-acid2.gbc [Cgb] | a269892e53c05800 | b6b0632d997517d6
 cgb-acid2/cgb-acid2.gbc [Dmg] | 44f5ca4841667b3c | b6b0632d997517d6

@@ -220,6 +220,27 @@ impl Ppu {
     /// `win_mode` (a natural end in the defer gap).
     pub(in crate::ppu) fn window_abort_render(&mut self) {
         if !self.render.win_mode {
+            // PRE-DRAW abort. Same rule as the drawn case below: a clear
+            // landing while the fetch holds no latched row abandons it, and the
+            // line then keeps nothing of the window — the SCX fine-scroll
+            // penalty included (mattcurrie §WIN_EN drops it, exit cfl257 rather
+            // than 257 + SCX&7), so give that discard back.
+            //
+            // The fetch phase is the whole discriminator, and it replaces the
+            // dot threshold the CGB read-law arm used to carry: across
+            // `late_disable_early_scx03_wx{0f,10,11,12}` every `_1` leg aborts
+            // at `LoWait` and wants the short exit while every `_2` aborts at
+            // `Push` and wants the long one — both with `wx_match_dot == 0`, so
+            // the match dot cannot separate them and the phase can. CGB only:
+            // the DMG legs of the same ladder still need their own arm.
+            if self.model.is_cgb()
+                && self.render.active
+                && !matches!(self.render.phase_of(), FetchPhase::Push | FetchPhase::Hi)
+            {
+                let r = &mut self.render;
+                let hf = r.hunt_fine & 7;
+                r.lx = r.lx.saturating_add(hf);
+            }
             return;
         }
         let cgb = self.model.is_cgb();

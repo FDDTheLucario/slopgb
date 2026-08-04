@@ -87,7 +87,7 @@ fn obj_fetch_base(cgb: bool, fetched: u16) -> u16 {
 /// FIFO drains (Pan Docs "Push": "this state is executed only if [the
 /// FIFO] is empty").
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum FetchPhase {
+pub(in crate::ppu) enum FetchPhase {
     /// First dot of the tile-number read.
     TileNoWait,
     /// Second dot: latch the tile number (+ CGB attributes).
@@ -306,6 +306,9 @@ pub(super) struct Render {
 }
 
 impl Render {
+    pub(in crate::ppu) fn phase_of(&self) -> FetchPhase {
+        self.phase
+    }
     pub(super) fn new() -> Self {
         Self {
             active: false,
