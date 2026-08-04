@@ -586,3 +586,24 @@ rather than modelling a mechanism.
 dispatches STAT at dot 16 where SameBoy dispatches at 18, and mooneye is green at
 439/439 on 16 with the dispatch counter-pinned. That is the work; nothing on the
 window side reaches it.
+
+## The dispatch pin is real — tested, not inherited
+
+Every other "counter-pinned / atomic / structural floor" verdict in this file
+fell when tested. This one does not. Delaying the mode-2 line-start STAT IF (the
+source the `late_*` kernels dispatch from) by 2, 3 or 4 dots takes mooneye from
+**93/93 to 91/93** at every value, and the two that break are the ones that pin
+the mode-2 IRQ dot directly (`intr_2_*`).
+
+Both halves of the abort group's 4-dot offset are therefore CPU quantities that
+mooneye already fixes:
+
+* the STAT dispatch dot (slopgb 16, SameBoy 18) — the probe above;
+* the ack-to-write ISR path (slopgb 88/92, SameBoy 90/94) — the interrupt entry
+  cost, pinned by `intr_timing` / `ei_timing` / `halt_ime0_ei`.
+
+So the abort arms are not a read law that has not been found yet: they are the
+representable consequence of a CPU frame that mooneye and gambatte disagree
+about. Retiring them means resolving that disagreement, which is a decision about
+which oracle wins on the dispatch dot — not a PPU change. Until then the arms are
+the correct place for it, and this file is the record of why.
