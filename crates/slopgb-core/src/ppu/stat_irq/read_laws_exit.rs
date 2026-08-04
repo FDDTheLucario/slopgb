@@ -153,13 +153,20 @@ impl Ppu {
                     self.projected_flip_dot()
                 };
                 fold(&mut exit, 2 * i32::from(flip) - 4);
-            } else if self.render.n_sprites == 0 {
-                fold(&mut exit, 2 * (253 + scx7));
-            } else if self.render.sprites[..usize::from(self.render.n_sprites)]
-                .iter()
-                .any(|s| u16::from(s.x) == u16::from(self.eff.wx) + 1)
-            {
-                fold(&mut exit, 2 * 259);
+            } else {
+                // WX == 0xA6: the off-screen window renders nothing, and the
+                // render's flip already lands on the bare end it should
+                // (`m2int_wxA6_scx2_m3stat`: flip 259 == 257 + SCX&7) — including
+                // the extension an object at WX+1 adds. Only the read frame
+                // separates it from the on-screen branch above, one dot earlier
+                // at -6. Bracketed by the ROMs, not swept: -5 and -8 each drop
+                // two rows, -7 and -6 both hold, and -6 is the whole dot.
+                let flip = if self.line_render_done && self.flip_dot != 0 {
+                    self.flip_dot
+                } else {
+                    self.projected_flip_dot()
+                };
+                fold(&mut exit, 2 * i32::from(flip) - 6);
             }
         }
         // Arm 8-spr — the DS WINDOW+SPRITE mode-3 exit (CGB). Arm 1 (the
