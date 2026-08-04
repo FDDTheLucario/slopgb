@@ -269,24 +269,6 @@ impl Ppu {
         {
             fold(&mut exit, 2 * 270);
         }
-        // Arm 4 — the DS pre-draw abort twin. SameBoy renders the
-        // early aborts bare with the penalty dropped, exit `cfl257 dc2` (the
-        // DS half-dot bare exit) = slopgb 254. The DS abort boundary is
-        // wx-DEPENDENT: `(89 + WX) & !1` — the window's first-fetch M-cycle
-        // start on the DS 2-dot grid.
-        if self.model.is_cgb()
-            && self.ds
-            && self.render.win_predraw_abort
-            && self.render.win_predraw_abort_dot < (89 + u16::from(self.wx)) & !1
-            && self.eff.lcdc & LCDC_WIN_ENABLE == 0
-            && self.line >= 1
-            && self.line < 144
-            && m == 3
-            && !self.render.win_active
-            && self.bare_sprite_free()
-        {
-            fold(&mut exit, 2 * 254);
-        }
         // Arm 5 — the CGB window-REENABLE length, SS. A window
         // disabled then RE-enabled mid-mode-3 redraws from the re-enable
         // point; mode 3 extends past the read iff the re-enable beat the WX

@@ -219,19 +219,6 @@ impl Ppu {
     /// 2 pixels early). Idempotent: a no-op if the window already left
     /// `win_mode` (a natural end in the defer gap).
     pub(in crate::ppu) fn window_abort_render(&mut self) {
-        if std::env::var("SW_T").is_ok() && !self.render.win_mode && self.render.active {
-            let r = &self.render;
-            eprintln!(
-                "PD dot={} wxm={} d={} phase={:?} hf={} ns={} scxw={}",
-                self.dot,
-                r.wx_match_dot,
-                i32::from(self.dot) - i32::from(r.wx_match_dot),
-                r.phase_of(),
-                r.hunt_fine,
-                r.n_sprites,
-                r.scx_write_dot
-            );
-        }
         if !self.render.win_mode {
             // PRE-DRAW abort. Same rule as the drawn case below: a clear
             // landing while the fetch holds no latched row abandons it, and the
@@ -251,6 +238,14 @@ impl Ppu {
                 if self.render.active && incomplete {
                     let hf = self.render.hunt_fine & 7;
                     self.render.lx_add(hf);
+                }
+                if self.ds && self.render.active && self.render.wx_match_dot == 0 {
+                    // DS: a clear landing before the window ever matched WX
+                    // leaves the fetcher with nothing of the window at all, so
+                    // the line ends exactly where a window-free line does — one
+                    // dot earlier than slopgb's hunt otherwise carries.
+                    // Pins gambatte/window/late_disable_early_scx00_wx{0f..12}_ds_1.
+                    self.render.lx_add(1);
                 }
             } else if self.render.active {
                 // DMG: a pre-draw window abort re-anchors like CGB, but the BG

@@ -248,6 +248,31 @@ impl Ppu {
                 None
             }
         });
+        // A DS pre-draw window abort that landed before the WX match renders
+        // bare, so no length arm applies — but the native mode still has to be
+        // sampled in the read's own frame. The DS read carries a +4 hd debt, so
+        // a raw dot compare misses a flip the read has already reached; project
+        // the render's flip into the same half-dot frame and use the one
+        // comparison every other arm uses.
+        // Pins gambatte/window/late_disable_early_scx00_wx{0f..12}_ds_1 (read
+        // dot 252, flip 254 = rph 508) against their `_2` siblings, which abort
+        // after the match and keep the extended flip.
+        let exit = exit.or_else(|| {
+            if self.ds
+                && self.model.is_cgb()
+                && self.line >= 1
+                && self.line < 144
+                && !self.glitch_line
+                && self.render.win_predraw_abort
+                && (self.render.wx_match_dot == 0
+                    || self.render.win_predraw_abort_dot < self.render.wx_match_dot)
+                && !self.render.win_active
+            {
+                Some(2 * i32::from(self.projected_flip_dot()))
+            } else {
+                None
+            }
+        });
         let Some(exit_adj) = exit else {
             return m;
         };
