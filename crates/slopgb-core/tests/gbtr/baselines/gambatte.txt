@@ -491,8 +491,18 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # So the requirement is now exact, and it is the last shape standing: the FF26
 # read needs a sub-M-cycle POSITION compared against the length clock's own
 # position, the way `Ppu::read_pos_hd` is compared against the render's flip.
-# slopgb's APU has no such read position — that is the piece to build, and it is
-# a bounded one. Ten shapes eliminated getting here.
+# slopgb's APU has no such read position — that is the piece to build.
+# The boundary is now measured to the cycle. On speedchange_ch2_nr52, the length
+# clock that disables channel 2 runs at interconnect cycle 94238; `1a` reads at
+# 94238 (SAME machine cycle, wants the PRE-clock F2) and `1b` at 94240 (the next
+# one, wants POST-clock F0). So the law is simply: a read in the length clock's
+# own machine cycle sees the pre-clock value.
+# Implementing that as a snapshot latched in `clock_lengths` and cleared at the
+# top of `Apu::tick` does NOT reproduce it — the `_1b`/`_2b` rows break and the
+# `_1a`/`_2a` rows stay broken, so the snapshot's lifetime is not the machine
+# cycle those reads straddle. Getting that lifetime right — probably by keying the
+# snapshot to the interconnect's cycle counter rather than to the APU tick — is
+# the remaining work. Eleven shapes eliminated getting here.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
