@@ -250,6 +250,23 @@ impl Interconnect {
         // double speed; gambatte's cgb04c expectations are this suite's
         // oracle, and the speedchange2/3/4/5 (DS→single) LY families
         // confirm its doubled length.
+        // A STOP whose pause begins inside the M-cycle that services this
+        // line's HBlank block catches the transfer with the core clock already
+        // gated: it aborts with the count latched, FF55 keeping its length bits
+        // and gaining bit 7 (gambatte dma()'s halted path). Landing before that
+        // M-cycle leaves the transfer running; landing after it means the block
+        // already went and the transfer still completes normally.
+        // Pins gambatte/dma/hdma_transition_speedchange_hdmalen{00,01,7f}_* and
+        // hdma_late_m3speedchange_hdma5_scx{1,2}_2 [Cgb], against the `_1` legs
+        // one M-cycle earlier and hdma_m0speedchange_late_m3wakeup_* far later.
+        if entering_ds
+            && self.hdma_mode == HdmaMode::ArmedLcdOn
+            && self.ppu.hdma_period_law()
+            && self.ppu.hdma_block_m_cycle()
+        {
+            self.hdma5 |= 0x80;
+            self.hdma_mode = HdmaMode::Disabled;
+        }
         let dots_per_m: u64 = if self.double_speed { 2 } else { 4 };
         let target = self.cycles + 0x7FFF * dots_per_m;
         if entering_ds && pending_req.is_some() {

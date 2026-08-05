@@ -201,6 +201,29 @@ impl Ppu {
         flip <= self.dot && self.dot < flip + 4
     }
 
+    /// Whether this dot sits inside the M-cycle that services this line's
+    /// HBlank DMA block: the mode-0 flip plus 5 dots, one M-cycle wide. The
+    /// speed-switch pause uses it to tell a STOP that catches the block — the
+    /// transfer aborts, FF55 keeping its length bits and gaining bit 7 — from
+    /// one landing before it (the transfer survives) or long after it (the
+    /// block already went, and the transfer runs on to completion).
+    pub(crate) fn hdma_block_m_cycle(&self) -> bool {
+        if self.line > 143 {
+            return false;
+        }
+        let flip = if self.line_render_done {
+            if self.flip_dot == 0 {
+                return false;
+            }
+            self.flip_dot
+        } else if self.render.active {
+            self.projected_flip_dot()
+        } else {
+            return false;
+        };
+        (flip + 5..flip + 9).contains(&self.dot)
+    }
+
     /// Arm/disarm the SCOPED carried-read exit override (see the
     /// [`Ppu::read_carried`] field). `ack_impl` sets it after a STAT-ISR
     /// read carry; the interconnect clears it once the handler's FF41 read has

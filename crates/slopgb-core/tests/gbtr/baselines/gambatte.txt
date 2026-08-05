@@ -200,8 +200,6 @@ gambatte/dma/hdma_late_m3halt_m2unhalt_inc_scx1_2_cgb04c_out02.gbc [Cgb]
 gambatte/dma/hdma_late_m3halt_m2unhalt_inc_scx2_2_cgb04c_out02.gbc [Cgb]
 gambatte/dma/hdma_late_m3halt_m2unhalt_ly_scx1_4_cgb04c_out03.gbc [Cgb]
 gambatte/dma/hdma_late_m3halt_m2unhalt_ly_scx2_4_cgb04c_out03.gbc [Cgb]
-gambatte/dma/hdma_late_m3speedchange_hdma5_scx1_2_cgb04c_out80.gbc [Cgb]
-gambatte/dma/hdma_late_m3speedchange_hdma5_scx2_2_cgb04c_out80.gbc [Cgb]
 gambatte/dma/hdma_late_m3speedchange_inc_scx1_2_cgb04c_out02.gbc [Cgb]
 gambatte/dma/hdma_late_m3speedchange_ly_scx1_2_cgb04c_out93.gbc [Cgb]
 gambatte/dma/hdma_late_m3speedchange_ly_scx1_4_cgb04c_out93.gbc [Cgb]
@@ -221,48 +219,15 @@ gambatte/dma/hdma_transition_halt_late_unhalt_ldaaimm_hdma_scx1_2_cgb04c_out02.g
 gambatte/dma/hdma_transition_halt_late_unhalt_scx1_1_cgb04c_out00.gbc [Cgb]
 gambatte/dma/hdma_transition_halt_m0unhalt_ldaaimm_scx1_cgb04c_out02.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02.gbc [Cgb]
-# The `hdma_transition_speedchange_hdmalen*_hdma5` rows want exactly `got | 0x80`
-# — bit 7 of FF55, "transfer stopped". The abort that sets it already exists
-# (`hdma.rs`, the `cpu_halted` arm of `run_vram_dma`, whose comment cites these
-# very ROMs) and simply never runs: at the STOP, `pending_req` is None and
-# `in_window` is false, so the in-pause service is skipped. But
-# `hdma_period_law()` is TRUE by the time the pause begins (ly 66, dot 260) —
-# the snapshot is taken about two M-cycles before the skipped-byte read and the
-# internal cycle carry the PPU into the window. Two fixes from there are
-# REFUTED: forcing `cpu_halted` around the in-pause `run_vram_dma` does nothing
-# (that call is not reached), and re-evaluating the window live at the
-# `halt_hdma` snapshot does nothing either (High alone does not set bit 7).
-# Also refuted: servicing an HBlank block DURING the pause. At PAUSE-BEGIN the
-# CPU IS halted (ly 66, dot 260, mode still ArmedLcdOn), so a block serviced
-# there would take the abort arm — but nothing is serviced, the halt gate
-# suppressing requests outright, and forcing one costs 13 rows (5 -> 18) whether
-# it fires once or once per dot. gambatte only fires in-pause when the request
-# was already pending at the STOP, which it is not here. So bit 7 arrives by some
-# route other than a serviced block — look at the wake re-check
-# (`vram_dma_unhalt`), and at whether FF55 bit 7 should read from `hdma_mode`
-# rather than from the stored byte.
-# DERIVED, and the sticking point. The abort boundary is the mode-0 flip plus 5
-# dots — the M-cycle the HBlank block is serviced in. Measured at the pause
-# begin (ly 66), dot / flip / delta / wanted FF55:
-#     late_m3 scx1_1  256 / 255 / 1 / active
-#     late_m3 scx2_1  260 / 256 / 4 / active
-#     late_m3 scx1_2  260 / 255 / 5 / abort
-#     late_m3 scx2_2  264 / 256 / 8 / abort
-#     transition_scx1 260 / 255 / 5 / abort
-# `delta >= 5` separates all five, and applying it (a `m0_block_dot_passed`
-# predicate gating an `hdma5 |= 0x80` + mode Disabled at pause begin) DOES fix
-# all five `hdma_transition_speedchange_hdmalen*` rows. It is not shippable as
-# it stands: it breaks four `late_m3speedchange_hdma5` rows, and the reason is
-# the useful part — `scx1_2`/`scx2_2` want $80 and ALREADY PASS today, so slopgb
-# reaches their bit 7 by some other route, and adding this abort double-counts.
-# Find that route and reconcile the two before installing the predicate. The two
-# `_ds_1` rows want "active" and need the delta boundary re-measured at double
-# speed (2, 3, 4 and 5 were tried; none separates them).
-gambatte/dma/hdma_transition_speedchange_hdmalen00_hdma5_scx1_cgb04c_out80.gbc [Cgb]
-gambatte/dma/hdma_transition_speedchange_hdmalen01_hdma5_scx1_cgb04c_out81.gbc [Cgb]
-gambatte/dma/hdma_transition_speedchange_hdmalen01_hdmadst10_scx1_cgb04c_out00.gbc [Cgb]
-gambatte/dma/hdma_transition_speedchange_hdmalen7f_hdma5_scx1_cgb04c_outFF.gbc [Cgb]
-gambatte/dma/hdma_transition_speedchange_hdmalen7f_hdmadst10_scx1_cgb04c_out00.gbc [Cgb]
+# The speed-switch HDMA abort is SOLVED (see `Ppu::hdma_block_m_cycle`): a STOP
+# whose pause begins inside the M-cycle that services the line's HBlank block —
+# the mode-0 flip plus 5 dots, one M-cycle wide — catches the transfer with the
+# core clock already gated, so it aborts with the count latched and FF55 gains
+# bit 7. Landing before that M-cycle leaves the transfer running; landing after
+# it means the block already went and the transfer completes. Recovered the five
+# `hdma_transition_speedchange_hdmalen*` rows plus
+# `hdma_late_m3speedchange_hdma5_scx{1,2}_2`. Scoped to a STOP that ENTERS double
+# speed: the `_ds_1` legs leave it and want the transfer to survive.
 gambatte/dma/hdma_transition_speedchange_ldaaimm_scx1_cgb04c_outFF.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_ldaaimm_scx1_ds_cgb04c_out03.gbc [Cgb]
 # A block serviced inside the speed-switch pause advances the frozen OAM
