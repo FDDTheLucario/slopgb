@@ -508,6 +508,15 @@ gambatte/window/late_wx_ds_2_cgb04c_out3.gbc [Cgb]
 # raise for these lines runs through the STAT WRITE-trigger path in
 # `stat_irq.rs` (`crossed`/`m0_pending`), not the per-dot event source, and that
 # path is shared with ~30 passing rows. Start there, not in the renderer.
+# Traced end to end since, which sharpens it: on the measurement frame the ROM
+# clears IF at ly1 dot 69, reads it at dot 252 (`_1`, wants 0) or 256 (`_2`,
+# wants 2), and slopgb raises NOTHING in between — its mode-0 raise for that line
+# lands in the following frame. So the requirement is exact: the raise must fall
+# inside (252, 256), which is the bare end (~254) rather than the window-extended
+# flip at 261. The raise is not ack-squashed and no STAT dispatch clears it; the
+# IF path is fine. What does not work is setting `m0_src`/`m0_rise_dot` early —
+# the rise moves but no row changes, so the IF edge is taken somewhere that does
+# not observe it. Find that observer first.
 gambatte/window/m2int_wxA6_m0irq2_2_dmg08_cgb04c_out2.gbc [Cgb]
 gambatte/window/m2int_wxA6_m0irq_2_dmg08_cgb04c_out2.gbc [Cgb]
 gambatte/window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2.gbc [Dmg]
