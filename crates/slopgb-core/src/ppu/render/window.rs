@@ -411,6 +411,23 @@ impl Ppu {
         // below, one phase earlier. CGB only: the DMG leg of each pair wants the
         // window's cost kept (`late_disable_scx{2,3,5}_1` want 0 on CGB and 3 on
         // DMG from one ROM).
+        if self.ds
+            && cgb
+            && !tileno_pending
+            && !matches!(r.phase, FetchPhase::Push | FetchPhase::Hi)
+            && r.bg_count == 0
+        {
+            // Double speed: the clear catching the fetch mid-flight with an
+            // empty FIFO abandons it, and the line no longer waits out the
+            // refetch it was going to need — the same 6 dots a window start
+            // pays. The `_2` legs abort a phase later with a full tile already
+            // queued (`bg_count` 8) and keep their length.
+            // Pins gambatte/window/late_disable_ds_1 and
+            // late_disable_late_scx00_wx{0f,10}_ds_1 [Cgb], which abort at
+            // HiWait against their siblings' TileNoWait.
+            r.lx = r.lx.saturating_add(6);
+            r.win_stalled = false;
+        }
         if cgb && tileno_pending && r.discard > 0 && r.lx == 0 {
             let fine = self.eff.scx & 7;
             let to_boundary = (8 - (fine.wrapping_add(r.lx) & 7)) & 7;
