@@ -496,6 +496,10 @@ gambatte/vram_m3/prewrite_lcdoffset2_1_cgb04c_out1.gbc [Cgb]
 # into (see docs/hardware-state/ppu-window-wy.md), which moves these `scx5_ds`
 # pairs one rung. `late_disable_scx5_ds_1` is SameBoy-FAIL (sb=3, want=0) —
 gambatte/window/late_enable_afterVblank_lcdoffset1_1_cgb04c_out3.gbc [Cgb]
+# Re-measured with failures and recoveries separated (two earlier verdicts this
+# session were misread counts). These hold: extending the DMG re-enable pending
+# rule to CGB double speed recovers nothing, and `late_wx_ds_2` fails with the
+# WX un-catch disabled as well as enabled, so that rule is not implicated in it.
 # `late_reenable_scx5_ds_1`: its SS sibling was recovered by keeping a match that
 # failed on LCDC.5 alive to the activation instant (DMG only — CGB wants the
 # opposite verdict from the same ROM). The double-speed leg does not follow.
