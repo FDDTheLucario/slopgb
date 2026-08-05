@@ -221,6 +221,17 @@ gambatte/dma/hdma_transition_halt_late_unhalt_ldaaimm_hdma_scx1_2_cgb04c_out02.g
 gambatte/dma/hdma_transition_halt_late_unhalt_scx1_1_cgb04c_out00.gbc [Cgb]
 gambatte/dma/hdma_transition_halt_m0unhalt_ldaaimm_scx1_cgb04c_out02.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02.gbc [Cgb]
+# The `hdma_transition_speedchange_hdmalen*_hdma5` rows want exactly `got | 0x80`
+# — bit 7 of FF55, "transfer stopped". The abort that sets it already exists
+# (`hdma.rs`, the `cpu_halted` arm of `run_vram_dma`, whose comment cites these
+# very ROMs) and simply never runs: at the STOP, `pending_req` is None and
+# `in_window` is false, so the in-pause service is skipped. But
+# `hdma_period_law()` is TRUE by the time the pause begins (ly 66, dot 260) —
+# the snapshot is taken about two M-cycles before the skipped-byte read and the
+# internal cycle carry the PPU into the window. Two fixes from there are
+# REFUTED: forcing `cpu_halted` around the in-pause `run_vram_dma` does nothing
+# (that call is not reached), and re-evaluating the window live at the
+# `halt_hdma` snapshot does nothing either (High alone does not set bit 7).
 gambatte/dma/hdma_transition_speedchange_hdmalen00_hdma5_scx1_cgb04c_out80.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_hdmalen01_hdma5_scx1_cgb04c_out81.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_hdmalen01_hdmadst10_scx1_cgb04c_out00.gbc [Cgb]
