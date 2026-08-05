@@ -377,6 +377,13 @@ gambatte/scx_during_m3/scx_0761c0/scx_during_m3_ds_6.gbc [Cgb]
 gambatte/scx_during_m3/scx_attrib_during_m3_spx2_ds.gbc [Cgb]
 gambatte/scx_during_m3/scx_during_m3_spx2.gbc [Cgb]
 gambatte/scx_during_m3/scx_during_m3_spx2_ds.gbc [Cgb]
+# The nine `scy_during_m3_*_ds_*` [Cgb] rows: five miss by exactly ONE TILE
+# (8 px) and the rest by a few, so the mid-mode-3 SCY write reaches the map row
+# one fetch off. It is NOT the sampling lead: `map_scy_formed` gives double speed
+# d = 0 against single speed's 1-2, and raising it to 1 or 2 breaks five rows that
+# pass today (ds_1, ds_4, ds_7, spx08_ds_1, spx08_ds_2) without fixing any of
+# these. Note the ring is indexed per FETCHER STEP, not per tile — eight steps
+# wrap a slot, so a lead of 1-2 moves the sample inside the same tile fetch.
 gambatte/scy/scy_during_m3_ds_3.gbc [Cgb]
 gambatte/scy/scy_during_m3_spx08_ds_3.gbc [Cgb]
 gambatte/scy/scy_during_m3_spx08_ds_4.gbc [Cgb]
