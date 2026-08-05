@@ -440,6 +440,14 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # NOT transfer: giving the APU the same +4 T divider view before its own
 # `div_write` costs a row (20 -> 21). The rest are two `ly44_m3_stat` and one
 # `nop_m2int_m3stat_scx1`.
+# Three APU shapes refuted, plus a trace that narrows it: evaluating the STOP
+# div_write edge with the NEW speed's bit costs a row (20 -> 21), suppressing the
+# entering-side div_event the way the leaving side does costs a row, and giving
+# the APU the timer's +4 T divider view costs a row. The ch2_nr52 siblings run
+# the SAME number of frame-sequencer events (649 each), so the divergence is not
+# the event count — it is where the ROM's NR24 length-enable write falls relative
+# to a length step. That is the extra-length-clock quirk meeting the switch, not
+# the divider pacing.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
