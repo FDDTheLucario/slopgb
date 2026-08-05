@@ -73,10 +73,6 @@ work built from it stay free on the same terms. That is why slopgb is GPL-2.0,
 and it seems a small thing to give back for what the source taught this project
 about the parts of the hardware nobody documented.
 
-An earlier version of this file called gambatte "studied, not copied" and
-claimed no obligation followed. That was wrong; the license was corrected to
-GPL-2.0-only as soon as the comments were read properly.
-
 <https://github.com/sinamas/gambatte> — GPL-2.0. Its test ROMs are run through a
 harness written here against the documented `testrunner.cpp` protocol; no
 gambatte source files are vendored.
