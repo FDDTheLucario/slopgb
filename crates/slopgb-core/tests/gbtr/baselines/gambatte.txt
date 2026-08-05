@@ -241,6 +241,23 @@ gambatte/dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02.gbc [Cgb]
 # route other than a serviced block — look at the wake re-check
 # (`vram_dma_unhalt`), and at whether FF55 bit 7 should read from `hdma_mode`
 # rather than from the stored byte.
+# DERIVED, and the sticking point. The abort boundary is the mode-0 flip plus 5
+# dots — the M-cycle the HBlank block is serviced in. Measured at the pause
+# begin (ly 66), dot / flip / delta / wanted FF55:
+#     late_m3 scx1_1  256 / 255 / 1 / active
+#     late_m3 scx2_1  260 / 256 / 4 / active
+#     late_m3 scx1_2  260 / 255 / 5 / abort
+#     late_m3 scx2_2  264 / 256 / 8 / abort
+#     transition_scx1 260 / 255 / 5 / abort
+# `delta >= 5` separates all five, and applying it (a `m0_block_dot_passed`
+# predicate gating an `hdma5 |= 0x80` + mode Disabled at pause begin) DOES fix
+# all five `hdma_transition_speedchange_hdmalen*` rows. It is not shippable as
+# it stands: it breaks four `late_m3speedchange_hdma5` rows, and the reason is
+# the useful part — `scx1_2`/`scx2_2` want $80 and ALREADY PASS today, so slopgb
+# reaches their bit 7 by some other route, and adding this abort double-counts.
+# Find that route and reconcile the two before installing the predicate. The two
+# `_ds_1` rows want "active" and need the delta boundary re-measured at double
+# speed (2, 3, 4 and 5 were tried; none separates them).
 gambatte/dma/hdma_transition_speedchange_hdmalen00_hdma5_scx1_cgb04c_out80.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_hdmalen01_hdma5_scx1_cgb04c_out81.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_hdmalen01_hdmadst10_scx1_cgb04c_out00.gbc [Cgb]
