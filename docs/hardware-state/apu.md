@@ -229,3 +229,75 @@ by the *zero-switch* rungs `ch1_duty0_pos6_to_pos7_timing_ds_{5,6}` and
 `speedchange_ch1_nr4init_...`, which have no pause between trigger and
 retrigger, and both score `+6/−6` and `+10/−5` on the corpus: they take
 same-suite `channel_1/2_align{,_cpu}` with them. The `- lf_div` term stays.
+
+## The lazy-advance rewrite (specified, not built)
+
+The fifteen `speedchange` APU rows need a change to how the APU is *driven*, not
+to any rule inside it. Sixteen shapes were tried against them and every one
+failed; the reason is structural and is written up in the class notes of
+`tests/gbtr/baselines/gambatte.txt`.
+
+### Why the current model cannot express them
+
+slopgb ticks the APU eagerly: `Interconnect::tick_machine` calls
+`Apu::tick(div, ds)` once per machine cycle, which detects the DIV-APU edge (and
+with it clocks lengths) and then advances the channels four dots, or two in
+double speed. Register accesses happen *after* that tick, so a read always
+observes the whole machine cycle including any length clock inside it.
+
+gambatte advances lazily instead. `memory.cpp` case `0x26` — the NR52 read —
+calls `psg_.generateSamples(cc, isDoubleSpeed())` first, and `sound.cpp`:
+
+```cpp
+unsigned long const cycles = (cpuCc - lastUpdate_) >> (1 + doubleSpeed);
+lastUpdate_ += cycles << (1 + doubleSpeed);
+```
+
+The PSG is brought up to the read's own CPU cycle, truncated to a whole APU
+granule — two CPU cycles per step at single speed, four at double. A read
+landing inside a granule sees the APU as of that granule's start, so it can
+observe state from *before* a length clock that the machine cycle already
+contains. Two reads one machine cycle apart therefore straddle the clock, which
+is exactly what `ch2_nr52_1a` (wants the channel still on) and `_1b` (wants it
+off) measure.
+
+Crucially the length counters advance *with* the channels in gambatte
+(`length_counter.cpp` events run from the channel's own update), not from an
+eager frame sequencer. That is why the length state can lag a machine cycle
+while the divider does not.
+
+### The change
+
+1. Give `Apu` a `last_update` cycle and an `advance_to(cc, ds)` that runs
+   `(cc - last_update) >> (1 + ds)` granules and stores the truncated
+   `last_update` back. Move the channel stepping and the length counters onto
+   it.
+2. Stop calling `Apu::tick` from `tick_machine`. Call `advance_to` from the
+   three places that observe APU state: the `0xFF10..=0xFF3F` read and write
+   arms in `interconnect/memory.rs`, and wherever audio samples are drained.
+3. Keep the DIV-APU edge where it is — driven by the divider per machine cycle —
+   but let it *schedule* the frame-sequencer step rather than perform it, so the
+   step lands when `advance_to` reaches its granule.
+4. `speed_lag` (the one-machine-cycle single-speed pace after a switching STOP)
+   becomes an offset on the first granule after the switch.
+5. Save state gains `last_update` and any pending step; `STATE_VERSION` bumps.
+
+### Verification, in order
+
+Each step must hold the previous gate before the next begins.
+
+- `cargo test -p slopgb-core --lib apu` — the unit tests are the tightest net.
+- blargg `dmg_sound` and `cgb_sound` — the acceptance bar; both currently pass.
+- The 164 `gambatte/sound/` ROMs — ~50 pass today and are the first thing a
+  timing shift will break.
+- `same_suite` APU rows, then the full `gbtr` battery and `golden_fingerprint`.
+
+### What is already ruled out
+
+Do not retry these; each is measured, with numbers in the baseline notes:
+deferring the length clock a machine cycle, deferring the whole APU step,
+snapshotting pre-clock bits at the read (plain, cycle-keyed, speed-scoped and
+granule-scoped), shifting the APU's divider view, moving the div_write edge,
+suppressing the entering-side div event, and stepping the frame sequencer at
+T-cycle granularity. The last of those is the useful negative: resolution is not
+the problem, the observation point is.
