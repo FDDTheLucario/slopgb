@@ -555,6 +555,17 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # why two reads identical in cycle, divider phase and speed still want opposite
 # answers — they sit at different offsets INSIDE the granule, and slopgb does not
 # represent that offset at all.
+# Approximating it at the read is REFUTED: snapshotting the pre-length-clock
+# channel bits and returning them when the read lands inside the granule
+# (`cycles % g != 0`, g swept 2/4/8) is net negative every time — 2/6, 4/10,
+# 5/21 recovered against broken. It has to be: `generateSamples` advances the
+# WHOLE PSG to the read's cycle, so duty position, envelope and sweep all move
+# with it, and patching only the length bits desynchronises the rest.
+# The real fix is adopting the lazy model — hold a `last_update` cycle, advance
+# the APU on demand to `(cc - last_update) >> (1 + ds)` granules whenever a
+# sound register is read or written, and stop ticking it eagerly per machine
+# cycle. That is a restructure of how the APU is driven rather than a patch, and
+# it is the shape the remaining fifteen rows need.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
