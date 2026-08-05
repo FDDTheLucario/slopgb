@@ -15,6 +15,20 @@ Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 ----------------------------------------------------------------------------
 
+slopgb is GPL-2.0 by inheritance rather than by policy. Parts of its core —
+the DMA engines and the STAT interrupt model, chiefly — were written from
+gambatte's source, and gambatte (Sindre Aamås) is GPL-2.0 — released on the
+condition that anything built from it stays free on the same terms. That is a
+fair price for what the source explains about hardware nobody else documented.
+
+Everything the emulator knows it learned from someone: SameBoy (Lior Halphon,
+Expat/MIT) for the timing model it ports, mooneye and gb-ctr (Gekkio) for the
+tests and the CPU reference, Pan Docs for the rest, and a long list of people
+who wrote test ROMs so the next person would not have to guess. Their notices
+and the full account are in THIRD_PARTY_LICENSES.md.
+
+----------------------------------------------------------------------------
+
 GNU GENERAL PUBLIC LICENSE
 Version 2, June 1991
 
