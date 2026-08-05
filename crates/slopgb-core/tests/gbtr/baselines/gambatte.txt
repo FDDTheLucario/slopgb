@@ -453,6 +453,15 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # `Apu::next_step_clocks_length`, plain divider parity — and the switch's
 # `div_write` both advances that divider and clocks lengths, so it moves the
 # parity a later NRx4 write is judged against. That coupling is where to look.
+# Traced, and it moves the target again: the ch2_nr52 NRx4 writes land BEFORE the
+# switch (div_divider 0, next_step_clocks_length true, prev_div 0x0FFC so bit 12
+# is clear and the switch raises no div_event at all). Both siblings are
+# byte-identical in slopgb at that point, so the phase at the write is NOT what
+# separates them — hardware's frame-sequencer step boundary must fall between the
+# two writes, four T apart, where slopgb puts both in one step. Shifting the APU's
+# divider view does not express that: +4/+8 costs eight rows, -1/-2/-4 costs five.
+# So the boundary is inside the FS step placement, not a constant offset applied
+# to the divider it reads.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
