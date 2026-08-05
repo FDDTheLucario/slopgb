@@ -511,8 +511,20 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # `_b` read at the same offset. That is the last unknown — everything else about
 # this family is now measured. Twelve shapes eliminated.
 # Speed is NOT that discriminator: scoping the rule to single speed costs six
-# more rows (20 -> 26), and both the fixed `_a` set and the broken `_b` set
-# contain single- and double-speed members. Thirteen shapes eliminated.
+# more rows (20 -> 26) — but scoping it to DOUBLE speed is nearly right, and the
+# measurement behind that is the useful part. Clock cycle against read cycle:
+#   speedchange  _1a  read 94238, clock 94238 (same), DS, wants PRE
+#   speedchange  _1b  read 94240, clock 94238,        DS, wants POST
+#   speedchange2 _1a  read 225507, clock 209127,      SS, wants PRE
+#   speedchange2 _1b  read 225511, clock 225511 (same), SS, wants POST
+# So a same-cycle read wants PRE in double speed and POST in single — the machine
+# cycle is two dots against four, so the read sits ahead of the clock only in DS.
+# The DS-scoped rule recovers four speedchange rows (20 -> 16) but breaks four
+# gambatte/sound DS rows (ch2_late_div_write_nr52_ds_1b/2b, ch2_late_reset_nr52
+# _ds_1b, ch2_reset_length_counter_timing_nr52_ds_2) which are ALSO same-cycle DS
+# reads and want POST. The one thing separating those from the speedchange ones is
+# that the speedchange reads follow a speed SWITCH. That is the last discriminator
+# to pin. Fourteen shapes eliminated.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
