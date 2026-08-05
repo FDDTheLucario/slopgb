@@ -1,4 +1,4 @@
-slopgb — next task: the nine `ch1_duty0_pos6_to_pos7_timing` rows
+slopgb — next task: the twelve `ch1_duty0_pos6_to_pos7_timing` rows
 
 ## Repo state (verified 2026-08-05)
 
@@ -10,8 +10,9 @@ gbtr **221/221**; mooneye **93/93** suite tests (439/439 rom×model); core lib
 
 gambatte baseline **250 keys**; **349** baselined floor cases across all suites
 (read the floor-class index header in `tests/gbtr/baselines/gambatte.txt` before
-touching any baselined row). Remaining `speedchange` APU rows: the nine
-`ch1_duty0_pos6_to_pos7_timing` variants. The six `ch2_nr52` rows are GONE.
+touching any baselined row). Remaining APU rows: twelve
+`ch1_duty0_pos6_to_pos7_timing` variants (eleven in `speedchange/`, one in
+`sound/`). The six `ch2_nr52` rows are GONE.
 
 The project is GPL-2.0-only, so gambatte's source is readable on compatible
 terms and *was* read to derive both this task and the last one. Clone it outside
@@ -38,9 +39,22 @@ Score **+7 / −0**: all six `speedchange*_ch2_nr52_*a` rows plus age
 `spsw-ch2-lc-delay-cgbBCE`. With both grid re-anchors disabled the model is
 byte-identical to the eager clock (verified by running the matrix that way).
 
-## TARGET — the nine duty rows
+## TARGET — the twelve duty rows
 
-They turn on whether the leaving re-anchor also hands the APU the granule
+**Measured per ROM, not inferred** (probe: 16 frames on CGB, read
+`ch1.duty_pos` at the end — the kernel freezes it, so it IS the verdict; duty 0
+is high on position 7 only). All 22 `_1` rungs sit on 6 and every one is
+correct; every `_2` rung is on 7 (pass) or 6 (fail). Each failure is therefore
+the same single 2 MHz cycle, and **every uniform shift is refuted a priori** —
+advancing the duty unit a granule everywhere puts all 22 `_1` rungs on 7.
+
+The enter-side pace is settled by construction, not by sweep:
+`Apu::set_double_speed_lag` gives the entering STOP one granule more than
+gambatte's `generateSamples(cc + 8, old speed)` jump. Removing it drops every
+`_2` rung one (the passing ones fail); adding another raises every `_1` rung one
+(those fail). It is already at its only two-sided-correct value.
+
+The remaining lever turns on whether the leaving re-anchor also hands the APU the granule
 **debt** gambatte's `lastUpdate_ -= ds` implies. Measured, two-sided:
 
 | leave re-anchor | score |
@@ -56,12 +70,17 @@ and 3 and to be in step after enter 2, which forces the leave to flip parity,
 and every parity-flipping shift gives speedchange2..5 the same delta. Swept
 enter 0..4 × leave 0..3 (20 points, full matrix each): best net +6.
 
-**The lever is whatever separates a second leave from a first.** The unmodelled
-candidate named in the source is the frame-sequencer re-base gambatte does on
-the ENTERING side — `cycleCounter_ = cc - divCycles/2 - lastUpdate_ % 2`
-(`PSG::speedChange`) — which is keyed on the grid's parity and has no
-counterpart here because slopgb derives the frame sequencer from DIV rather than
-from the PSG's own counter. Start there, not on another shift sweep.
+**The lever is whatever separates a second leave from a first**, and it is finer
+than the granule the model runs on. Before spending a session on gambatte's
+entering-side FS re-base (`cycleCounter_ = cc - divCycles/2 - lastUpdate_ % 2`,
+`PSG::speedChange`): the DIV reset immediately preceding it leaves `divCycles`
+at the four granules the `cc + 8` jump just ran, so the expression reduces to
+pulling the PSG counter back two granules plus the grid's parity, and it moves
+the frame sequencer *relative to the channels*. The duty rows measure the
+channels alone, so that is probably the length/envelope side's lever, not
+theirs — and that side is already green. Rebuild the duty-position probe first
+(it is ~50 lines against `gb.bus.apu()` from an in-crate test) and measure where
+the expiry sits against each rung's retrigger; do not sweep a scalar again.
 
 ## Constraints
 
@@ -90,6 +109,9 @@ from the PSG's own counter. Start there, not on another shift sweep.
 - **A `_1`/`_2` pair is two granules apart in single speed**, one in double. A
   one-granule move therefore flips only one of a single-speed pair — which is
   why "+1 step" broke four `_1` rows without touching their `_2` siblings.
+- **Read the frozen state, not the verdict.** The pass/fail bit hides the
+  distance; `ch1.duty_pos` gives it directly and killed a whole class of
+  candidate fixes in one run.
 - **Restore baselines with `git checkout --`, never a `/tmp` copy.**
 
 ## Last session

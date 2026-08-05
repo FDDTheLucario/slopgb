@@ -282,12 +282,39 @@ was verified, by running the gambatte matrix with the grid pinned in step.
 
 Save state carries `lag` and the pending edge; `STATE_VERSION` is 18.
 
-### Residual: the nine `ch1_duty0_pos6_to_pos7_timing` rows
+### Residual: the twelve `ch1_duty0_pos6_to_pos7_timing` rows
 
-They turn on whether the leaving re-anchor also hands the APU the granule
-**debt** gambatte's subtraction implies. slopgb re-anchors at the STOP's toggle,
-a machine cycle ahead of where gambatte times it, so the grid can move without
-one. Measured on top of the shipped model, and two-sided:
+Eleven in `speedchange/` plus `sound/ch1_duty0_pos6_to_pos7_timing_ds_6`.
+
+**Measured, per ROM** (probe: run the suite's 16 frames on CGB, read
+`ch1.duty_pos` at the end — the kernel freezes it, so it *is* the verdict; duty 0
+is high on position 7 only, `_outaudio1` ⇔ 7):
+
+- all 22 `_1` rungs sit on 6 and all of them are correct;
+- every `_2` rung is on 7 (pass) or 6 (fail) — nothing else, on any row.
+
+So each failure is the same one 2 MHz cycle: the duty expiry lands *after* the
+`_2` rung's retrigger instead of between the two rungs. That kills every uniform
+shift a priori, without running one — advancing the duty unit a granule
+everywhere puts all 22 `_1` rungs on 7 and fails them. The fix has to move the
+expiry in the twelve failing configurations only, and the `_1` rungs are the
+two-sided bracket that says how far: one machine cycle, no more.
+
+The twelve are not separated by any single structural key. Ends-in-double-speed
+holds for ten of them but `sound` `ds_2`/`ds_4` and all three `speedchange5`
+rungs end there and pass; switch count splits 1/2/3 failing against 4/5 passing;
+the `nop` position, the frequency ($C0 vs $E0) and the final grid parity each cut
+across both sets.
+
+The enter-side pace is NOT the lever, and that is now settled by construction
+rather than by sweep. `Apu::set_double_speed_lag` gives the entering STOP one
+granule more than gambatte's `generateSamples(cc + 8, old speed)` jump does.
+Removing that granule moves every `_2` rung down one — the passing ones fail;
+adding a second moves every `_1` rung up one — those fail. The knob is already at
+its only two-sided-correct value (+8/−0 when it landed), so the residual is not
+a per-switch pace term.
+
+The leave-side debt is the one lever that moves rows, and it is bracketed:
 
 | leave re-anchor | score |
 |---|---|
@@ -303,11 +330,16 @@ parity-flipping shift gives speedchange2..5 the same granule delta while the
 duty rows want +1 for 2/3 and 0 for 4/5. Swept enter 0..4 x leave 0..3 (20
 points): best net +6, and only the shipped shape is regression-free.
 
-The lever left is whatever separates a second leave from a first. The unmodelled
-candidate is the frame-sequencer re-base gambatte does on the *entering* side —
-`cycleCounter_ = cc - divCycles/2 - lastUpdate_ % 2` (`PSG::speedChange`), keyed
-on the grid's parity — which has no counterpart here because slopgb derives the
-frame sequencer from DIV rather than from the PSG's own counter.
+What is left is a per-configuration term finer than the granule the model runs
+on. The unmodelled candidate named in gambatte's source is the frame-sequencer
+re-base on the *entering* side — `cycleCounter_ = cc - divCycles/2 -
+lastUpdate_ % 2` (`PSG::speedChange`) — but read it before spending a session on
+it: the DIV reset immediately preceding it leaves `divCycles` at the four
+granules the `cc + 8` jump just ran, so the whole expression reduces to pulling
+the PSG counter back two granules plus the grid's parity, and it moves the frame
+sequencer *relative to the channels*. The duty rows measure the channels alone,
+so it is unlikely to be their lever — it belongs to the length/envelope side,
+which is already green.
 
 ### What is already ruled out
 

@@ -581,8 +581,18 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # speed) and `PSG::speedChange` (`lastUpdate_ -= ds`: only the LEAVING direction
 # moves it). With the grid in step the whole model is byte-identical to the eager
 # clock — verified by running the matrix with both re-anchors disabled.
-# The nine `ch1_duty0_pos6_to_pos7_timing` rows are NOT cleared and are bracketed
-# two-sided by that leave. They turn on whether the re-anchor also hands the APU
+# The twelve `ch1_duty0_pos6_to_pos7_timing` rows (eleven here plus sound/
+# ch1_duty0_pos6_to_pos7_timing_ds_6) are NOT cleared, and they are now measured
+# per ROM rather than inferred: reading ch1.duty_pos at the end of the suite's 16
+# frames (the kernel freezes it, so it IS the verdict) puts all 22 `_1` rungs on
+# position 6 — every one correct — and every `_2` rung on 7 (pass) or 6 (fail).
+# So each failure is the same single 2 MHz cycle, and every UNIFORM shift is
+# refuted without running one: advancing the duty unit a granule everywhere puts
+# all 22 `_1` rungs on 7 and fails them. The enter-side pace is settled too, by
+# construction: `Apu::set_double_speed_lag` gives the entering STOP one granule
+# more than gambatte's `generateSamples(cc + 8, old speed)`; removing it drops
+# every `_2` rung one (the passing ones fail), adding another raises every `_1`
+# rung one (those fail). What is left is bracketed two-sided by the leave. They turn on whether the re-anchor also hands the APU
 # the granule DEBT gambatte's subtraction implies (slopgb re-anchors an M-cycle
 # earlier than gambatte times it, so the grid can move without one). Measured, on
 # top of the shipped model:
