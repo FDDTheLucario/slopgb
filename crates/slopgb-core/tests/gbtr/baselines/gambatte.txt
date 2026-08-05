@@ -470,6 +470,19 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # contract allows. Seven shapes eliminated on this family now; the next attempt
 # should question the CONTRACT (when the write samples the APU) rather than the
 # APU's own resolution.
+# Traced to the exact instant. For ch2_nr52 the NR52 READ lands at FS divider 3,
+# in the same machine cycle as the length clock that disables channel 2 — and
+# under tick-then-access the read always sees the post-clock state, so slopgb
+# returns F0 for BOTH siblings. Hardware separates them there: the `1a` read
+# falls before that length clock (F2), the `1b` read after it (F0). So the whole
+# family is one ordering question — the CPU read versus the length clock inside
+# one machine cycle — not divider pacing, not FS resolution.
+# Two more shapes eliminated: shifting which step the NRx4 write samples
+# (both directions cost eight rows, and they are blargg-pinned), and deferring
+# the length clock by one machine cycle (20 -> 22). Eight eliminations total.
+# What is left is the tick order itself: the APU is stepped for the whole machine
+# cycle before the access commits. Changing that touches every subsystem, so it
+# wants its own session and a full-matrix guard, not a patch here.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
