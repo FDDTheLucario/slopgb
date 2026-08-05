@@ -510,6 +510,9 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # equality is not the whole discriminator: something separates an `_a` read from a
 # `_b` read at the same offset. That is the last unknown — everything else about
 # this family is now measured. Twelve shapes eliminated.
+# Speed is NOT that discriminator: scoping the rule to single speed costs six
+# more rows (20 -> 26), and both the fixed `_a` set and the broken `_b` set
+# contain single- and double-speed members. Thirteen shapes eliminated.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
