@@ -462,6 +462,14 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # divider view does not express that: +4/+8 costs eight rows, -1/-2/-4 costs five.
 # So the boundary is inside the FS step placement, not a constant offset applied
 # to the divider it reads.
+# Stepping the frame sequencer at T-cycle granularity — splitting the DIV-APU
+# edge out of `Apu::tick` and running it four times per machine cycle while the
+# channels still advance once — is NEUTRAL (20 either way). That rules the
+# granularity out: under tick-then-access the NRx4 write already observes the APU
+# stepped through the whole preceding machine cycle, which is as fine as the
+# contract allows. Seven shapes eliminated on this family now; the next attempt
+# should question the CONTRACT (when the write samples the APU) rather than the
+# APU's own resolution.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
