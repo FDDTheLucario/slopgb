@@ -408,6 +408,12 @@ g++ -O1 -fno-exceptions -fno-rtti -DHAVE_STDINT_H \
     $(find libgambatte/src -name '*.cpp' | grep -vE 'cinterface|file_zip')
 ```
 
+SameBoy builds the same way — `make tester -j4 CONF=release`, which needs RGBDS
+for its boot ROMs (`rgbasm`/`rgblink`) and produces a headless
+`build/bin/tester/sameboy_tester <rom>`. Printing
+`square_channels[0].current_sample_index` in the `Core/apu.c` NRx4 trigger gives
+its frozen duty position directly.
+
 `main.cpp` is a dozen lines against `gambatte.h` (`GB::load`, `runFor` in a
 loop). Counting granules in `PSG::generateSamples` and printing in
 `DutyUnit::nr4Change` + `PSG::speedChange` gives the reference timeline;
@@ -455,7 +461,54 @@ rows that broke. Fix them in that order, re-measuring between each — and settl
 the reload against SameBoy first, since same-suite pins it and gambatte does
 not get to overrule that.
 
-#### The blocker: SameBoy and gambatte disagree by one 2 MHz cycle (2026-08-05)
+#### CLOSED: the twelve rows are a three-way reference disagreement (2026-08-05)
+
+Both references were built, instrumented and run on the same ROMs. On
+`speedchange3`, the frozen channel-1 duty position (duty 0 is high on index 7
+only, and all three use the same duty table):
+
+| | `_1` rung (wants pos != 7) | `_2` rung (wants pos == 7) |
+|---|---|---|
+| gambatte | 6 — pass | 7 — pass |
+| **SameBoy** | **7 — FAIL** | 7 — pass |
+| slopgb | 6 — pass | **6 — FAIL** |
+
+**SameBoy does not pass these ROMs either.** It misses the `_1` rung by being
+one 2 MHz cycle *ahead* of gambatte, exactly as we miss `_2` by being one
+*behind*. So the family is not a slopgb defect to chase: it is a disagreement
+between the two references, with gambatte's hardware-verified cgb04c
+expectation sitting between them. Class G (upstream tie-break needed), not a
+timing floor.
+
+Our value is already SameBoy's, and that is now provable rather than empirical.
+SameBoy (`Core/apu.c`, NRx4 trigger) uses
+
+```c
+delay = 6 + lf_div * (model < GB_MODEL_CGB_D && cgb_double_speed ? 1 : -1);
+```
+
+— the `+lf_div` sign on CGB <= C in double speed that this port deliberately
+drops. Both SameBoy and gambatte sample the write at the machine cycle's
+START (SameBoy's `cycle_write` advances 3, writes, then advances 1;
+gambatte's `FF_WRITE` timestamps at `cc` before `cc += 4`), while
+tick-then-access samples at the END — one `lf_div` toggle later in double
+speed, where the APU advances one granule per machine cycle. Substituting
+`lf_div_start = 1 - lf_div_end` and removing the granule already run:
+
+```
+SameBoy   base + 6 + lf_div_start - 1  ==  base + 6 - lf_div_end   <- what we ship
+gambatte  base + 4 - align_start  + 1  ==  base + 4 + lf_div_end
+```
+
+So the dropped sign flip is not a fudge, it is the exact compensation for the
+observation point, and the two references differ by `2 - 2*lf_div` — zero when
+`lf_div` is 1, two granules when it is 0. Measured, that difference is worth
++5/−4 on the family and −5 same-suite rows.
+
+Every lever below was measured against both oracles before this was understood;
+the table stands as the record of what each costs.
+
+#### The measurement table
 
 Every lever that moves the twelve rows was measured against both oracles. The
 gambatte column is the duty family only (`SLOPGB_GBTR_FILTER=duty0_pos6`); the

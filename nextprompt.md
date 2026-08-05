@@ -1,4 +1,4 @@
-slopgb — the twelve `ch1_duty0_pos6_to_pos7_timing` rows are BLOCKED (read below first)
+slopgb — APU duty family CLOSED (class G); next is the merge + the PPU clusters
 
 ## Repo state (verified 2026-08-05)
 
@@ -39,44 +39,42 @@ Score **+7 / −0**: all six `speedchange*_ch2_nr52_*a` rows plus age
 `spsw-ch2-lc-delay-cgbBCE`. With both grid re-anchors disabled the model is
 byte-identical to the eager clock (verified by running the matrix that way).
 
-## TARGET — the twelve duty rows (blocked on a cross-oracle conflict)
+## The twelve duty rows are CLOSED — do not chase them
 
-**Read `docs/hardware-state/apu.md` §"The blocker" first.** The cause is fully
-localized, by differencing against a built + instrumented gambatte (build recipe
-in that file — one `g++` line): the whole family is one 2 MHz cycle in the
-INACTIVE TRIGGER's reload. gambatte lands the first duty step `period + 4 -
-align` granules after the trigger; we land at `period + 5 - lf_div`. Every
-measured lever:
+Both references were built, instrumented and run on the same ROMs
+(recipes in `docs/hardware-state/apu.md`; gambatte is one `g++` line, SameBoy is
+`make tester` and needs RGBDS, which this box has). Frozen ch1 duty position on
+`speedchange3` — duty 0 is high on index 7 only, and all three share a duty
+table:
 
-| lever | duty fixed | duty broken | same-suite broken |
-|---|---|---|---|
-| inactive delay −1, single speed only | 6 | 4 | 1 ([Agb]) |
-| inactive delay −1, double speed only | 5 | 2 | **7** |
-| both speeds | 11 | 6 | **7** |
-| `lf_div` flipped in double speed (SameBoy's CGB ≤ C rule) | 4 | 2 | **7** |
-| gambatte's full alignment form | 4 | 2 | **7** |
-| granule-accounting corrections | 0 | 0 | 0 |
-| double-speed PCM read offset | 0 | 0 | 0 |
+| | `_1` rung (wants != 7) | `_2` rung (wants == 7) |
+|---|---|---|
+| gambatte | 6 pass | 7 pass |
+| **SameBoy** | **7 FAIL** | 7 pass |
+| slopgb | 6 pass | **6 FAIL** |
 
-The seven are `channel_1/2_align`, `_align_cpu`, `_duty` and
-`channel_1_freq_change_timing-A` — all SameBoy-passing, so the cross-oracle rule
-keeps SameBoy's value. Compensating the delay after flipping `lf_div` recovers
-three and leaves `channel_1/2_align` + `_duty`, which proves what they pin is the
-double-speed trigger delay itself — the quantity gambatte wants one shorter.
+**SameBoy fails these ROMs too**, one 2 MHz cycle in the opposite direction from
+us. Class G (upstream tie-break needed), not a timing floor and not ours to fix.
+Our value is provably SameBoy's: SameBoy's `delay = 6 + lf_div * (model <
+CGB_D && double_speed ? 1 : -1)` sampled at the machine-cycle START equals the
+`base + 6 - lf_div` we sample at the END, once the granule already run is
+removed. Adopting gambatte's value instead costs seven same-suite rows SameBoy
+passes.
 
-**Do not re-run this sweep.** The open question is a third quantity that makes
-one of the two hardware-verified suites read wrong here; the two testable
-candidates (the alignment bit, the register-read observation point) are both
-excluded above. Hardware evidence, or SameBoy's and gambatte's handling of the
-same ROM traced side by side, is what moves this next.
+Re-open only on hardware evidence. Everything measured is tabulated in apu.md;
+the sweep does not need repeating.
 
-Two traps worth carrying forward. `lf_div` derives from the APU's granule
-parity, so a one-granule clock change flips it and moves the trigger delay the
-other way — **levers do not compose**, always re-measure a combination. And the
-granule accounting has two compensating errors (the enter grants one extra
-granule, the leave withholds the debt gambatte pays); correcting both is exact
-against gambatte and precisely neutral on the corpus, and is the right substrate
-for any further attempt even though it buys no row on its own.
+## What is actually next
+
+1. **Merge this branch to `main`** — it is +7 rows, verified, six commits.
+2. **The remaining gambatte baseline is 250 keys**, biggest clusters `dma` 44,
+   `m1` 20, `lcd_offset` 19, `lycEnable` 17, `sprites` 13. Mostly class A/B
+   (double-speed sub-cycle phase) — the same structural shape the granule grid
+   just cracked for the APU, so the differencing rig is worth pointing at the
+   PPU side next.
+3. Optional substrate: the granule-accounting corrections (below) make the APU
+   match gambatte segment-for-segment and are corpus-neutral. Ship them only if
+   a future lever needs them; they cost a full golden recapture.
 
 ## Constraints
 

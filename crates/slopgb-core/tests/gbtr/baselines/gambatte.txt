@@ -600,7 +600,8 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # per-switch accumulating term generates (k=3 and k=4 share their two enters and
 # differ only by a trailing leave; k=2 and k=3 differ by an enter yet want the
 # same). Suspect the per-switch-count FRAME: each rung carries its own `dec b`
-# delay constant, so disassemble the kernels before fitting another term. They turn on whether the re-anchor also hands the APU
+# delay constant, so disassemble the kernels before fitting another term.
+# The leave-side lever turns on whether the re-anchor also hands the APU
 # the granule DEBT gambatte's subtraction implies (slopgb re-anchors an M-cycle
 # earlier than gambatte times it, so the grid can move without one). Measured, on
 # top of the shipped model:
@@ -617,10 +618,24 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # every parity-flipping shift gives all of speedchange2..5 the same granule delta
 # while the duty rows want +1 for 2/3 and 0 for 4/5. Swept: enter 0..4 x leave
 # 0..3, best net +6 (20 points, none zero-regression except the shipped shape).
-# The next lever is what separates a second leave from a first — the FS-phase
-# re-base gambatte does on the ENTERING side (`cycleCounter_ = cc - divCycles/2
-# - lastUpdate_ % 2`, sound.cpp), which is grid-parity-keyed and not modelled
-# here because slopgb derives the frame sequencer from DIV instead.
+# CLOSED as CLASS G (upstream tie-break needed), 2026-08-05. Both references
+# were built, instrumented and run on these ROMs, and SAMEBOY FAILS THEM TOO.
+# Frozen ch1 duty position on speedchange3 (duty 0 is high on index 7 only, and
+# all three share a duty table): gambatte 6/7 passes both rungs, SameBoy 7/7
+# fails the `_1` rung by one 2 MHz cycle in the OPPOSITE direction from us,
+# slopgb 6/6 fails `_2`. Not a slopgb defect to chase.
+# Our value is provably SameBoy's. SameBoy (Core/apu.c, NRx4 trigger) uses
+# `delay = 6 + lf_div * (model < CGB_D && double_speed ? 1 : -1)` and samples
+# the write at the machine cycle START (cycle_write advances 3, writes, advances
+# 1), as gambatte does (FF_WRITE timestamps before `cc += 4`); tick-then-access
+# samples at the END, one lf_div toggle later in double speed. Substituting
+# lf_div_start = 1 - lf_div_end and removing the granule already run turns
+# SameBoy's form into the `base + 6 - lf_div` we ship and gambatte's into
+# `base + 4 + lf_div`, so the dropped CGB<=C sign flip is the exact
+# compensation for the observation point, not a fudge. The two references
+# differ by `2 - 2*lf_div`; taking gambatte's costs 5 same-suite rows.
+# Re-open only on hardware evidence. Full lever table + the build recipes for
+# both reference emulators: docs/hardware-state/apu.md.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
