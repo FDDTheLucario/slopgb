@@ -56,6 +56,21 @@ impl Ppu {
         // SameBoy's own activation instant (see `Render::win_pending_until`),
         // so a WY write landing in between still catches this line.
         let win_match = if win_match {
+            if !self.model.is_cgb()
+                && wy_ok
+                && self.lcdc & LCDC_WIN_ENABLE == 0
+                && self.render.win_disabled_line
+            {
+                // DMG: a match that failed only because the window was switched
+                // OFF stays live to the activation instant, exactly as one that
+                // failed on the WY latch does — so a re-enable landing inside
+                // the fine-scroll lead still catches the line, where the
+                // edge-triggered comparator alone could never re-fire.
+                // Pins gambatte/window/late_reenable_scx5_2 [Dmg]: match dot 97,
+                // lead 5 (SCX&7), re-enable committing at dot 101 — inside the
+                // window. CGB wants the opposite verdict from the same ROM.
+                self.render.win_pending_until = self.dot + self.win_activation_lead();
+            }
             if !wy_ok {
                 self.render.win_pending_until = self.dot + self.win_activation_lead();
             }

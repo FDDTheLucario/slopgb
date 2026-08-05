@@ -6989,7 +6989,7 @@ gambatte/window/late_reenable_scx3_3_dmg08_cgb04c_out0.gbc [Dmg] | 28ceffd1b2178
 gambatte/window/late_reenable_scx5_1_dmg08_cgb04c_out3.gbc [Cgb] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/window/late_reenable_scx5_1_dmg08_cgb04c_out3.gbc [Dmg] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/window/late_reenable_scx5_2_dmg08_out3_cgb04c_out0.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
-gambatte/window/late_reenable_scx5_2_dmg08_out3_cgb04c_out0.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
+gambatte/window/late_reenable_scx5_2_dmg08_out3_cgb04c_out0.gbc [Dmg] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/window/late_reenable_scx5_3_dmg08_cgb04c_out0.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/window/late_reenable_scx5_3_dmg08_cgb04c_out0.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/window/late_reenable_scx5_ds_1_cgb04c_out3.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
