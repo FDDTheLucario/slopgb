@@ -541,36 +541,20 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # measured, the DS-scoped form recovers four rows, and the last discriminator is
 # absent from the model AND from every proxy tried for it. Resolving it needs the
 # frame sequencer's step to carry a real T-position within the machine cycle.
-# FOUND, in SameBoy 1.0.2 `Core/timing.c` (the divider coroutine, ~line 275):
-#     GB_SLEEP(gb, div, 1, 3);
-#     while (true) {
-#         advance_tima_state_machine(gb);
-#         GB_set_internal_div_counter(gb, gb->div_counter + 4);
-#         ...
-#         GB_SLEEP(gb, div, 2, 4);
-#     }
-# The divider advances in 4-cycle steps, but the loop opens with a THREE-cycle
-# sleep — so every div update, and with it the APU div event and the length
-# clock, sits at T-offset 3 of the machine cycle rather than on its boundary.
-# slopgb has no such offset: `Apu::tick` runs the whole step at the cycle's end.
-# That offset is the missing quantity. Applying it means giving the length clock
-# a position of 3 within the machine cycle and comparing the FF26 read's own
-# position against it, which also needs the read to carry a position — the same
-# `read_pos_hd` shape the PPU already has.
-# CORRECTION, measured with a SameBoy 1.0.2 tester patched to trace the length
-# clock and the NR52 read: SameBoy READS NR52 ONCE in each of these ROMs and
-# reports channel 2 INACTIVE for `_1a` as well as `_1b` — that is, SameBoy gets
-# the same answer slopgb does and FAILS the `_1a` expectation. So SameBoy cannot
-# supply the missing T-offset for this family; it does not reproduce the
-# behaviour. gambatte does (these `_outN` values are its suite, hardware-checked),
-# so gambatte's APU length/frame-sequencer model is the reference to read here,
-# not SameBoy's. The T-offset 3 noted above is SameBoy's divider placement and
-# may simply be the wrong model for this corner.
-# NOT by re-seeding the divider: SameBoy starts it at 8 (`gb.c`
-# GB_set_internal_div_counter(gb, 8)) but slopgb's boot DIV is installed directly
-# and pinned by mooneye boot_div-cgbABCDE / -A and the gambatte div/start_inc
-# rows, so that phase is already oracle-fixed. The offset belongs to the APU's
-# step position inside the machine cycle, not to the divider's seed.
+# ANSWERED, from gambatte's source — readable now that slopgb is GPL-2.0, the
+# same terms gambatte ships under. `memory.cpp` case 0x26, the NR52 read, calls
+# `psg_.generateSamples(cc, isDoubleSpeed())` BEFORE reading status, and
+# `sound.cpp:142` is
+#     unsigned long const cycles = (cpuCc - lastUpdate_) >> (1 + doubleSpeed);
+#     lastUpdate_ += cycles << (1 + doubleSpeed);
+# The APU is advanced lazily to the read's own CPU cycle, truncated to a whole
+# APU granule — two CPU cycles per step at single speed, four at double — so a
+# read landing inside a granule sees the APU as of that granule's START.
+# slopgb has no such model: `Apu::tick` advances a whole machine cycle eagerly
+# and the read always samples afterwards, so every read looks post-clock. That is
+# why two reads identical in cycle, divider phase and speed still want opposite
+# answers — they sit at different offsets INSIDE the granule, and slopgb does not
+# represent that offset at all.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
