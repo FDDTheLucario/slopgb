@@ -427,6 +427,11 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # (0x7FFF is a sharp minimum, +-1 M-cycle gives 93 and 99). So the lost increment
 # is in the timer's own divider phase across the clock-rate change, not in when
 # DIV is cleared or how long the pause runs.
+# A third is ruled out too: flipping `double_speed` BEFORE the internal M-cycle
+# that precedes the pause, rather than after it, takes the cluster 34 -> 70. And
+# the FF04 write path is itself correct — it samples the selected bit for a
+# falling edge before zeroing, so the reset cannot swallow an increment. What is
+# left is the divider's phase during the pause.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
