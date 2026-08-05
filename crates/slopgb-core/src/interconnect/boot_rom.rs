@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Boot-ROM mapping on [`Interconnect`] (opt-in, golden-safe): a boot ROM
 //! attached by `GameBoy::new_with_boot` overlays the low cart region until it
 //! writes FF50. Every method is inert when no boot ROM is attached

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! OBJ pipeline: OAM scan (dot-serial + freeze-glitch), sprite fetch, pixel mix/priority, CGB color lookup. Oracle: gbtr sprites/*, mooneye intr_2_mode0_timing_sprites, mealybug obj photos.
 
 use super::*;

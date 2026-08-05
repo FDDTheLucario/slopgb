@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `Settings` ↔ bgb.ini mapping. Reads the recognized keys into `Settings`
 //! (defaulting anything absent/unparseable) and writes them back, touching only
 //! the mapped keys + our `Slopgb*` extras — every other line the ini holds is

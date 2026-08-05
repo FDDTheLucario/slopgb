@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Unit tests for the SGB presentation parser ([`SgbView::sgb_command`]).
 //! Packet layouts cite Pan Docs "SGB Command $xx".
 

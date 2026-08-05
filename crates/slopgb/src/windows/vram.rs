@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The bgb VRAM viewer window (Layer C): a tabbed BG map / Tiles / OAM /
 //! Palettes view. Pure content renderers composing `ui` over the
 //! `slopgb_core::debug` VRAM decoders; the winit surface comes with B12b.

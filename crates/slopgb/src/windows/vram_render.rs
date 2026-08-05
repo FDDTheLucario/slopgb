@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! VRAM viewer rendering: tiles / BG-map / OAM / palette panes, hover
 //! detail panels, and the palette/overlay helpers. Split out of
 //! `windows.rs` for the size cap; a set of free fns over the `vram`

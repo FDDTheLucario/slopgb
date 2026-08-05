@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 use super::*;
 
 /// Declared-flag table matching one real manifest (`msu1.wasm`'s), for tests

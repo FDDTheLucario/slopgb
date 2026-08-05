@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Pure search + bookmark logic for the debugger Search menu (MB3): a forward
 //! byte-or-mnemonic scan over the live machine (`find_match`) and the
 //! next/previous-mark cursor walk (`next_mark`). The view state + machine glue

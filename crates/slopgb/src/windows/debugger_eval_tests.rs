@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Evaluate-expression + user-clock wiring tests (RM14): the Debug-menu rows are
 //! live, and the eval modal stores the expression + signals the scan on accept.
 

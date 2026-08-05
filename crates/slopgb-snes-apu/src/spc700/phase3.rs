@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! S-DSP / SGB-APU seam completion — state access the S-DSP and the SGB APU wiring
 //! need that the verified CPU surface does not expose:
 //!

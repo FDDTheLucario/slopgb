@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The optional SNES-PPU plugin seam: absent = audio-only (unchanged),
 //! present = captured `$21xx` writes + DMA B-bus bytes route to the PPU and
 //! the clocking loop renders scanlines into a per-frame fetchable image.

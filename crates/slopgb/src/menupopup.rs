@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The game-window right-click menu as its **own borderless window** (the QA
 //! fix for the menu being clipped by the game window's edge). bgb draws this as
 //! a native Win32 popup that can extend past the parent onto the desktop; the

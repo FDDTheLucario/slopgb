@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Software-rendered UI toolkit for the bgb-style debugger/viewer windows:
 //! pure pixel drawing into softbuffer XRGB8888 buffers, no GUI dependency.
 //! Composed into the tool windows.

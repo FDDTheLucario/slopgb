@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Native tests for the SF2-to-`.smpl` converter wrapper. These drive
 //! `convert` directly (target-independent); `run_until`/`read_file` cross the
 //! wasm-only ABI and are not exercised natively.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Save-state serialization for [`SgbCoprocessor`] (the two plugins' opaque
 //! state blocks + the host-side runtime), the deep clone used by
 //! `AudioCoprocessor::clone_box`, and the [`InertCoprocessor`] fallback that

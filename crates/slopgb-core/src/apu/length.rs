@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Length counter: silences a channel after a programmable time.
 //!
 //! Clocked at 256 Hz by frame-sequencer steps 0/2/4/6. Pulse and noise

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Battery-backed save images (RAM + serialized RTC) and RTC/rumble hooks.
 
 use super::*;

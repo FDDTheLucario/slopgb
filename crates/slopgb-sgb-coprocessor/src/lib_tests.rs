@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Tests for the plugin-backed SGB coprocessor: the SNES-command routing
 //! (DATA_SND / JUMP / SOUND) that the built-in HLE path leaves as no-ops, the
 //! clean-room firmware chain 65C816 → SPC700 → S-DSP producing audio, a

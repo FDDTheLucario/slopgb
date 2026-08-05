@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Clean-room SNES PPU (S-PPU) for the slopgb SGB SNES side, authored purely
 //! from nocash *fullsnes* ("SNES Memory VRAM/CGRAM/OAM Access", "SNES PPU"
 //! chapters) — never from emulator source. This crate is native-unit-testable

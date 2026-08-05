@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Round-trip fixture: reads a register and a memory byte, logs both — so the
 //! host test can assert the guest observed the same machine the host sees.
 

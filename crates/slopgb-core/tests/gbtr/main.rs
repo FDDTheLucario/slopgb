@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Harness binary for the c-sp/game-boy-test-roms v7.0 collection
 //! (`test-roms/game-boy-test-roms-v7.0/`, fetched by `test-roms/download.sh`).
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Golden safety net for CPU-visible PPU timing.
 //!
 //! A per-ROM frame + audio FINGERPRINT of the whole collection under one fixed

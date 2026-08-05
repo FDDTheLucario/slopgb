@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 use super::*;
 
 fn rom_with_cgb_flag(flag: u8) -> Vec<u8> {

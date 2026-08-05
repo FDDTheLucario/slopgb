@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The BG scanline renderer (modes 0/1), authored from nocash *fullsnes*:
 //! "2105h BGMODE", "2107h BGnSC", "210Bh BG12NBA", "VRAM 8x8 Pixel Tile
 //! Data", "16x16 (and bigger) Tiles", and the BG-map entry layout. Modes

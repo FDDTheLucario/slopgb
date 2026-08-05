@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! mooneye-test-suite (2022 build) harness — the copy of Gekkio's mooneye
 //! test suite bundled in the c-sp collection (`mooneye-test-suite/`).
 //!

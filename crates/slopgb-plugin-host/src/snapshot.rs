@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! [`Snapshot`] — an owned, frame-consistent copy of the observable machine
 //! state a plugin can read, so host import functions serve reads without
 //! borrowing the `GameBoy` (wasmi store data must be `'static`).

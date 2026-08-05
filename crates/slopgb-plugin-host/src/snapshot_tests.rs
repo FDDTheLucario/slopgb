@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Snapshot must be a faithful owned copy of the machine's observable state.
 
 use slopgb_core::{GameBoy, Model};

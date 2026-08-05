@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Run a single mooneye test ROM and report pass/fail, final registers and
 //! elapsed cycles. Dev tool for the test fix loop.
 //!

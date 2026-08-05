@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Tool plugins: request/response wasm modules the host calls on demand (the
 //! shape MCP debug tools take). One module may expose several tools, addressed
 //! by index.

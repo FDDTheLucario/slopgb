@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The stop/finished shutdown machinery shared by every background socket
 //! worker ([`crate::link::LinkSocket`], [`crate::mcp::server::Server`]): a
 //! background thread that polls a `stop` flag to exit promptly, a `finished`

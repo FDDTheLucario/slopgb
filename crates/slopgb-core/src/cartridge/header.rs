@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Cartridge header parsing: size codes, mapper detection, CGB/SGB flags.
 
 use super::*;

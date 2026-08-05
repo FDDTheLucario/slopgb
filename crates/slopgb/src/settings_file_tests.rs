@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 use super::*;
 
 /// A unique temp path per (process, test name) so parallel tests don't collide.

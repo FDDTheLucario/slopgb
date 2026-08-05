@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Joypad autopoll ($4200 bit 0 → $4218-$421F) and the pad feed back to the
 //! GB joypad matrix.
 

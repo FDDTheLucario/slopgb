@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! End-to-end proof that the real 65C816 coprocessor plugin
 //! (`slopgb-w65c816-plugin`), compiled to wasm32, executes a program across the
 //! host boundary: the host writes a comm port, clocks the CPU with `run_until`,

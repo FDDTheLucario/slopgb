@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `App` discrete-action dispatch: [`App::run_action`] (shared by the keyboard
 //! map and the debugger menu items so a hotkey and its menu entry never
 //! diverge), the [`MenuOutcome`] applier, and the screenshot / memory-dump

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 /// How a CPU access with a $FE00-$FEFF value on the address bus collides
 /// with the OAM scan on DMG-family models (Pan Docs "OAM Corruption Bug").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

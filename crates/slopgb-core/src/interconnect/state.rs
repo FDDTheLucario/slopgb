@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Interconnect save-state (de)serialization (a second `impl Interconnect`
 //! block; see `crate::state`). Delegates the peripherals to their own
 //! serializers and writes the interconnect's own volatile state (WRAM/HRAM, IF/

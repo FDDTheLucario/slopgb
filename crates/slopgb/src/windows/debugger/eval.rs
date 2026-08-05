@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! A small expression evaluator for the debugger's "Evaluate expression" (RM14).
 //! bgb-style: numbers are hex by default; registers take precedence over hex
 //! (so `bc` is the register pair, `ff` is `0x00FF`); `[x]` reads one byte.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Tests for the decoupled mode timeline: each pins a concrete number against
 //! SameBoy 1.0.2 `display.c` (asserting the spec value, not the function's own
 //! definition).

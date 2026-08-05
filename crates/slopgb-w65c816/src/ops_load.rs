@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Loads, stores, register transfers and `XBA`. Load/store width follows the
 //! accumulator (`M`) or index (`X`) flag; transfers take the destination
 //! register's width. Behaviour per the WDC W65C816S datasheet and vectors.

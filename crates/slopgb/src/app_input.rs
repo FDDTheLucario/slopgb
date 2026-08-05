@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `App` joypad-input handling: keyboard → Game Boy button application with the
 //! SOCD filter (Joypad → "allow pressing L+R or U+D"), plus the **sub-frame
 //! input timing** that gives the joypad interrupt a realistic, varied LCD line.

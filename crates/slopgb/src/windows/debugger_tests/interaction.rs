@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Click resolution, context menus, modal dialogs, register edit, and
 //! code/data-hint tests.
 

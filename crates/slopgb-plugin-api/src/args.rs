@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Minimal argument reader for tool plugins. The host hands
 //! [`ToolPlugin::call`](crate::ToolPlugin::call) the MCP `arguments` object
 //! serialized as compact JSON (e.g. `{"from":"0100","to":"0103"}`); this pulls a

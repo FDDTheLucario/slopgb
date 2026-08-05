@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Std-only uncompressed-AVI video writer for the recorder (Joypad → "Video").
 //! Streams each frame straight to disk (a whole recording is far too big to
 //! buffer), then patches the RIFF/movi sizes + frame count and appends the

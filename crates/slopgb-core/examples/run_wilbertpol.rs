@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Scratch dev tool: run one wilbertpol-fork ROM (0xED exit protocol) and
 //! dump the result registers for round-by-round decoding against the asm.
 //!

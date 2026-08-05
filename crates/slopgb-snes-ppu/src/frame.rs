@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Main-screen line assembly: the BG/OBJ layers merged per the fullsnes
 //! "Background Priority Chart" (modes 0/1 columns), TM layer enables,
 //! the CGRAM-0 backdrop, and INIDISP forced-blank/master-brightness

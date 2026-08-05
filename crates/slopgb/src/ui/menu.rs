@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Popup (context / dropdown) menu widget for the bgb-style debugger windows
 //! (right-click-menu plan RM1/RM2). bgb draws every menu the same way — a
 //! bordered white box, one row per item: an optional left check-mark, the

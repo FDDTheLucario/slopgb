@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Per-M-cycle machine advance (the clock-master step) + the HALT/STOP core-clock gate. docs/ARCHITECTURE.md §Timing.
 
 use super::*;

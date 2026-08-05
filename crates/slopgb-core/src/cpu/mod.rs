@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! SM83 CPU core: registers, decode/execute, interrupt dispatch.
 //!
 //! The CPU is the machine's clock master. Every memory access it performs is

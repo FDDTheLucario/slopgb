@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Coprocessor plugin wrapping the SNES SPC700 (S-SMP) + S-DSP audio subsystem
 //! (`slopgb-snes-apu`) — the exact same code the `slopgb-core` built-in SGB
 //! audio path runs, compiled to wasm and driven by the host through the tier-3

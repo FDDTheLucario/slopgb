@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `AudioCoprocessor` impl for [`SgbCoprocessor`] — the trait `GameBoy` drives
 //! the SGB SNES-side machine through (clock/poll/mix/status), plus the
 //! coprocessor's self-describing manifest and the menu-row export it declares.

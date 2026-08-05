@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! MBC6 unit tests (Pan Docs "MBC6"): 8 KiB ROM/flash windows, 4 KiB RAM
 //! windows, and the MX29F008 flash command set. Written against the spec;
 //! the `roms/mbc6` exerciser pins the same behavior end to end.

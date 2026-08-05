@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The SNES clocking loop: vblank NMI delivery, RDNMI/HVBJOY shadows, the
 //! resident handler's RAM-vector dispatch and register preservation.
 

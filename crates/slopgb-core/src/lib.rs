@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! slopgb-core: cycle-accurate Game Boy (DMG) and Game Boy Color (CGB) emulator core.
 //!
 //! Zero dependencies, `forbid(unsafe_code)`, fully deterministic. The frontend

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! acid suite — Matt Currie's three PPU acid tests from the c-sp collection:
 //! `dmg-acid2/`, `cgb-acid2/`, `cgb-acid-hell/`.
 //!

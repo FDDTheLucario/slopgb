@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Black-box extraction of the CGB boot ROM's DMG-compat palette assignment.
 //!
 //! We treat the reference `cgb_boot.bin` purely as an oracle: build synthetic

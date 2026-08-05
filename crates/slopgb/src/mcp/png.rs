@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Std-only PNG encoder: an XRGB8888 `w×h` framebuffer → an 8-bit RGB PNG.
 //! bgb screenshots are BMP (`screenshot::to_bmp`), but MCP image content wants a
 //! format every client renders, so the `vram` tool emits PNG. The DEFLATE stream

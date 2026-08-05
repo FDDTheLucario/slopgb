@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Clean-room WDC 65C816 CPU core — the SNES-side CPU used by the Super Game
 //! Boy. Bus-generic (tested against TomHarte vectors with a flat bus; hosted as
 //! a slopgb coprocessor plugin with a comm-port bus). Built only from the WDC

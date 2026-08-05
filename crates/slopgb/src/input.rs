@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Keyboard mapping: physical key codes to Game Boy buttons and frontend
 //! actions, **focus-dependent** like bgb (see [`map`] / [`Focus`]).
 //!

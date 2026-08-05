@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Minimal PNG decoder for test reference images.
 //!
 //! The core crate forbids dependencies — including dev-dependencies — so the

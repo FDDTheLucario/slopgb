@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Filesystem tests: exercises `read_dir`/`home`/`roots`/`make_dir` against a
 //! real temp directory (see the module doc on `source.rs` for why this is the
 //! one file allowed to touch disk).

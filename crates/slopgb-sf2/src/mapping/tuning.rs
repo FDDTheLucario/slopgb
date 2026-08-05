@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! N-SPC `base16` (instrument base-pitch multiplier) <-> SF2 tuning
 //! generators (`coarseTune`/`fineTune`) + sample tuning (`originalPitch`/
 //! `pitchCorrection`/`dwSampleRate`).

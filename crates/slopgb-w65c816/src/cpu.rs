@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The CPU: register file plus the fetch/execute step. Every bus access counts
 //! one cycle (`read8`/`write8`); internal operations count via `io`, so the
 //! returned cycle total matches the SingleStepTests `cycles` array length. All

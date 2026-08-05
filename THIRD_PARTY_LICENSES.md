@@ -126,14 +126,3 @@ That is every external dependency any workspace crate declares — `slopgb-core`
 is std-only. Transitive dependencies are pinned in `Cargo.lock` and not
 enumerated here; generate that tree from the lock file when preparing a binary
 release.
-
----
-
-## Crates that stay MIT
-
-`crates/slopfp` (the dependency-free file-picker state machine) and
-`crates/slopgb-plugin-api` (the SDK that Rust→wasm plugins compile against)
-contain no code derived from gambatte or SameBoy, and remain MIT under their own
-manifests. The SDK especially: someone writing a plugin should be free to
-license it however they like, and the GPL on the emulator ought not reach into
-their work.

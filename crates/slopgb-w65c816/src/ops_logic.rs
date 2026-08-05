@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Bitwise logic (`AND`/`ORA`/`EOR`/`BIT`), increments/decrements, the
 //! shift/rotate family, and `TSB`/`TRB`. Read-modify-write ops read the operand,
 //! spend one internal cycle, then write the result back high byte first. Widths

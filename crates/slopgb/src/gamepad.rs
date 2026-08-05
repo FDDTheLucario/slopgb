@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Game-controller input (Options → Joypad → "configure game controller").
 //! `gilrs` reads the platform gamepad(s) and maps arbitrary controllers to
 //! standardized buttons via its bundled SDL_GameControllerDB, so A/B/Start/

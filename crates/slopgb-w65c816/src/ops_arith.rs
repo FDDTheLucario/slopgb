@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `ADC` and `SBC`, binary and decimal (BCD), 8- and 16-bit. Binary add/subtract
 //! set carry from the unsigned result and overflow from the signed result.
 //! Decimal mode adjusts each byte per nibble; N/Z come from the adjusted result,

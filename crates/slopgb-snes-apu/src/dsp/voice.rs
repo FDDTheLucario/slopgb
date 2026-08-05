@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! One of the eight S-DSP voices: BRR sample streaming, the pitch counter,
 //! Gaussian interpolation, and the ADSR/GAIN envelope.
 //!

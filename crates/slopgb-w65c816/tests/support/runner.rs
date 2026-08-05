@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The single-step harness: apply a vector's `initial` state, run one `step`,
 //! then diff registers, RAM and the per-cycle bus activity against `final` +
 //! `cycles`. The first mismatch panics with the offending field.

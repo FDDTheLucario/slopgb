@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The bgb "Options" control panel (functional clone of bgb 1.6.4's Options
 //! property sheet — captures in `docs/bgb-reference/options/`). A modal overlay
 //! over the LCD (like [`super::mainwin::InfoBox`]): a 9-tab dialog laid out in

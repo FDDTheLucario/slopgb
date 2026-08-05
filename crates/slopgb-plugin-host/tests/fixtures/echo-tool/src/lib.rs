@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Tool-plugin round-trip fixture: echoes its args and reads PC through the
 //! view, so the host test can assert both the arg path and introspection work.
 

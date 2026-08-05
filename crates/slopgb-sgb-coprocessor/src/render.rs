@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The SNES-side scanline rasterization pump `flush` calls each pass and the
 //! per-frame handoff of the image it builds, plus the raw guest-RAM debug
 //! helpers — the read-only plugin-memory peeks the debugger/MCP reads the

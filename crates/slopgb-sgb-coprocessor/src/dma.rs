@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The host-side GP-DMA engine (`$420B` / `$43x0-$43x6`) and the WRAM B-bus
 //! access ports (`$2180-$2183`), driven from the guest's captured MMIO
 //! writes. The plugin stalls its CPU on the `$420B` write until the host has

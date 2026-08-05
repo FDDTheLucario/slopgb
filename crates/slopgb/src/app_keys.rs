@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `App` game-window keyboard dispatch: modal capture (wizards / dialogs /
 //! Options), the rebindable joypad map, the focus-dependent hotkey actions, and
 //! the key-rebind wizard plumbing. Split out of `main.rs` to keep it under the

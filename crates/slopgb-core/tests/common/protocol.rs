@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Mooneye pass/fail protocol constants, defined once and shared between the
 //! integration harness (`tests/common/mod.rs`, via `mod protocol`) and the
 //! `run_mooneye` dev example (`examples/run_mooneye.rs`, via a `#[path]`

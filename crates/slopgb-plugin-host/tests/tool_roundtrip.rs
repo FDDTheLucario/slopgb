@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! End-to-end proof of the tool-plugin request/response path: a real Rust tool
 //! plugin (built with slopgb_tools!, compiled to wasm32) receives an argument
 //! string, reads the machine through its view, and returns text the host reads

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Optional **user-supplied SGB BIOS** seam: install the SGB firmware's real
 //! default border and its title→palette table.
 //!

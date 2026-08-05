@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The bgb I/O map window (Layer C): every I/O register's live value in bgb's
 //! groups, plus the LCDC/STAT bit breakdowns. Pure content over
 //! `GameBoy::debug_read`; the winit surface comes with B12b.

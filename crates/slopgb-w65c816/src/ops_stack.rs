@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Stack primitives and the push/pull family (including `PEA`/`PEI`/`PER`). The
 //! stack lives in bank 0; in emulation mode `S` stays inside page 1. Pushes
 //! store high byte first (so the value is little-endian in memory). Per the WDC

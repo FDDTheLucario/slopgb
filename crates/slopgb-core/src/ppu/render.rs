@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Mode 3 pixel pipeline: BG/window fetcher, pixel FIFO, sprite fetcher.
 //!
 //! Timing model: the pipeline starts at line dot 84 (the glitched

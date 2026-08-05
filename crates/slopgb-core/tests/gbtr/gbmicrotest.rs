@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! GBMicrotest suite harness (`gbmicrotest/`, 513 flat ROMs).
 //!
 //! Protocol (`gbmicrotest/game-boy-test-roms-howto.md`): a test writes its

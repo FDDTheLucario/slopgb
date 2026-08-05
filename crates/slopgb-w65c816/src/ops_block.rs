@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Block moves `MVN` and `MVP`. Each moves `C + 1` bytes between banks, one byte
 //! per loop iteration; the CPU re-fetches the opcode and the two bank operands
 //! every iteration (so `PC` sits on the opcode until the move finishes, making

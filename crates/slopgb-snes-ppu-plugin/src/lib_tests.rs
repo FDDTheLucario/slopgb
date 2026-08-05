@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Native tests for the S-PPU coprocessor wrapper: the Coprocessor logic is
 //! target-independent, so these drive it directly (no wasm boundary). The
 //! wasm-crossing proof is `slopgb-plugin-host`'s `snes_ppu_roundtrip`.

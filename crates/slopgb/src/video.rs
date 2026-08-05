@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Presentation: softbuffer surface with an integer-scaled, letterboxed,
 //! nearest-neighbor blit of the core's 160x144 XRGB8888 frame.
 

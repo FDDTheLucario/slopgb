@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Tests for the VRAM viewer rendering (moved with the code out of
 //! `windows_tests.rs`).
 

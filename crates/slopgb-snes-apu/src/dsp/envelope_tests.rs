@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Envelope + rate-counter tests, checked against the Blargg per-step rules.
 
 // Tests set one or two `Env` fields on a default to isolate a phase; the struct

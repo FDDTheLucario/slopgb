@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! same-suite — SameBoy's SameSuite ROMs (`same-suite/` in the collection).
 //!
 //! Protocol (same-suite/game-boy-test-roms-howto.md): every ROM executes

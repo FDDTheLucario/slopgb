@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Serial link-cable plumbing on [`Interconnect`]: thin delegators to the
 //! [`crate::serial::Serial`] byte-exchange hook (frontend TCP peer). Every one
 //! is inert when no peer is attached, so the link is golden-safe — the

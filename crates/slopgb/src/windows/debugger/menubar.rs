@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The debugger menu bar + its six dropdowns (MB1+): File / Search / Run /
 //! Debug / Window / Execution profiler, transcribed item-for-item from
 //! `docs/bgb-reference/menus/menubar-*.png`, plus the breakpoint/watchpoint

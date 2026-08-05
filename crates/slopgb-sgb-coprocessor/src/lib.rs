@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Combined SGB SNES-side audio coprocessor, driving the SNES CPU (65C816) and
 //! audio subsystem (SPC700 + S-DSP) as **loaded wasm coprocessor plugins**.
 //!

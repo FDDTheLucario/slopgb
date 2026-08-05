@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 use super::*;
 
 // A CRLF bgb-flavored sample: bools, a repeated list key, an empty value, a

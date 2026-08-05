@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The SGB's built-in **default border**: an original, procedurally-generated
 //! frame drawn around the Game Boy inset.
 //!

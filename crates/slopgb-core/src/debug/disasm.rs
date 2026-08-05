@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Game Boy instruction disassembler in bgb's no$gmb syntax or RGBDS syntax.
 //!
 //! Pure: `decode(bytes, pc)` (bgb) / `decode_with(bytes, pc, syntax)`. The bgb

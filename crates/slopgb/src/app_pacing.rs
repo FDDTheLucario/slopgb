@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `App` emulation pacing loop: the audio-/timer-/turbo-paced frame drivers,
 //! the audio-health fallback, FPS accounting, and the breakpoint-arming that
 //! lets a free run halt at a breakpoint. The pacing *primitives* (the audio

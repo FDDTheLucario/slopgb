@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The `--sf2` soundfont import path: resolve an SF2 file to its N-SPC
 //! sample regions, via the `.smpl` cache next to it or, on a miss, the
 //! `sf2.wasm` tier-3 converter plugin. Split out of `session.rs` to keep that

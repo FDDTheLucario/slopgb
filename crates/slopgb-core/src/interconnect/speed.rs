@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! CGB speed-switch / halt-wake / dispatch engine bodies (the `Bus` trait
 //! impl in the parent delegates here — a trait impl cannot split across
 //! files; CLAUDE.md <1000-line cap). Holds `stop` (the STOP dance: gambatte

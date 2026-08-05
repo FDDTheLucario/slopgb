@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Pins the builder↔`reset_defaults` single source. `reset_defaults` derives the
 //! fields it resets from what each tab's builder renders ([`controls`]), so a
 //! control and its reset can't drift apart — this proves it end to end: perturb

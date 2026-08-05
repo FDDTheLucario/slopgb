@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 use super::*;
 
 /// Rec.709 relative luminance (0..1), no gamma correction — plenty precise

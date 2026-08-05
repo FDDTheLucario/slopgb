@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Debug runner for gambatte `_out<HEX>` test ROMs: runs a ROM for the
 //! suite's 16 LCD frames and OCRs the top tile row back into hex digits
 //! (the same protocol as `tests/gbtr/gambatte.rs`; see the howto notes

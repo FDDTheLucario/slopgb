@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Manual little-endian binary (de)serialization for on-disk save states
 //! (bgb's File → Save state / Load state). Std-only and `forbid(unsafe_code)`,
 //! so there is no serde and no memory-dump: every struct hand-writes its

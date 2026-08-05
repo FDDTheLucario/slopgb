@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Dev tool: run a screenshot test ROM to its `LD B,B` breakpoint +1 frame and
 //! write the 160x144 framebuffer as raw little-endian u32 (XRGB) to a file, for
 //! pixel-diffing against a suite reference PNG. Usage: dump_frame <rom> <model> <out.raw>

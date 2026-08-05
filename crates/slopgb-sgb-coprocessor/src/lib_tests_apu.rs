@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! APU-chain tests: the SOUND command driving the 65C816 -> SPC700 ->
 //! S-DSP firmware chain to audible output, the SOU_TRN game-driver upload,
 //! and the SPC700 IPL upload protocol under both fair pacing and the

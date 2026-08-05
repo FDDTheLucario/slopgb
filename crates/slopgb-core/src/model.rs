@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Hardware model selection and per-model post-boot state.
 
 /// Which physical Game Boy we are emulating.

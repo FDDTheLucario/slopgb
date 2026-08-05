@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The ICD2 register block — the SGB cartridge's SNES↔GB interface chip as
 //! the SNES CPU sees it at `$6000-$7FFF` (nocash fullsnes, "SGB I/O Map
 //! (ICD2-R)"). The read side effects (`$7000` clears the packet flag,

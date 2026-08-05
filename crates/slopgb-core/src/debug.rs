@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Read-only debug introspection for the bgb-style debugger/viewer UI.
 //!
 //! Everything here is side-effect-free: it observes emulator state through

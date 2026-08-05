@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! SingleStepTests 65816 vector conformance, grouped by opcode family. Each test
 //! runs all 10000 cases per opcode in both emulation and native mode. Vectors
 //! are gitignored; absent, the tests skip (set `SLOPGB_REQUIRE_65816_VECTORS`

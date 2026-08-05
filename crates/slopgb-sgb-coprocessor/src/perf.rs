@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Env-gated (`SLOPGB_PERF=1`) wall-time section accounting for `flush` —
 //! prints per-section totals every ~500 GB frames of flushes, then resets.
 

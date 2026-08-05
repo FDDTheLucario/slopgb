@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Super Game Boy presentation layer: the SNES-side colorization of the DMG
 //! output driven by SGB command packets. A behaviour-preserving submodule of
 //! [`Ppu`] (a second `impl` block via `use super::*`).

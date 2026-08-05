@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! FF0F (IF register) read-view + squash family: the cc+0 FF0F read's verdict
 //! laws — the group-A STAT engine-rise PEEK, the group-B/C/E write-race /
 //! dispatch-ack / OAM-pulse squash arms. A third `impl Ppu` block split out of

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Execution-profiler (MB5) tests for the debugger window: the profiler
 //! dropdown's radio modes + live count, and the disasm per-line count overlay.
 

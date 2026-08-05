@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `interconnect_tests` — hdma tests (split for file size).
 
 use super::*;

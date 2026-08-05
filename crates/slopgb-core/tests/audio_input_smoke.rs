@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! End-to-end smokes for the two subsystems a headless test run otherwise leaves
 //! blind: audio output and joypad input. Not accuracy tests (mooneye/gambatte
 //! cover the APU + joypad timing) — these prove the *player-facing* paths carry

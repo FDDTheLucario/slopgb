@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Dep-free clipboard write (debugger "Copy data" / "Copy code", RM10).
 //!
 //! The frontend is restricted to winit/softbuffer/cpal — no clipboard *crate*

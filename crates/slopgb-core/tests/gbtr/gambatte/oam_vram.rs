@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! OAM / VRAM / sprite / mode-2-3 pinned-behavior tests.
 //!
 //! Split into cohesive submodules to stay under the 1000-line cap:

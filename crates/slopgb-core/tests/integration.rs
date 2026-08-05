@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Cross-module smoke tests: synthetic ROMs running on the full `GameBoy`
 //! (CPU + interconnect + peripherals), exercising the mooneye breakpoint
 //! protocol, interrupt delivery end-to-end, and OAM DMA driven by real CPU

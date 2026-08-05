@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Modal single-field prompt for the bgb-style debugger (right-click-menu plan
 //! RM3): a titled box with an editable hex/text field and OK / Cancel. bgb pops
 //! these for `Go to…`, `Set break/condition…`, `edit register`, and

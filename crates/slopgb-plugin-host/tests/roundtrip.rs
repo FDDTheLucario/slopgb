@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! End-to-end proof that a real Rust plugin — built with the `slopgb_plugin!`
 //! macro and the `GameBoyView` wrappers, compiled to wasm32 — round-trips
 //! through the host: its register/memory reads and its log all resolve against

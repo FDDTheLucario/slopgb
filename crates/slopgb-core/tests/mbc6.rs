@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! MBC6 exerciser ROM integration tests (breakpoint protocol).
 //!
 //! The ROM sources (RGBDS and wla-dx twins, assembling to the same test

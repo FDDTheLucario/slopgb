@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Cartridge: header parsing and MBC mappers. Cartridge work package.
 //!
 //! Supported mappers: none (32 KiB), MBC1 (incl. 8 Mbit multicart detection),

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The SNES CPU-side MMIO surface between the hosted 65C816 and the
 //! orchestrating host: a bounded **write-capture ring** for the PPU B-bus
 //! (`$2100-$213F`) and CPU I/O (`$4200-$44FF`) windows, and **host-fed read

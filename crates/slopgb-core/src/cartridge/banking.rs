@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! ROM/RAM banking + mapper register writes, and the debug offset accessors.
 
 use super::*;

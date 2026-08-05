@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Shared runners and result plumbing for the game-boy-test-roms suites.
 //!
 //! Per-suite pass protocols are documented in each suite's

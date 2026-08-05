@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Power-on / post-boot hardware state install (no boot ROM executed): registers, internal DIV, WRAM/VRAM seeding, LCD phase. Oracle: mooneye boot_regs/boot_hwio/boot_div, gambatte $143=$C0 carts.
 
 use super::*;

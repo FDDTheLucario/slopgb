@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Miscellaneous single-byte ops: `NOP`, the flag/control instructions, and the
 //! `SLEEP`/`STOP` halts.
 //!

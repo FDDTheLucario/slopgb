@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! blargg suite harness (`blargg/` in the c-sp collection): Blargg's
 //! hardware test ROMs — 58 ROMs across 9 sub-suites plus the loose
 //! `halt_bug.gb` at the suite root.

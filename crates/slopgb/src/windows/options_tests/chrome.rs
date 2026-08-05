@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Dialog-chrome tests (tab strip, button row, render, scratch/Defaults
 //! semantics), split out of `options_tests.rs` to keep it under the
 //! 1000-line cap.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Mooneye test-suite integration harness.
 //!
 //! Discovers ROMs under `<repo>/test-roms/mts-*/` at runtime (prints a skip

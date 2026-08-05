@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! MBC3 real-time clock behavior (deterministic tick from emulated cycles).
 
 use super::*;

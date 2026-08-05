@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! age-test-roms suite harness (c-sp/game-boy-test-roms v7.0,
 //! `age-test-roms/`).
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! SameBoy `GB_STAT_update` rising-edge STAT-interrupt line — wired into the
 //! PPU as `Ppu.stat_update`, the production STAT-line tracker.
 //!

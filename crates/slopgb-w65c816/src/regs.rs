@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The 65C816 register file + processor-status flags, and the mode/width rules
 //! that govern every instruction (WDC W65C816S datasheet; Eyes & Lichty
 //! "Programming the 65816"). Clean-room: modeled from the datasheet, never from

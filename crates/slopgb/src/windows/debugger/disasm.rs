@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Disassembly pane: decode + bgb-format (`disasm_rows`) and rendering
 //! (`render_disasm` + the profiler-count overlay), split out of `debugger.rs`
 //! to keep each file under the size cap. Re-exported from the parent so the

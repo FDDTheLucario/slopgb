@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! APU RAM + the 64-byte IPL boot ROM overlay, and the address decoder.
 //!
 //! Memory map (fullsnes, "SNES APU Memory Map"):

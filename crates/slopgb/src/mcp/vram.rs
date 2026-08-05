@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! VRAM capture for the MCP `vram` tool: builds a plain XRGB8888 bitmap for one
 //! of the VRAM-viewer views (`bg` / `win` / `tile0` / `tile1` / `oam` /
 //! `palette`) out of the core's read-only decoders (`debug::tile_pixels` /

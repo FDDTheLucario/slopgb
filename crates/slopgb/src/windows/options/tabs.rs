@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Per-tab control descriptors for the Options dialog. Each tab builds a flat
 //! list of placed [`Ctrl`]s from the current [`Settings`]; the same list drives
 //! both rendering and click hit-testing, so the two can't diverge. Live controls

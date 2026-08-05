@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Frontend-only presentation filters applied to the core's XRGB8888 frame just
 //! before the blit. Every filter is a pure function over pixels and touches only
 //! a frontend-owned scratch copy of the frame — the core buffer is never

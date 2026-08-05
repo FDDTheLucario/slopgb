@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Wave channel (channel 3): 32 4-bit samples from FF30-FF3F.
 //!
 //! DMG quirks implemented here (gbdev wiki "Game Boy Sound Operation",

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Memory-map routing: WRAM/echo/HRAM indexing, prohibited area, OAM-bug trigger, the untimed read_no_tick/write_no_tick + IO register read/write dispatch. Oracle: full mooneye + gbtr matrix.
 
 use super::*;

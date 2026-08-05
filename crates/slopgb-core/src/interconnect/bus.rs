@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `impl Bus for Interconnect`: the CPU-facing bus contract. Each
 //! read/write/tick advances every peripheral one M-cycle then performs
 //! the access; plus interrupt dispatch/ack, halt-wake, STOP, the

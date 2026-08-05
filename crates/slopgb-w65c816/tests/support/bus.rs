@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! A sparse flat bus for the vectors: 24-bit address space backed by a map,
 //! seeded from each vector's `initial.ram`, logging every access in order so the
 //! harness can check it against the vector's `cycles` list.

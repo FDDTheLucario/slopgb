@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Mid-mode-3 pixel-render pinned-behavior tests (`*_m3_render_*`).
 //!
 //! Submodule of `oam_vram`; see the module root for the split rationale.

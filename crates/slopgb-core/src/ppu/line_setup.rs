@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Per-line setup at a line boundary (`start_line`). A behaviour-preserving
 //! submodule of [`Ppu`] (a second `impl` block via `use super::*`); the fields
 //! it touches live in the parent struct.

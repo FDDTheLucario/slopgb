@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Debugger/introspection accessors on [`GameBoy`]: memory watchpoints, the
 //! exception-break mask, save-states, the execution profiler, the FCEUX-style
 //! code/data log (CDL), and the WRAM/VRAM bank indicators.

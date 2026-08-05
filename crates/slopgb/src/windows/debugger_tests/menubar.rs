@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Menu bar + dropdown wiring tests (MB1).
 
 use super::super::*;

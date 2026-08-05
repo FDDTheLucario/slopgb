@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! SNES S-DSP `ADSR1`/`ADSR2`/`GAIN` <-> SF2 volume-envelope generators.
 //!
 //! **This mapping is best-effort and lossy** (documented per-field below) —

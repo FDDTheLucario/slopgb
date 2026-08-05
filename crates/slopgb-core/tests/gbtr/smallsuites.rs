@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Small screenshot suites of the c-sp collection: `bully/`,
 //! `strikethrough/`, `turtle-tests/`, `scribbltests/`, `little-things-gb/`,
 //! `mbc3-tester/` and `rtc3test/`.

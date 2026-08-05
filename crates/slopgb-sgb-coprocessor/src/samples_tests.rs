@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Tests for the two-axis N-SPC install ([`install_nspc`](super::SgbCoprocessor::install_nspc)):
 //! engine source (ROM vs clean-room) x sample source (ROM vs SF2), plus the
 //! `install_sgb_bios` regression guard. Builds the two wasm plugins like

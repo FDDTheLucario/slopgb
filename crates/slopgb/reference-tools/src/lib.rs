@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Reference tool plugins: the built-in MCP debug tools, reimplemented on the
 //! plugin ABI as the dogfood/proof set. Each one produces byte-identical output
 //! to the matching `slopgb::mcp::tools` built-in for a fixed machine (the parity

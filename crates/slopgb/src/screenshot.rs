@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Frame → 24-bit BMP, std-only (no PNG encoder, which would need a dep — the
 //! frontend stays winit/softbuffer/cpal-only). bgb's "Save screenshot" writes a
 //! viewable image; an uncompressed BMP opens everywhere. The encoder is pure so

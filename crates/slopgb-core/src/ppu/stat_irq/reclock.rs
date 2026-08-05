@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The STAT IRQ engine (SameBoy `GB_STAT_update` port) — the
 //! `stat_update_tick` rising-edge dispatch + vblank/OAM direct pokes, the
 //! halt-commit masks, the decoupled `mode_for_interrupt` derivation, and the

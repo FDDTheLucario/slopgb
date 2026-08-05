@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Runtime that loads slopgb wasm plugins and drives them against a live
 //! `GameBoy`. Guest SDK is `slopgb-plugin-api`; guide is
 //! `docs/ui-state/plugin-api.md`.

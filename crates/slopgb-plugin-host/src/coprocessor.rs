@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Coprocessor plugins (tier 3): a whole chip a plugin hosts (the SGB SPC700 or
 //! 65C816), driven by the host through reset / clock / comm-port calls. The
 //! chip's internal RAM stays inside the sandbox; only the comm ports cross.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Code/Data Log + banked debug memory access (explicit ROM/VRAM/WRAM/SRAM banks).
 
 use super::*;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! A coprocessor's self-describing **manifest** — what a plugin declares about
 //! itself so the host binds it by identity/role instead of by filename, and
 //! surfaces its contributed CLI flags. The guest emits it (see

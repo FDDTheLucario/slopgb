@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Audio output: a cpal stream at the device's default config fed from a
 //! lock-free queue of stereo frames, plus a streaming linear resampler to
 //! bridge the core's APU sample rate to the device rate.

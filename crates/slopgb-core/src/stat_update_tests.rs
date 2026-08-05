@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Unit tests for the SameBoy `GB_STAT_update` rising-edge core
 //! ([`super::StatUpdate`]). Pin the level OR, the 0→1 edge detection, the
 //! STAT-blocking "already high → no re-fire", and the `mode_for_interrupt`

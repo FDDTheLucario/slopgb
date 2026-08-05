@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! End-to-end proof that the SF2-to-`.smpl` converter plugin
 //! (`slopgb-sf2-plugin`) produces byte-identical output in wasm, driven
 //! through the host, as calling `slopgb_sf2::import_sf2` natively on the same

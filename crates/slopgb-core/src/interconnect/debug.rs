@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Debugger-only inherent methods on [`Interconnect`]: memory watchpoints (RM8),
 //! the execution profiler (MB5), and the exception-break checks (Options →
 //! Exceptions). Every one is a live-debugger control that defaults inert and is

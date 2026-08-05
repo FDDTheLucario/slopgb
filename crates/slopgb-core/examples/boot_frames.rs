@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Dump boot-animation frames as PPM so we can study the exact reference timing.
 //! `cargo run -p slopgb-core --example boot_frames -- <boot.bin> <cart> <outdir> <step> <count>`
 use slopgb_core::{GameBoy, Model, SCREEN_H, SCREEN_W};

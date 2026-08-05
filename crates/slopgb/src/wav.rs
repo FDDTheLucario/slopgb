@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Std-only WAV encoder for the audio recorder (Joypad → "Audio"). Buffers the
 //! recorded stereo frames in memory while recording and emits a 16-bit PCM WAV
 //! on stop (`encode_wav`); the frontend picks the path and writes the bytes. No

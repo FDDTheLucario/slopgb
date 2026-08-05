@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The roles-and-slots plugin registry: a single surface over every
 //! `SUBSYSTEM`-tier contributing unit — a loaded wasm plugin or a native
 //! orchestrator (e.g. the frontend's SGB coprocessor) — queried uniformly for

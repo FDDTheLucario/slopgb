@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Section timing over a captured PPU state (run by hand):
 //! `SLOPGB_PPU_STATE=<blob> cargo test -p slopgb-snes-ppu --test bench_state -- --ignored --nocapture`
 //! The blob is a `slopgb-snes-ppu-plugin` save_state image; only the leading

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Super Game Boy SNES-side seams.
 //!
 //! The SGB cartridge embeds an SNES: a Super Famicom running the Game Boy in a

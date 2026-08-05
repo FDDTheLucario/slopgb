@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The eighth-grid sub-cc phase model: the free helpers + `EdgeKind` that the
 //! `tick`/`memory` submodules use to place PPU boundary events and CPU-access
 //! observers at sub-M-cycle phases. No `impl` block — pure functions/consts.

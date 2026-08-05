@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Mode/DMA access-blocking predicates (OAM/VRAM/palette read+write) + the DMG OAM-corruption bug. Oracle: gbtr oamdma/late_sp*, blargg oam_bug, mooneye sprite/access.
 
 use super::*;

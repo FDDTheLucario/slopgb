@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! End-to-end proof that the SNES PPU coprocessor plugin
 //! (`slopgb-snes-ppu-plugin`), compiled to wasm32, renders across the host
 //! boundary: B-bus port writes build a scene, a host-window write renders a

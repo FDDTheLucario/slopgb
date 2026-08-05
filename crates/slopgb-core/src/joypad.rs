@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Joypad matrix (FF00 P1) and the SGB command-packet/multiplayer port.
 //! Timer/serial/joypad work package.
 //!

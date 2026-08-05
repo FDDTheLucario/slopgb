@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Port-semantics tests for the S-PPU memory state machines, pinned to
 //! nocash *fullsnes* ("SNES Memory VRAM/CGRAM/OAM Access").
 

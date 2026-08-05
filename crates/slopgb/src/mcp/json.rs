@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Minimal std-only JSON: a value type with an escaping renderer and a total
 //! recursive-descent parser — enough for the MCP JSON-RPC envelope. No serde
 //! (the frontend stays winit/softbuffer/cpal-only, like `link.rs` /

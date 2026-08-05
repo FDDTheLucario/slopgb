@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Parity: each reference tool plugin's output equals the built-in
 //! `mcp::tools` output for a fixed machine, and the MCP server lists + dispatches
 //! a loaded plugin tool identically to a built-in. Both build the reference-tools

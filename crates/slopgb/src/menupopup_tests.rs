@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Headless tests for the popup-window focus-dismiss latch. The winit glue
 //! (borderless window creation, surface, event routing) is verified live; this
 //! pins the WM-quirk handling that nearly closed the menu on open.

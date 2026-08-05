@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Tests for the deferred-commit clock: each pins a worked example against
 //! SameBoy 1.0.2 `sm83_cpu.c`.
 

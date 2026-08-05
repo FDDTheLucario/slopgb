@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Super Game Boy accessors on [`GameBoy`]: the colorized border surface and
 //! the SNES-side command seams (SOUND / SOU_TRN / OBJ_TRN / DATA_TRN /
 //! DATA_SND / flags + JUMP) an installed coprocessor consumes, plus the opt-in

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Opcode decode: map each of the 256 opcodes to its addressing mode and
 //! operation. Store/RMW indexed modes resolve with `write = true` so they always
 //! spend the indexing dummy cycle. Opcode assignments per the 65C816 matrix.

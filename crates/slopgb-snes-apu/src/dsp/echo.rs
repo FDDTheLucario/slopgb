@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The S-DSP echo unit: an 8-tap FIR filter over a delay-line ring buffer that
 //! lives in APU RAM.
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Run control (`run_until`/`run_frame`/`run_slice`) and serial-link behavior.
 
 use super::*;

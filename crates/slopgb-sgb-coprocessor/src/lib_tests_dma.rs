@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! GP-DMA tests: the host-side engine ($420B / $43x0-$43x6), the WRAM
 //! B-bus access ports, and the plugin stall handshake making transfers
 //! atomic under the polled capture ring.

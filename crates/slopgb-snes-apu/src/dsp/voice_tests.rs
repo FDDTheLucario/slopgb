@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Voice tests: directory read + key-on, pitch advance, envelope gating, and
 //! the end/loop → ENDX path.
 

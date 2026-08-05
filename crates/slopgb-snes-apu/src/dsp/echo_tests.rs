@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Echo unit tests: FIR passthrough, EVOL scaling, and the ECEN write-disable.
 
 use super::*;

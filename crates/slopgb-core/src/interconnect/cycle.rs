@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Deferred-commit cycle-clock + leading-edge read helpers.
 //! A behaviour-preserving submodule of [`Interconnect`] (a second `impl` block
 //! via `use super::*`); the `clock` / `leading-edge` fields live in the

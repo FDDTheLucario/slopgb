@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! MCP address parsing — the `BB:AAAA` / `AAAA` operand shared by the
 //! `disassemble` / `peek` / `cdl` / `breakpoint` tools.
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! **MCP server** — slopgb hosts a Model Context Protocol server so an LLM agent
 //! can drive the debugger: disassemble, peek memory, read the CDL, capture VRAM,
 //! set breakpoints, read registers, and evaluate expressions against the *live*

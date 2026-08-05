@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Mode-3 write strobe staging (stage_write / commit_eff / strobe_tick),
 //! split from regs.rs (register read/write dispatch) to stay under the
 //! 1000-line cap. Second `impl Ppu` block via `use super::*`; behaviour-

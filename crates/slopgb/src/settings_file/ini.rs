@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! std-only ordered-line INI model for bgb.ini compatibility. bgb's file is a
 //! flat `Key=Value` list (no `[section]` headers), CRLF-terminated, with some
 //! keys repeated as a list (`ColorScheme=`, `Recent0..9` are distinct keys).

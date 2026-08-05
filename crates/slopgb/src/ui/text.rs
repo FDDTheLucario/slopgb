@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Text drawing: blit the embedded [`font`] glyphs onto a
 //! [`Canvas`]. Fixed-width — every glyph advances by `GLYPH_W`, so column
 //! layout is just `x + col * GLYPH_W`. All drawing clips through the canvas.

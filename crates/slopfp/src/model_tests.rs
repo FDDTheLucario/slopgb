@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Pure model tests — no filesystem access anywhere in this file. Every
 //! `Picker` here is built with `with_entries`; `navigate_to`'s real-disk path
 //! (via `crate::source::read_dir`) is exercised separately by the `nav.rs`

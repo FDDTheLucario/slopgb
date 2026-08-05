@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Disassembler tests. Every expected string/len/cycles below is the literal
 //! text bgb 1.6.4 produced for that byte sequence — captured in
 //! `docs/bgb-reference/disasm-probe-{1,2,3}.png` (built by `gen_disasm_rom.py`).

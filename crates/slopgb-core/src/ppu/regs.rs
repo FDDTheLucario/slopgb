@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! PPU register read/write dispatch (FF40-FF4B) + LCDC.7 enable/disable. The
 //! mode-3 write strobe staging (stage_write/commit_eff/strobe_tick) lives in
 //! regs/stage.rs. docs/ARCHITECTURE.md §Mode-3 write strobe. Oracle: mealybug m3_*, gambatte scx/scy/dmgpalette during_m3.

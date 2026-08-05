@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Mode/width rules pinned to the datasheet: reset state, XCE, REP/SEP.
 
 use super::*;

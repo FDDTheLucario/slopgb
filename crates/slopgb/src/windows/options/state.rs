@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! [`OptionsState`]'s dialog geometry + click-routing methods, a second
 //! `impl OptionsState` block split out of `options.rs` to keep it under the
 //! 1000-line cap.

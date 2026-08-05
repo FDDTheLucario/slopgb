@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Assemble a `.spc` (SPC700 Sound File, v0.30) snapshot from a live SPC700 +
 //! S-DSP — the 256-byte header (with the CPU registers), the 64 KB APU RAM, and
 //! the 128-byte DSP register file. A snapshot taken while a song is playing is

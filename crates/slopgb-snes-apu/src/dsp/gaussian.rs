@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Gaussian 4-tap interpolation — how the S-DSP resamples a BRR voice to the
 //! output pitch.
 //!

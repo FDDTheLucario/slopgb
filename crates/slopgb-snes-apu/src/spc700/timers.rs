@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The three SPC700 timers.
 //!
 //! T0/T1 are clocked at 8 kHz (1.024 MHz ÷ 128), T2 at 64 kHz (÷ 16). Each timer

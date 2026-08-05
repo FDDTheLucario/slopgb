@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Read-only / debug accessor surface: model + peripheral getters, the
 //! CGB-mode + double-speed views, cartridge/serial handles, the debug
 //! write, and the side-effect-free `peek_no_io`. No timing; construction

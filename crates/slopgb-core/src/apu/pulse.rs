@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Pulse (square wave) channels 1 and 2. Channel 1 additionally has the
 //! frequency sweep unit (NR10); channel 2's sweep state simply stays inert
 //! because no register write ever reaches it and the sweep machinery is

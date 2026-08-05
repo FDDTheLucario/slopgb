@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Addressing-mode operand resolution + the multi-step `MOV` handlers.
 //!
 //! `am_*` fetch operand bytes and return the source **value**; `ea_*` fetch

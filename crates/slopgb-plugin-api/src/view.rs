@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! [`GameBoyView`] — read-only handle onto the live machine, and the
 //! [`Registers`] snapshot it returns.
 

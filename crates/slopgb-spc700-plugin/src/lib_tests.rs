@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Native tests for the SPC700 + S-DSP coprocessor wrapper. These drive the
 //! Coprocessor logic directly (target-independent); the wasm-crossing proof is
 //! `slopgb-plugin-host`'s `spc700_roundtrip`.

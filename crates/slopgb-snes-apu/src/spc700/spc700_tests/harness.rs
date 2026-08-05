@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Cycle-timing / conformance checks:
 //!
 //! 1. [`opcode_cycle_table_smoke`] — always runs. Dispatches all 256 opcodes and

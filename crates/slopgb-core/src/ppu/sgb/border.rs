@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! SGB border composite: the 256×224 SNES surface (32×28 tiles of 8×8) with the
 //! colorized 160×144 Game Boy screen composited as an inset at (48, 40). Border
 //! tiles with color 0 are transparent over the GB area (the screen shows

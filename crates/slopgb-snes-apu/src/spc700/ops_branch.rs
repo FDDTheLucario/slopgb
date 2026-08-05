@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Branches, jumps, calls/returns, `CBNE`/`DBNZ`.
 //!
 //! Conditional branches consume the `rel` operand unconditionally and add +2

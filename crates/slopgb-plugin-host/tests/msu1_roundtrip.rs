@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! End-to-end proof of the MSU-1 streaming-audio coprocessor plugin
 //! (`slopgb-msu1-plugin`) running *in wasm*, driven through the host over the v4
 //! bulk channels. Covers both usage modes:

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! mealybug-tearoom-tests suite harness.
 //!
 //! Protocol (`mealybug-tearoom-tests/game-boy-test-roms-howto.md` + the

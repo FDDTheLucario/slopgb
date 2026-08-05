@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 use super::font::{self, GLYPH_H, GLYPH_W};
 
 #[test]

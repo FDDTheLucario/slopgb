@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! MBC6 (cartridge type 0x20): window banking + the MX29F008 flash chip.
 //!
 //! Pan Docs "MBC6": the switchable areas are half the usual size — two 8 KiB

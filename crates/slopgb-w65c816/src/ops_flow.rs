@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Jumps and subroutine calls: `JMP`/`JML`, `JSR`/`JSL`, `RTS`/`RTL`. The
 //! return address pushed is the address of the instruction's last byte (so a
 //! return adds one). The 6502-era calls (`JSR`/`RTS`) keep the stack in page 1

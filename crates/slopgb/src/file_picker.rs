@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The in-app file browser: `slopfp`'s pure state machine wired to the game
 //! window. This is the file picker for every file purpose (Load ROM / Save &
 //! Load state / symbols / bootrom paths / CDL / cheats) — self-contained, with

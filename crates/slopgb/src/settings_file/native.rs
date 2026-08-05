@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! slopgb's native settings format: a versioned, sectioned,
 //! std-only text file (`slopgb.conf`) — the default store; bgb.ini is demoted to
 //! import/export. Human-editable + git-diffable, forward/back compatible:

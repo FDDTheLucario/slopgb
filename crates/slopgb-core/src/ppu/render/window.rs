@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Window machine: WX comparator (pause-aware, edge-triggered), window line counter, mid-line LCDC.5 abort. Oracle: gbtr m3_wx_*/window/m0enable, mealybug m3_window_timing*.
 
 use super::*;

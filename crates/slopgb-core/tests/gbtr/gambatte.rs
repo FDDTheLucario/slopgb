@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! gambatte suite harness (`gambatte/`, 3524 ROMs).
 //!
 //! Protocol per `gambatte/game-boy-test-roms-howto.md` and the upstream

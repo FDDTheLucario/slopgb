@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Serial port (FF01 SB, FF02 SC). Timer/serial work package.
 //!
 //! The internal serial clock is derived from the DIV counter, so transfer

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Unit tests for the interconnect (memory map, DMA engines, IO routing,
 //! sub-dot access machinery, speed switch). Split out of `interconnect.rs`
 //! for file size; compiled as `super::tests` via the `#[path]` attribute.

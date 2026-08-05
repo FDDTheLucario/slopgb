@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! SoundFont-2 (SF2) importer/exporter + SNES BRR codec for the SGB N-SPC
 //! music engine.
 //!

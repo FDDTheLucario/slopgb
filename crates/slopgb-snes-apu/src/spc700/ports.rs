@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! I/O registers `$F0-$FF`: control/test, DSP address/data, the four comm
 //! ports, the aux registers, and the timer target/counter registers.
 //!

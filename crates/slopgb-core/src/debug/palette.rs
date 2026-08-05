@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Palette decoders for the bgb VRAM viewer's Palettes tab. CGB palette RAM
 //! is the exact 15-bit BGR555 words bgb prints (e.g. `7FFF`); DMG palettes are
 //! the BGP/OBP shade-index mappings. The swatch *colour* bgb draws applies a

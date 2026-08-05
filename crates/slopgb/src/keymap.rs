@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Rebindable keyboard → Game Boy button map and the bgb-style "configure
 //! keyboard" wizard.
 //!

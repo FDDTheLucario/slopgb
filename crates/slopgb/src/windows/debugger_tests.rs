@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Debugger window tests, split into category submodules to keep every file
 //! under the size cap. Shared fixtures (`regs0`, `AREA`, `NOPS`) live here;
 //! each category module pulls them via `use super::{...}` and reaches the code

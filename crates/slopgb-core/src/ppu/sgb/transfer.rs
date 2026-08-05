@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! SGB VRAM transfers: the `*_TRN` commands capture the *rendered* Game Boy
 //! screen (never VRAM) and read its 2-bit shades as packed 4bpp data — 4096
 //! bytes per full-screen capture (Pan Docs "SGB Functions — VRAM Transfer";

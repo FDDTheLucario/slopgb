@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! OAM / VRAM / sprite access + mode-2/3 STAT-read pinned-behavior tests.
 //!
 //! Submodule of `oam_vram`; see the module root for the split rationale.

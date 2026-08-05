@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Emulation pacing helpers: the audio pipeline (core → resampler → device
 //! queue), a watchdog for a dead cpal stream, and the audio-vs-timer pacing
 //! decision. The pacing *loop* lives on `App` in [`crate::app_pacing`].

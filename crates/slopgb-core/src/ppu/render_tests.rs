@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Unit tests for the PPU renderer (OAM scan, fetcher, sprites, window,
 //! mode-0 grid). Split out of `render.rs` for file size; compiled as
 //! `super::tests` via the `#[path]` attribute there.

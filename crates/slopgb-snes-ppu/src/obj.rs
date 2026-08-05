@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The OBJ (sprite) scanline renderer, authored from nocash *fullsnes*:
 //! "2101h OBSEL", "SNES PPU Sprites (OBJs)", the OAM entry/high-table
 //! layout, and the OBJ tile-number arithmetic ("no carry-outs from x+1 to

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! One loaded ROM: the live [`GameBoy`], battery-RAM persistence (atomic
 //! `.sav` writes + autosave), in-memory quick-save snapshots, and cartridge-
 //! header parsing for the "Cart info" box.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Startup resource resolution: the boot-ROM / SGB-BIOS bytes, the plugin
 //! registry (manifest-declared CLI flags — see `docs/ui-state/plugin-api.md`),
 //! and the opt-in tier-1 plugin host (`--plugins` dir), each resolved from CLI

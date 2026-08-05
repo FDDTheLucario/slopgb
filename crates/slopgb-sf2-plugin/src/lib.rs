@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Coprocessor plugin that converts a host-supplied SF2 soundfont into the
 //! N-SPC sample-bank cache format (`slopgb-sf2`'s `.smpl`), inside a wasm
 //! sandbox — not a clocked chip: the host hands over the raw SF2 bytes with

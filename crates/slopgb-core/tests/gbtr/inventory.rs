@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Whole-collection inventory guard: every `.gb`/`.gbc` file in the
 //! game-boy-test-roms checkout must be claimed (≥1 rom×model case) or
 //! exempted (documented never-run) by exactly one suite module, so adding a

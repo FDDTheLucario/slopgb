@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Resident N-SPC install: two independent, composable axes.
 //!
 //! **Engine source** ([`Engine`]) — the ROM's own resident engine code

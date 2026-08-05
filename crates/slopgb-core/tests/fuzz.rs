@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Panic-freedom fuzz smoke for the untrusted parsers a real user feeds: the ROM
 //! image, the `.sav` battery file, the savestate blob, and the CDL file. All are
 //! attacker/accident-controlled bytes; none may ever panic, hang, or over-allocate

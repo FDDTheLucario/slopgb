@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! N-SPC sample bank (dir + instrument table + BRR data) <-> SF2, both
 //! directions.
 //!

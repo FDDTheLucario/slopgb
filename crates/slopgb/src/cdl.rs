@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! CDL (code/data logging) frontend helpers: the per-flag background tint for
 //! the memory viewer, and a std-only RLE codec for the compressed save file.
 //! The core owns the golden-safe flag store; this is pure display + file glue.

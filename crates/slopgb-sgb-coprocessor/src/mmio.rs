@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Routing for the guest's captured SNES MMIO writes: the batched pure-PPU
 //! port run, and the per-register dispatch that hands MSU-1, WRAM-access,
 //! CPU I/O, GP-DMA and PPU writes to their consumers.

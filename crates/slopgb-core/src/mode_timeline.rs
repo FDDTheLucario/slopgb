@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Decoupled visible-mode / interrupt-mode timeline for the mode-2/3/0 spine of
 //! a visible line, on a finer (sub-dot) grid than the live PPU's whole-dot
 //! `vis_mode` + `m0_src`/`m0_rise_dot` model.

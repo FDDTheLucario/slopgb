@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Multi-window support (B12b): owns the open bgb tool windows (Debugger / VRAM
 //! viewer / I/O map) alongside the always-present game window, which `main`
 //! keeps handling itself. Each tool window is a winit window + its own

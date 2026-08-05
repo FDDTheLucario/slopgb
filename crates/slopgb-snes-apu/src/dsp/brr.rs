@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! BRR (Bit Rate Reduction) sample decoding — the SNES ADPCM format.
 //!
 //! A BRR sample is a chain of 9-byte blocks. Byte 0 is the header:

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Timer tests: the 8 kHz (T0/T1) and 64 kHz (T2) dividers, the 4-bit
 //! read-and-clear output, target-0-means-256, enable-edge reset, and the
 //! disabled-timer freeze. Driven through the real I/O path (`$F1`, `$FA-$FF`)

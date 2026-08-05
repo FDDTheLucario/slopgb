@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The clocking pump: the Game Boy cycle stream batched into [`FLUSH_CHUNK`]
 //! passes, and everything one pass does — apply the guest's captured MMIO
 //! writes, rasterize the scanlines the SNES beam has passed, maintain the

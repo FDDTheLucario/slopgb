@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! End-to-end oracle for the clean-room SGB boot ROM (`boot/slopgb_sgb_boot.bin`,
 //! built from `boot/slopgb_sgb_boot.asm`). Unlike the copyrighted `dmg_boot.bin`
 //! oracle in `bootrom.rs`, this asset is committed (original MIT work), so the

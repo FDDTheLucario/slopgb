@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! ROM-gated round-trip integration test: the SGB system ROM's N-SPC sample
 //! bank exports to a standard SF2 and re-imports to structurally valid S-DSP
 //! regions, with the decoded audio surviving the lossy BRR re-encode.

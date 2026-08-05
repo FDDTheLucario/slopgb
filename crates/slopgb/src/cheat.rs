@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Cheat engine, modeled on bgb's Cheat dialog (docs/bgb-reference/cheat/):
 //! a list of `{ comment, code, enabled }` entries. Enabled GameShark codes are
 //! re-poked into RAM once per frame — the same `debug_write` re-apply the freeze

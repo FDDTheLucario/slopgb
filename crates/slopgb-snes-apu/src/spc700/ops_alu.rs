@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! ALU: arithmetic/logic primitives + the RMW, 16-bit word, `MUL`/`DIV`,
 //! `DAA`/`DAS`, and `XCN` handlers.
 //!

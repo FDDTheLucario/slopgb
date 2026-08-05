@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Guest SDK for slopgb plugins. A plugin is a `wasm32` library that implements
 //! [`Plugin`] and invokes [`slopgb_plugin!`]. The host is `slopgb-plugin-host`.
 //! Guide: `docs/ui-state/plugin-api.md`.

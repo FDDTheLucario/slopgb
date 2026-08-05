@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `mod_tests` — stat tests: OAM + vblank-pulse group (split for file size).
 
 use super::*;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! BG renderer tests, pinned to the fullsnes tile/map/scroll laws.
 
 use super::*;

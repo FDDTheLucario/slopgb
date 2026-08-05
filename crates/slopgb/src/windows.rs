@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Layer C: the bgb tool windows (Debugger / VRAM viewer / I/O map). Each is a
 //! pure content renderer composing the `ui` widgets over `slopgb_core::debug`
 //! introspection, unit-tested headless; the event loop (B12b) feeds each one a

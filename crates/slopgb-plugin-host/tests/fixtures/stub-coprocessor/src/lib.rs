@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Coprocessor round-trip fixture: a comm-port latch whose read value folds in
 //! the current cycle, so the host test can prove reset, run_until, port_write,
 //! and port_read all cross the boundary correctly.

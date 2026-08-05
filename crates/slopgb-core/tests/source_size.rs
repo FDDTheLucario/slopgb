@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Repo hygiene guard: enforce the project's "every `.rs` under 1000 lines"
 //! rule (CLAUDE.md "No god files"). Walks the whole workspace source + test
 //! tree and fails listing every file over the cap, so a silently-growing god
@@ -47,7 +50,17 @@ fn every_rs_file_under_the_god_file_cap() {
     let mut over: Vec<(usize, PathBuf)> = files
         .into_iter()
         .filter_map(|p| {
-            let n = std::fs::read_to_string(&p).ok()?.lines().count();
+            // The licence header is not code: skip the leading `//` comment
+            // block so a two-line SPDX notice does not eat a file's budget.
+            let src = std::fs::read_to_string(&p).ok()?;
+            let mut body = src
+                .lines()
+                .skip_while(|l| l.starts_with("// SPDX-") || l.starts_with("// Copyright"));
+            // …and the blank line that separates the header from the code.
+            let mut n = body.clone().count();
+            if body.next() == Some("") {
+                n -= 1;
+            }
             (n > LIMIT).then_some((n, p))
         })
         .collect();

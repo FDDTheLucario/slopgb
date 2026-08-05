@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Guest↔host wire contract: ABI version, register index map, wasm imports.
 //! Host counterpart is `slopgb-plugin-host`; both must agree on the items here.
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Whole-DSP tests: register access + mirror, live ENVX/OUTX/ENDX reads,
 //! KON-driven synthesis end-to-end, the FLG mute, and a save-state round-trip.
 

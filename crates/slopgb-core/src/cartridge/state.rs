@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Save-state (manual serialization; see `crate::state`).
 //!
 //! ROM bytes + ROM-derived flags (has_battery, multicart/mbc30/rumble_cart, the

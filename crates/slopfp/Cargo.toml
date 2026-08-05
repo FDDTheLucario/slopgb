@@ -6,7 +6,7 @@ description = "Std-only, framework-agnostic file-picker state machine + view-mod
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-license = "MIT"
+license.workspace = true
 
 [dependencies]
 # Intentionally empty. std only, forever. See lib.rs `forbid(unsafe_code)`.

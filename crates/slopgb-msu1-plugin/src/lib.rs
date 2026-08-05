@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! MSU-1 streaming-audio coprocessor, as a slopgb tier-3 wasm plugin.
 //!
 //! MSU-1 is an open homebrew add-on chip (near/byuu): eight memory-mapped

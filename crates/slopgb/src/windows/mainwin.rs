@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The main game-window right-click menu (bgb's `rc-main.png`) and its submenus.
 //! Unlike the debugger panes this isn't a tool window — it's an app-owned popup
 //! drawn as an overlay over the live LCD. Pure state + hit-tests here (unit-

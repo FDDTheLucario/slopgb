@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! SGB command routing: the teed raw packets, SOUND/DATA_SND/DATA_TRN/JUMP
 //! commands, and the SOU_TRN driver upload — everything `poll` drains from
 //! the core each step and lands on the two chips.

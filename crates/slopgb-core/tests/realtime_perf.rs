@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Performance floor: the emulator must run each model **faster than real time**
 //! headless, or it can't hold 60 fps for a player. Deliberately a loose bound
 //! (~realtime, not the true ~hundreds-of-fps headroom) so it never flakes on a

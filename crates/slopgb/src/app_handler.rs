@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `App`'s winit [`ApplicationHandler`] impl: the event-loop trait driving the
 //! app — window/surface/audio creation on `resumed`, the per-window event
 //! router in `window_event` (modifiers, the right-click popup window, the debug

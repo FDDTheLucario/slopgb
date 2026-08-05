@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Coprocessor plugin wrapping the clean-room 65C816 (`slopgb-w65c816`) — the
 //! SNES-side CPU the Super Game Boy runs — as a host-driven wasm subsystem.
 //!

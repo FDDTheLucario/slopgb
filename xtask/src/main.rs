@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Dev-only workspace tasks, invoked via the `cargo xtask` alias (std only, plus
 //! the std-only/zero-dep `slopgb-sf2` for `gen-sf2`). Two jobs: build the
 //! coprocessor plugin crates to wasm and stage them under the fixed filenames

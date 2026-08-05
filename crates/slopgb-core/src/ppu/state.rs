@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! PPU save-state (de)serialization (a second `impl Ppu` block; see
 //! `crate::state`). Covers the registers, OAM, both VRAM banks, the CGB palette
 //! RAM, the STAT/LYC event ladder, and the sub-dot fetch/FIFO pipeline (`eff`,

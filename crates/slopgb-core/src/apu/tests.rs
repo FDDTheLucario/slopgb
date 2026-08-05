@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Unit tests for the APU. Split out of `mod.rs` for file size;
 //! compiled as `super::tests` via the `#[path]` attribute there.
 

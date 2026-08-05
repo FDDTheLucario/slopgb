@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Immediate-mode widgets for the bgb-style tool windows. Each is a stateless
 //! draw + hit-rect: the window owns the state (checked, pressed, …) and passes
 //! it in, and the returned [`Rect`] is what a click is tested against. They

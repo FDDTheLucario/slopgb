@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! LYC compare machinery: held-compare windows, LYC period, FF45 write trigger (DMG/CGB). Port of gambatte lyc_irq.cpp. Oracle: gbtr age ly/ly-ncm, wilbertpol -C LY, mooneye LYC.
 
 use super::*;

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `.smpl` cache: a compact on-disk serialization of [`Regions`] so a
 //! previously-imported soundfont doesn't need to be re-resampled/re-BRR-
 //! encoded on every run.

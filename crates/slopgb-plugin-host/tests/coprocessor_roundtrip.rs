@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! End-to-end proof of the coprocessor (tier-3) plugin path: a real Rust
 //! coprocessor built with slopgb_coprocessor_plugin!, compiled to wasm32, is
 //! reset, clocked, and exchanges comm-port values with the host. Skips if

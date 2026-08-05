@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! SNES-side audio subsystem for the Super Game Boy: the [`spc700`] S-SMP CPU
 //! and the [`dsp`] S-DSP sample synthesizer, plus the little-endian [`state`]
 //! serializer they save through.

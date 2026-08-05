@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! End-to-end proof that the SPC700 + S-DSP coprocessor plugin
 //! (`slopgb-spc700-plugin`) — the same audio subsystem `slopgb-core` runs
 //! natively — executes correctly *in wasm*, driven through the host: clocking it

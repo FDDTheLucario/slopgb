@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Hand-rolled SF2 (`RIFF....sfbk`) reader.
 //!
 //! Parses just enough of the format for the N-SPC round-trip: samples (PCM16,

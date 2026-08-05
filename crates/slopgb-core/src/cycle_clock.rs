@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Deferred-commit ("lazy-advance") CPU clock: the executable encoding of
 //! SameBoy 1.0.2's `pending_cycles` clock (`sm83_cpu.c`).
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Building the backend: reading the plugin `.wasm` files (the two required
 //! chips plus the optional SNES-PPU and MSU-1 plugins), attaching an MSU-1
 //! track pack, and installing the resident clean-room firmware into both

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Frame-assembly tests: the priority chart, TM, backdrop, INIDISP.
 
 use super::*;

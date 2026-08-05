@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! APU: 2 pulse channels, wave, noise (FF10-FF3F). APU work package.
 //!
 //! The frame sequencer (length/envelope/sweep) is clocked by falling edges

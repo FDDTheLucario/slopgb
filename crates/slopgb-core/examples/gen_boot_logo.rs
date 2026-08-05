@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Generate the SLOPGB boot wordmark in the chunky forward-italic style of the
 //! classic Game Boy logo (original art — not the trademarked logo bitmap).
 //! Upright slab glyphs are defined at half height, doubled vertically (the GB

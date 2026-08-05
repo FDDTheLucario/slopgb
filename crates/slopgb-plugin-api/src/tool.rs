@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Request/response tool plugins — the shape an MCP-style debug tool takes.
 //! A tool plugin is called on demand (not per frame) with an argument string
 //! and returns text or an image. One module may expose several tools.

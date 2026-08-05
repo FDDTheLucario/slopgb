@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `App` presentation: the game-window redraw (frame-source select, postfx,
 //! modal overlays) and the DMG-palette / no-ROM blank-frame plumbing. Split out
 //! of `main.rs` to keep it under the size cap.

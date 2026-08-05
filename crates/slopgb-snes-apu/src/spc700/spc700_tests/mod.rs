@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! SPC700 test suite (compiled as `super::tests`).
 //!
 //! - [`ops`]     — per-opcode / per-flag unit tests, incl. the documented

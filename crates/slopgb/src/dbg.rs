@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Frontend debugger execution control: break / resume / step / step-over over
 //! the live machine, driving the emulation loop. Both the keyboard-driven core
 //! and breakpoint-by-click (double-click a disasm row) drive it.

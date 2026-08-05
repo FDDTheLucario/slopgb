@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Integration test: drive the `Picker` through the **public** API only,
 //! against a real temp-dir tree on disk. Unit tests exercise `model.rs`
 //! logic in isolation (`with_entries`, no fs); this test is the one place

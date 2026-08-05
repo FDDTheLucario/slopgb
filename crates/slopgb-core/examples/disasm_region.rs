@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Disassemble a region of a raw binary (e.g. a boot ROM) for analysis.
 //! `cargo run -p slopgb-core --example disasm_region -- <bin> <start_hex> <end_hex>`
 use slopgb_core::debug::decode;

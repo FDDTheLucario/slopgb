@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The MSU-1 seam: with `msu1.wasm` attached and a `.pcm` pack, a game reaches
 //! the chip the real-hardware way — its resident SNES-side handler drives the
 //! MSU-1 registers at SNES `$2000-$2007`, which the host routes to the plugin

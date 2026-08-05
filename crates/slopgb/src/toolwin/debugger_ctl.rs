@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Debugger-window control surface: the `ToolWindows` methods that drive the
 //! debugger view (view lookup, navigation, modals, bookmarks, search, disasm
 //! copy/export, eval). Split out of `toolwin.rs` to keep each file under the

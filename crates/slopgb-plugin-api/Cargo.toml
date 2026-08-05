@@ -6,7 +6,7 @@ description = "Guest SDK for writing slopgb emulator plugins in Rust, compiled t
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-license = "MIT"
+license.workspace = true
 
 [dependencies]
 # Intentionally empty. A plugin's only dependency is this SDK; std only.

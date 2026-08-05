@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Command-line parsing for the slopgb frontend. Kept pure (no I/O, no exit)
 //! so [`Options::parse`] is unit-testable; `main` prints the help / errors.
 //!

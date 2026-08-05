@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Coprocessor plugin wrapping the clean-room SNES PPU (`slopgb-snes-ppu`)
 //! as a host-driven wasm subsystem.
 //!

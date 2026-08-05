@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Pure decoders over the raw VRAM/OAM bytes ([`crate::GameBoy::vram`] /
 //! [`crate::GameBoy::oam`]) for the bgb VRAM viewer's Tiles and OAM tabs.
 //! Kept out of the PPU (which only hands over raw bytes) so they unit-test

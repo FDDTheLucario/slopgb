@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Pure picker logic — **no filesystem access**. Everything here derives from
 //! `self.entries` + view state, so it is unit-testable via
 //! [`Picker::with_entries`]. The one exception is `Picker::navigate_to`, which

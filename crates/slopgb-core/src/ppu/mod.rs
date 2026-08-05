@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Dot-accurate PPU with pixel FIFO. PPU work package.
 //!
 //! Stepped one 8 MHz half-dot at a time by the interconnect

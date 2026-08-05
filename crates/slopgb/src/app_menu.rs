@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `App` game-window menu handling: the bgb right-click main menu, its
 //! submenus (Window size / Sound channel / Other / State), the info boxes
 //! (Cart info / System info / About), and the window-size resize. The menu

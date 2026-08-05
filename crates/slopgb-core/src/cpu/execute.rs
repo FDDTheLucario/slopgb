@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Instruction decode and execution. CPU work package.
 //!
 //! Cycle model: every [`Bus::read`]/[`Bus::write`] and every internal

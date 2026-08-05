@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Bookkeeping for the multi-window frontend: which bgb tool windows are open
 //! and which OS window id shows which, so the event loop can route redraw/input
 //! to the right one. Pure state — creating/destroying the actual winit windows

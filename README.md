@@ -158,6 +158,3 @@ gambatte (GPL-2.0), which requires derivative works to carry the same licence;
 the SameBoy timing port is Expat/MIT and its notice is reproduced as that
 licence requires. Both, plus the reference-project attributions, are in
 [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
-
-`crates/slopfp` and `crates/slopgb-plugin-api` carry no derived code and stay
-MIT, so plugin authors are not pulled into the GPL by the guest SDK.

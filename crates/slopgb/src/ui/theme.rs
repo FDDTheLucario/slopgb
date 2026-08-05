@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The active colour palette for every bgb-style tool window: a flat table of
 //! named colour roles (`u32` XRGB8888, `0x00RRGGBB`) with **no geometry** — so
 //! swapping a [`Theme`] can only ever recolor pixels, never move or resize a

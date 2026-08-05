@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The SNES **S-DSP** — the 8-voice sample/echo synthesizer that turns the
 //! SPC700's register writes + APU RAM into a 32 kHz stereo stream.
 //!

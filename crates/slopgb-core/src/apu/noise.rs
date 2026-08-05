@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Noise channel (channel 4): 15-bit LFSR clocked from a free-running
 //! counter.
 //!

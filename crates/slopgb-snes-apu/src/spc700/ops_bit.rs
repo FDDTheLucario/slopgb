@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Bit instructions.
 //!
 //! - `SET1`/`CLR1 dp.bit` and `BBS`/`BBC dp.bit,rel`: the tested bit is the

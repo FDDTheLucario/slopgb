@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! CGB post-boot PCM-decay probe (was `mod pcm_decay_probe` in
 //! `interconnect.rs`).
 

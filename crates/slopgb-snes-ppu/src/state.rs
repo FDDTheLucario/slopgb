@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Snapshot serialization for [`SnesPpu`] — a fixed-length byte image of the
 //! three memories + every port/latch/register, so the wasm plugin wrapper
 //! (and any other host) can save/restore the chip without reaching into

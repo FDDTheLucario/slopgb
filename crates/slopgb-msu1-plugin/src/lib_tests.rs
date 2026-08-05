@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Native unit tests for the target-independent MSU-1 logic: header parsing,
 //! volume scaling, the status-register bit layout, control-register decoding,
 //! and the seek-pointer assembly. The streaming + host-file/mailbox paths call

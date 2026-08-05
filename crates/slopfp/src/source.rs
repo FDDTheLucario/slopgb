@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The **only** module that touches `std::fs` — the picker's filesystem source.
 //! Everything is std-only. Tested against a real temp directory (see
 //! `source_tests.rs`), platform-specific bits gated behind `#[cfg(unix)]` etc.

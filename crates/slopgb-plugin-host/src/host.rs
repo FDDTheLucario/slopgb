@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! [`PluginHost`] — loads wasm plugins, serves their host imports from a
 //! per-frame [`Snapshot`], and drives their `on_frame` export.
 

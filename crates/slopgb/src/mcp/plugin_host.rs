@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Tool-plugin hosting for the MCP server: loads tier-2 `LoadedTool` wasm
 //! modules and dispatches their tools against the live machine.
 //!

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! BG fetcher + FIFO + the mode-0/IRQ-flip end-of-line grid (pipe-end projection, SCX hunt, flip/IRQ dot leads). Oracle: gbtr bgtile*/m0enable, gbmicrotest hblank_int/int_hblank, mooneye intr_2_mode0_timing.
 
 use super::*;

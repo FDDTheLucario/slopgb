@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! bgb/rgbds-style `.sym` symbol files: one `BB:AAAA name` line per symbol
 //! (`BB` = bank hex, `AAAA` = 16-bit address hex). Loaded into the debugger so
 //! the disassembly, `Go to…`, and the breakpoint manager can show names.

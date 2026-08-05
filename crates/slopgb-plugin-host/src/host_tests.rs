@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Load-gating and the host-import round trip, driven by synthetic `.wat`
 //! modules so they don't need the wasm32 fixture build.
 

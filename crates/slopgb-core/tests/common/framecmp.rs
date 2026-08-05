@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! RGB frame-vs-reference-image comparators for test-ROM suites whose
 //! expected output ships as full-color reference images (decoded PNG:
 //! width/height/`Vec<[u8; 3]>`), as opposed to the shade-class assets the

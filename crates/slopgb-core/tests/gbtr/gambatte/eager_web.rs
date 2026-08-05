@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! CGB single-speed dispatch/IRQ web pins. A CGB `GB_CONFLICT_WRITE_CPU`
 //! engine write (FF41 STAT / FF0F IF / FF45 LYC) commits its engine-visible
 //! effect one T into the M-cycle — [`Interconnect::write`] lands the commit at

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Software interrupts (`BRK`/`COP`), the interrupt return (`RTI`), and the
 //! `WAI`/`STP` wait/stop ops. A software interrupt pushes the return state,
 //! masks IRQs, clears decimal, zeroes the program bank and vectors through a

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Debugger interaction (RM4/RM5/RM7/RM11): left/right/double-click
 //! resolution, menu-choice application, and the modal prompt (Go to /
 //! Search / Evaluate / edit register) open + accept plumbing. Pure over

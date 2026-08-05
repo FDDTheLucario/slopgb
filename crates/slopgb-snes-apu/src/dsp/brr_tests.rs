@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! BRR decode tests. Where a value is "known", it is computed by hand from the
 //! Blargg decode rules this module implements; the filter tests additionally
 //! check the decoded slope against the documented float coefficients.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Gaussian table + interpolation tests. The strongest correctness check
 //! without hardware capture is the *unity-gain* property: at every fractional
 //! index the four selected coefficients sum to ≈ 2048, so `>> 11` leaves a

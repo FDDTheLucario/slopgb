@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Per-tab control builders for the Options dialog. Each `pub(super) fn`
 //! builds the flat [`Ctrl`] list for one tab from the current [`Settings`];
 //! the parent's `controls()` dispatches to them and `render()`/`apply()` read

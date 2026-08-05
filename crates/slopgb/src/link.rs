@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Serial **Link cable** over TCP — bgb-compatible 8-byte packet framing,
 //! driven by a background socket thread so the paced UI never blocks. Uses
 //! `std::net` + `std::thread` + `std::sync::mpsc` only (respects the frontend's

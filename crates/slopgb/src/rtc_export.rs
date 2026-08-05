@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! VBA-compatible RTC footer for the `.sav` (Options → System → "Save RTC in
 //! SAV file (VBA compatible)"). Lets VBA / mGBA / SameBoy read an MBC3 cart's
 //! clock out of a slopgb save. The byte layout is exactly what

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The bgb debugger window (Layer C): composes the `ui` widgets over
 //! `slopgb_core::debug` introspection. This module is the window *content* —
 //! pure rendering into a [`Canvas`], unit-tested headless; the winit surface

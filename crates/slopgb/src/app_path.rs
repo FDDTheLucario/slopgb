@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! `App` path-modal handling: the shared text prompt used for Load ROM / Save &
 //! Load state / Link connect / bootrom paths / `.sym` symbol load, and the
 //! recent-ROMs bookkeeping. Split out of `main.rs` to keep it under the size cap.

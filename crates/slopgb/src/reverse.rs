@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Reverse execution for the debugger and the player rewind, built on the
 //! checkpoint ring in [`Session`]. Frame-boundary save states are too coarse to
 //! *be* a reverse target, but they are exact **replay anchors**: load the

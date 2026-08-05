@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! DIV/TIMA timer (FF04-FF07). Timer work package.
 //!
 //! Built around the internal 16-bit DIV counter. TIMA increments on falling

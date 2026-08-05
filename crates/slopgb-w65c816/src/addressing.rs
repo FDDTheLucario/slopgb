@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Effective-address resolvers for every 65C816 addressing mode. Each returns
 //! the 24-bit address plus a `bank0` flag: `true` when a 16-bit data access must
 //! keep its high byte in bank 0 (direct-page and stack data wrap at `$FFFF`).

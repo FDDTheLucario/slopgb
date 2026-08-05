@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Search-menu wiring tests (MB3): the Search dropdown is fully live, and the
 //! Search-string modal stores the query + signals the scan on accept.
 

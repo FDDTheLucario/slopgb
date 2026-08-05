@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Memory map, peripheral wiring, IF/IE, OAM DMA, CGB extras.
 //! Interconnect work package.
 //!

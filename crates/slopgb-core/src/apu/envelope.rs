@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Volume envelope (NRx2) shared by the pulse and noise channels.
 //!
 //! Hardware model (SameBoy apu.c `GB_apu_div_event` /

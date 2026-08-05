@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! FF41 read-law engine, part 2: the per-config CPU-visible mode-3→0 exit
 //! table `vis_exit_hd` (window length/shadow arms · pre-draw/reenable aborts ·
 //! the post-switch exit table · the unified bare exit) + the shadow

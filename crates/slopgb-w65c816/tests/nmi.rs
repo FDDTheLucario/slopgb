@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Hardware NMI dispatch (a pin, not an opcode — no SingleStepTests vectors
 //! exist), per the WDC W65C816S datasheet: vectors `$00FFFA` (emulation) /
 //! `$00FFEA` (native); native mode pushes the program bank first; the

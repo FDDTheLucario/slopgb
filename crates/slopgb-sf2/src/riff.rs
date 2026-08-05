@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Minimal hand-rolled RIFF chunk framing shared by [`crate::reader`] and
 //! [`crate::writer`]: a RIFF file is a sequence of `FourCC + u32-LE length +
 //! data` chunks, each padded to an even byte length (the pad byte is not

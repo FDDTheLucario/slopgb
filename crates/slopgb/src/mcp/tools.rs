@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The built-in MCP tools' logic, run on the UI thread against the live machine.
 //! Each is read-only `&self` introspection except `breakpoint`, which toggles
 //! the App-owned breakpoint set. Formatting reuses the core disassembler and

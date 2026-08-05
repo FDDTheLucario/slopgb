@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! CGB VRAM (HBlank/General) DMA request engine: bus-stealing service seam, 2-bytes/cycle (1 in double speed), teardown cycle, halt/stop deferral. gambatte memory.cpp Hdma. Oracle: gbtr hdma_*, same-suite hdma.
 
 use super::*;

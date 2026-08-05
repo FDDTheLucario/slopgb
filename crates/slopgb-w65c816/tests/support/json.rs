@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! A tiny std-only JSON reader for the SingleStepTests vector files (modeled on
 //! the frontend's `mcp/json.rs`, but this copy lives in the CPU crate's test
 //! code). Numbers are integral in these files, so they parse as `i64`; `null`

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Shared helpers for the mooneye test-suite integration harness
 //! (`tests/mooneye.rs`).
 //!

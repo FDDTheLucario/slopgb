@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Linear-interpolation PCM16 resampler.
 //!
 //! Ceiling: linear interpolation only (no windowed-sinc / band-limited

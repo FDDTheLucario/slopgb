@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The `simulate` what-if fork: a cloned machine advanced cooperatively on the
 //! UI thread — one bounded slice per [`super::Mcp::pump`] — so a long run neither
 //! freezes the UI nor blocks the 5 s MCP reply window. Golden-safe: only the

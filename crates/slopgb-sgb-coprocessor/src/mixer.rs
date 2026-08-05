@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The audio output stage: resampling the 32 kHz S-DSP and 44.1 kHz MSU-1
 //! sources onto the host output rate, then mixing that stream into (or
 //! draining it out of) the Game Boy audio.

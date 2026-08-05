@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! SPC700 — the SNES APU (audio) CPU core.
 //!
 //! Self-contained, cycle-accurate SPC700 (Sony SPC700 / S-SMP) processor. The

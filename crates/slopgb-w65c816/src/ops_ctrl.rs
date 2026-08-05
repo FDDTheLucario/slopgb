@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Flag and mode control: `REP`/`SEP` mask the status byte, `XCE` swaps carry
 //! and emulation, `WDM` is a two-byte no-op. The single-bit flag clears/sets
 //! (`CLC`, `SEC`, ...) are decoded inline in `dispatch`. Per the WDC W65C816S

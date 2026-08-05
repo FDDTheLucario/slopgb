@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! mooneye-test-suite-wilbertpol harness — the 2016-era mooneye fork
 //! (`mooneye-test-suite-wilbertpol/` in the c-sp collection).
 //!

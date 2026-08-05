@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Hand-rolled SF2 (`RIFF....sfbk`) writer.
 //!
 //! Emits a minimal but valid, playable standard SF2: `INFO` (`ifil`=2.01,

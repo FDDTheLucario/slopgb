@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! SGB attribute-grid fills, palette-RAM select, and the sound / data / flag
 //! command handlers. A second `impl SgbView` block (`use super::*`); layouts
 //! cite Pan Docs "SGB Command $xx" and SameBoy `Core/sgb.c::command_ready`.

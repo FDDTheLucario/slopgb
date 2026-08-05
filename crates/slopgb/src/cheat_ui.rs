@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The Cheat dialog UI (bgb's Cheat window, docs/bgb-reference/cheat/): a centred
 //! modal over the LCD listing the cheats with a button grid + an Advanced toggle,
 //! plus a two-field Add/Edit editor (Comment / Code, exactly like bgb). The pure

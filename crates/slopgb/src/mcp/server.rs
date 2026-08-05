@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! The MCP transport: a background thread owns a `TcpListener` and speaks the
 //! Model Context Protocol **streamable-HTTP** profile — a client POSTs a
 //! JSON-RPC request and gets a JSON response (`claude mcp add --transport http`).

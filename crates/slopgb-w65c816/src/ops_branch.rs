@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Compares (`CMP`/`CPX`/`CPY`) and the branch family. A compare subtracts
 //! without storing and sets N/Z/C (C = no borrow). A taken branch spends one
 //! extra cycle, and a second in emulation mode when the target crosses a page.

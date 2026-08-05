@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Per-voice envelope: ADSR (attack / decay / sustain / release) and the five
 //! GAIN modes (direct, linear increase, bent increase, linear decrease,
 //! exponential decrease), plus the global rate counter that gates every step.

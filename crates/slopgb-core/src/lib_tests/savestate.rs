@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Save-state round-trips, corrupt/foreign rejection, clone independence.
 
 use super::*;

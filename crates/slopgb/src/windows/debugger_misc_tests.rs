@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Debugger tests added in the bgb-viewers-debugger round: memory-pane scroll,
 //! double-click breakpoints, go-to-by-symbol, and breakpoint-manager symbol
 //! labels. Split from `debugger_tests.rs` to keep that file under the size cap.

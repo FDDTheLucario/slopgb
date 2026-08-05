@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Boot-ROM convergence oracle: running the **real** DMG boot ROM
 //! from power-on must hand off (FF50) to the exact same register state the
 //! direct post-boot install produces — PC=0x0100 + the documented post-boot

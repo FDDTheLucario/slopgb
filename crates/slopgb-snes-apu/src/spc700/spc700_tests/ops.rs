@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Per-opcode / per-flag unit tests, with emphasis on the documented quirks.
 //!
 //! Exhaustive per-opcode correctness is covered by the `SingleStepTests`

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! OAM DMA engine: 160-cycle transfer, FF46 setup delay/restart, per-source-class bus conflicts (gambatte memory.cpp `oamDma*`). Oracle: gbtr oamdma/*, blargg oam_bug/*, mooneye acceptance/oam_dma/.
 
 use super::*;

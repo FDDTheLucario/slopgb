@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Headless throughput bench for [`SgbCoprocessor`]: how fast the two SGB
 //! SNES-side workloads run with no GUI/audio-device attached.
 //!

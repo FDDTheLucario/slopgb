@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Throwaway: boot a cart through a boot ROM vs. the direct post-boot install,
 //! report hand-off + dump both framebuffers (PPM) to compare.
 //! `cargo run -p slopgb-core --example boot_check -- <boot.bin> <rom> <frames>`

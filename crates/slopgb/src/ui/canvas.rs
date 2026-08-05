@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! A software drawing surface over a `&mut [u32]` XRGB8888 pixel buffer — the
 //! substrate the bgb-style debugger/viewer windows render into (we own every
 //! pixel; no GUI toolkit). Everything clips to the buffer and to a settable

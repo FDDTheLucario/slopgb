@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Richard Moch
+
 //! Current ROM/RAM bank indicators (debug, golden-safe `&self`). Split out of
 //! `cartridge_tests.rs` to keep that file under the 1000-line cap; compiled as
 //! `super::banks` via the `#[path]` attribute, sharing its `make_rom`/`cart`/
