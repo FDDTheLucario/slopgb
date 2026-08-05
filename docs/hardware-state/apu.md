@@ -356,6 +356,46 @@ parity-flipping shift gives speedchange2..5 the same granule delta while the
 duty rows want +1 for 2/3 and 0 for 4/5. Swept enter 0..4 x leave 0..3 (20
 points): best net +6, and only the shipped shape is regression-free.
 
+#### The kernel, disassembled
+
+Every rung is the same code at `$0150`, so the family's only free variables are
+the delay constant, the switch sequence and the rung padding:
+
+```
+AF        xor a          ; NR52 = 0  — power the APU off...
+E0 26     ldh ($26),a
+3E 80/E0 26              ; ...and on: the duty position resets to 0
+3E 77/E0 24              ; NR50 = $77
+3E 11/E0 25              ; NR51 = $11
+3E 00/E0 11              ; NR11 = 0  — duty 0 (high on position 7 only)
+3E 80/E0 12              ; NR12 = $80
+3E C0/E0 13              ; NR13 = $C0 (or $E0)
+3E 87/E0 14              ; NR14 = $87 — TRIGGER, frequency $7C0/$7E0
+   [ 3E xx E0 4D 10 00 ] ; ...ldh ($4D),a + STOP, once per switch
+06 NN/05/20 FD           ; ld b,NN + dec b/jr nz — THE DELAY
+00 00 ...                ; rung padding: the `_1`/`_2` rungs differ by one NOP
+3E 80/EE 40/E0 12        ; NR12 alternates $80/$C0 — the volume that makes sound
+3E 80/E0 14              ; NR14 = $80 — RETRIGGER, high bits dropped, so the
+                         ; position freezes: the reload outlasts the loop
+78/06 20/05/20 FD/18 EF  ; ~134 M-cycle loop, forever
+```
+
+The `10 00` count is the switch count, so `speedchangeN` really is N switches.
+The delay constants are per family, tuned so the expiry lands between that
+family's two rungs on hardware — which is why they all differ:
+
+| family | delay `NN` | switches | family | delay `NN` | switches |
+|---|---|---|---|---|---|
+| `sound` (dmg08, ds) | 108 | 0 | `speedchange3` | 95 / 94 | 3 |
+| `speedchange` | 99 / 105 (`_ds`) | 1 | `speedchange4` | 100 | 4 |
+| `speedchange2` | 102 / 103 | 2 | `speedchange5` | 91 / 90 | 5 |
+
+Two consequences. The delay loop itself cannot drift — it runs at a fixed
+granules-per-machine-cycle rate in whichever speed it sits in — so the whole
+error has to come from the switches. And a family's correction is not a function
+of its switch count alone, because each family also sits at a different distance
+from its own expiry to start with.
+
 The remaining candidate named in gambatte's source is the frame-sequencer
 re-base on the *entering* side — `cycleCounter_ = cc - divCycles/2 -
 lastUpdate_ % 2` (`PSG::speedChange`) — but read it before spending a session on

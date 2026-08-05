@@ -65,12 +65,21 @@ and 0 for 4/5**, and no per-switch accumulating term generates that — `k`=3 an
 `k`=4 share their two enters and differ only by a trailing leave, while `k`=2
 and `k`=3 differ by an enter yet want the same delta.
 
-**Suspect the frame, not the constant.** Each rung carries its own `dec b` delay
-constant, tuned so the expiry lands between the rungs on hardware, so two
-families with the same switch structure need not want the same correction —
-"delta per switch count" may be the wrong axis entirely. Disassemble the twelve
-kernels and compare their delay constants (`/rom-disasm-gaps`) BEFORE fitting
-another term; the twelve failures may not share one cause.
+**Suspect the frame, not the constant** — and the kernels are already
+disassembled for you in `docs/hardware-state/apu.md` § "The kernel,
+disassembled": one code body at `$0150`, whose only free variables are the
+switch sequence, the rung's padding NOP and a per-family `ld b,NN` delay (108 /
+99 / 105 / 102 / 103 / 95 / 94 / 100 / 91 / 90). Two things follow. The delay
+loop cannot drift — it runs at a fixed granules-per-machine-cycle rate in
+whichever speed it sits in — so the entire error comes from the switches. And a
+family's wanted correction is not a function of its switch count alone, because
+each family starts at a different distance from its own expiry, which is why
+fitting "delta per k" keeps failing.
+
+The measurement that would settle it: trace one failing family and one passing
+family with the same switch count (`speedchange3` vs `speedchange4`) and record
+the duty expiry's position against each STOP — per switch, not per ROM. The
+probe to build it on is `gb.bus.apu().ch1` from an in-crate test.
 
 The leave-side lever turns on whether the re-anchor also hands the APU the
 granule **debt** gambatte's `lastUpdate_ -= ds` implies. Measured, two-sided:
