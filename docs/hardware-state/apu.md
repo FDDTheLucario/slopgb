@@ -455,6 +455,70 @@ rows that broke. Fix them in that order, re-measuring between each — and settl
 the reload against SameBoy first, since same-suite pins it and gambatte does
 not get to overrule that.
 
+#### The blocker: SameBoy and gambatte disagree by one 2 MHz cycle (2026-08-05)
+
+Every lever that moves the twelve rows was measured against both oracles. The
+gambatte column is the duty family only (`SLOPGB_GBTR_FILTER=duty0_pos6`); the
+same-suite column counts rows that SameBoy passes and this change would drop:
+
+| lever | duty fixed | duty broken | same-suite broken |
+|---|---|---|---|
+| inactive trigger delay −1, single speed only | 6 | 4 | 1 (`freq_change_timing-A` [Agb]) |
+| inactive trigger delay −1, double speed only | 5 | 2 | **7** |
+| both speeds | 11 | 6 | **7** |
+| `lf_div` sign flipped in double speed (SameBoy's own CGB ≤ C rule) | 4 | 2 | **7** |
+| gambatte's full alignment form (grid-offset term + sign) | 4 | 2 | **7** |
+| granule-accounting corrections (below) | 0 | 0 | 0 |
+| double-speed PCM read offset (one granule back) | 0 | 0 | 0 |
+| double-speed flip WITH the delay compensated back | — | — | 4 |
+
+The last row is the diagnosis. Compensating the inactive delay after flipping
+`lf_div` recovers three of the seven, leaving `channel_1/2_align` and
+`channel_1/2_duty` — so what those rows pin is the trigger DELAY in double
+speed, active and inactive, and not any other consumer of `lf_div`. That is
+exactly the quantity gambatte's duty rows want one cycle shorter.
+
+Both suites are hardware-verified on the same CGB revision family, so one of
+them is being read wrong through some *other* part of this model — but not
+through the two candidates that were testable: the alignment bit (flipping it
+and compensating leaves the same four rows red) and the register-read
+observation point (a double-speed PCM read offset is exactly neutral, and does
+not rescue same-suite when the delay moves). Until that third quantity is
+found, the repo's cross-oracle rule keeps SameBoy's value and the twelve rows
+stay baselined.
+
+#### The granule accounting is now known-exact, and known-compensating
+
+Differencing per switch-segment against gambatte on `speedchange5` shows our
+segments off in two places that cancel:
+
+| segment | gambatte | slopgb | delta |
+|---|---|---|---|
+| enter → leave (double speed) | 32771 | 32772 | **+1** |
+| first leave → enter (single speed) | 65551 | 65550 | **−1** |
+| second leave → enter (single speed) | 65550 | 65550 | 0 |
+
+The +1 is the extra granule `Apu::set_double_speed_lag` grants that gambatte's
+`generateSamples(cc + 8, old speed)` jump does not; the −1 is the granule
+gambatte's leave debt (`lastUpdate_ -= ds`) pays back and our parity-only
+re-anchor does not. They cancel over one enter+leave pair, which is why
+three-switch ROMs come out exact and five-switch ROMs are one granule long.
+
+Correcting both — dropping the extra enter granule, giving the leave its debt,
+and taking gambatte's `ref = !(lastUpdate_ & ds)` into `lf_div` (which needs
+the grid's `lag`, so it was not expressible before) — makes every segment match
+gambatte exactly and is **precisely neutral** on gambatte, same-suite and
+blargg. It is not shipped: it buys no row, and it would churn every audio hash
+in the golden fingerprint. It is the right substrate for the next attempt,
+though, because it removes the two compensating errors that make any single
+lever read as a trade.
+
+One trap it explains: `lf_div` derives from the APU's granule parity, so
+changing the clock by one granule flips it and moves the trigger delay by one
+in the opposite direction. Lever combinations therefore do NOT compose — the
+delay fix plus the clock fix scores worse than either alone. Always re-measure
+a combination; never add up two separately measured deltas.
+
 The remaining candidate named in gambatte's source is the frame-sequencer
 re-base on the *entering* side — `cycleCounter_ = cc - divCycles/2 -
 lastUpdate_ % 2` (`PSG::speedChange`) — but read it before spending a session on

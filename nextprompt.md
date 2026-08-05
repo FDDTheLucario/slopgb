@@ -1,4 +1,4 @@
-slopgb — next task: the twelve `ch1_duty0_pos6_to_pos7_timing` rows
+slopgb — the twelve `ch1_duty0_pos6_to_pos7_timing` rows are BLOCKED (read below first)
 
 ## Repo state (verified 2026-08-05)
 
@@ -39,96 +39,44 @@ Score **+7 / −0**: all six `speedchange*_ch2_nr52_*a` rows plus age
 `spsw-ch2-lc-delay-cgbBCE`. With both grid re-anchors disabled the model is
 byte-identical to the eager clock (verified by running the matrix that way).
 
-## TARGET — the twelve duty rows
+## TARGET — the twelve duty rows (blocked on a cross-oracle conflict)
 
-**Measured per ROM, not inferred** (probe: 16 frames on CGB, read
-`ch1.duty_pos` at the end — the kernel freezes it, so it IS the verdict; duty 0
-is high on position 7 only). All 22 `_1` rungs sit on 6 and every one is
-correct; every `_2` rung is on 7 (pass) or 6 (fail). Each failure is therefore
-the same single 2 MHz cycle, and **every uniform shift is refuted a priori** —
-advancing the duty unit a granule everywhere puts all 22 `_1` rungs on 7.
+**Read `docs/hardware-state/apu.md` §"The blocker" first.** The cause is fully
+localized, by differencing against a built + instrumented gambatte (build recipe
+in that file — one `g++` line): the whole family is one 2 MHz cycle in the
+INACTIVE TRIGGER's reload. gambatte lands the first duty step `period + 4 -
+align` granules after the trigger; we land at `period + 5 - lf_div`. Every
+measured lever:
 
-The entering pace IS a live lever on this family, measured across the matrix:
+| lever | duty fixed | duty broken | same-suite broken |
+|---|---|---|---|
+| inactive delay −1, single speed only | 6 | 4 | 1 ([Agb]) |
+| inactive delay −1, double speed only | 5 | 2 | **7** |
+| both speeds | 11 | 6 | **7** |
+| `lf_div` flipped in double speed (SameBoy's CGB ≤ C rule) | 4 | 2 | **7** |
+| gambatte's full alignment form | 4 | 2 | **7** |
+| granule-accounting corrections | 0 | 0 | 0 |
+| double-speed PCM read offset | 0 | 0 | 0 |
 
-| entering pace | score |
-|---|---|
-| one granule less (gambatte's literal `cc + 8` jump) | −6 / +0 |
-| shipped (`Apu::set_double_speed_lag`) | — |
-| one granule more | **+9 / −8** |
-| one granule more + the leave debt | +9 / −9 |
+The seven are `channel_1/2_align`, `_align_cpu`, `_duty` and
+`channel_1_freq_change_timing-A` — all SameBoy-passing, so the cross-oracle rule
+keeps SameBoy's value. Compensating the delay after flipping `lf_div` recovers
+three and leaves `channel_1/2_align` + `_duty`, which proves what they pin is the
+double-speed trigger delay itself — the quantity gambatte wants one shorter.
 
-The +9/−8 row reads exactly as one granule per ENTERING switch: `k`=1,2 (one
-enter) move the expiry from after `_2` to between the rungs — pure fix; `k`=3
-(two enters) move it two and lose `_1`; `k`=4,5 were already between their rungs
-so any advance only costs them. So the corpus wants **+1 for speedchange 1/2/3
-and 0 for 4/5**, and no per-switch accumulating term generates that — `k`=3 and
-`k`=4 share their two enters and differ only by a trailing leave, while `k`=2
-and `k`=3 differ by an enter yet want the same delta.
+**Do not re-run this sweep.** The open question is a third quantity that makes
+one of the two hardware-verified suites read wrong here; the two testable
+candidates (the alignment bit, the register-read observation point) are both
+excluded above. Hardware evidence, or SameBoy's and gambatte's handling of the
+same ROM traced side by side, is what moves this next.
 
-**The cause is localized — read `docs/hardware-state/apu.md` §"Differential
-trace against gambatte" before anything else.** gambatte builds standalone in
-one `g++` line (recipe in that section) and can be instrumented, which turns
-this family from fitting into differencing. What it showed on `speedchange3`:
-the granule counts agree EXACTLY at every switch and over the whole
-trigger→retrigger span, the alignment bit agrees — and the duty position at the
-deciding retrigger is 7 in gambatte, 6 in slopgb. The entire difference is the
-**inactive trigger's reload**: gambatte's first step lands `period + 4 - align`
-granules after the trigger, ours lands at `period + 5 - lf_div`, one cycle
-later, uniformly.
-
-`base + 5 - lf_div` (gambatte's exact value, and NOT one of the refuted forms)
-scores **+11 / −6** on gambatte but breaks seven same-suite rows that SameBoy
-passes, so it is out as a uniform change. Tracing the six it breaks separates
-two further defects: `sound/*_ds_1,_ds_3` have the right interval but our
-`lf_div` reads 1 where gambatte's `align` reads 0, while `speedchange5*_1` has
-the right alignment but one granule too many in its interval (229827 vs
-229826). Three separable bugs, not one — and the reload's +1 was cancelling the
-`lf_div` disagreement on exactly the rows that broke. Settle the reload against
-SameBoy first (same-suite pins it, and gambatte does not overrule that), then
-the `lf_div` disagreement, then the five-switch interval.
-
-Older framing, still true but superseded — and the kernels are already
-disassembled for you in `docs/hardware-state/apu.md` § "The kernel,
-disassembled": one code body at `$0150`, whose only free variables are the
-switch sequence, the rung's padding NOP and a per-family `ld b,NN` delay (108 /
-99 / 105 / 102 / 103 / 95 / 94 / 100 / 91 / 90). Two things follow. The delay
-loop cannot drift — it runs at a fixed granules-per-machine-cycle rate in
-whichever speed it sits in — so the entire error comes from the switches. And a
-family's wanted correction is not a function of its switch count alone, because
-each family starts at a different distance from its own expiry, which is why
-fitting "delta per k" keeps failing.
-
-The measurement that would settle it: trace one failing family and one passing
-family with the same switch count (`speedchange3` vs `speedchange4`) and record
-the duty expiry's position against each STOP — per switch, not per ROM. The
-probe to build it on is `gb.bus.apu().ch1` from an in-crate test.
-
-The leave-side lever turns on whether the re-anchor also hands the APU the
-granule **debt** gambatte's `lastUpdate_ -= ds` implies. Measured, two-sided:
-
-| leave re-anchor | score |
-|---|---|
-| moves the grid only (shipped) | +6 / −0 |
-| with the debt (literal `lastUpdate_ -= 1`) | +10 / −4 |
-| debt alternating in sign per leave | +10 / −1, no source, NOT shipped |
-
-No constant (enter, leave, power-on) shift delivers the wanted vector while
-keeping the nr52 rows: those pin the grid to trail after enters 1 and 3 and to
-be in step after enter 2, which forces the leave to flip parity, and every
-parity-flipping shift gives speedchange2..5 the same delta. Swept enter 0..4 ×
-leave 0..3 (20 points, full matrix each): best net +6.
-
-**The lever is whatever separates a second leave from a first**, and it is finer
-than the granule the model runs on. Before spending a session on gambatte's
-entering-side FS re-base (`cycleCounter_ = cc - divCycles/2 - lastUpdate_ % 2`,
-`PSG::speedChange`): the DIV reset immediately preceding it leaves `divCycles`
-at the four granules the `cc + 8` jump just ran, so the expression reduces to
-pulling the PSG counter back two granules plus the grid's parity, and it moves
-the frame sequencer *relative to the channels*. The duty rows measure the
-channels alone, so that is probably the length/envelope side's lever, not
-theirs — and that side is already green. Rebuild the duty-position probe first
-(it is ~50 lines against `gb.bus.apu()` from an in-crate test) and measure where
-the expiry sits against each rung's retrigger; do not sweep a scalar again.
+Two traps worth carrying forward. `lf_div` derives from the APU's granule
+parity, so a one-granule clock change flips it and moves the trigger delay the
+other way — **levers do not compose**, always re-measure a combination. And the
+granule accounting has two compensating errors (the enter grants one extra
+granule, the leave withholds the debt gambatte pays); correcting both is exact
+against gambatte and precisely neutral on the corpus, and is the right substrate
+for any further attempt even though it buys no row on its own.
 
 ## Constraints
 
