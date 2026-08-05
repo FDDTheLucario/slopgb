@@ -65,7 +65,29 @@ and 0 for 4/5**, and no per-switch accumulating term generates that — `k`=3 an
 `k`=4 share their two enters and differ only by a trailing leave, while `k`=2
 and `k`=3 differ by an enter yet want the same delta.
 
-**Suspect the frame, not the constant** — and the kernels are already
+**The cause is localized — read `docs/hardware-state/apu.md` §"Differential
+trace against gambatte" before anything else.** gambatte builds standalone in
+one `g++` line (recipe in that section) and can be instrumented, which turns
+this family from fitting into differencing. What it showed on `speedchange3`:
+the granule counts agree EXACTLY at every switch and over the whole
+trigger→retrigger span, the alignment bit agrees — and the duty position at the
+deciding retrigger is 7 in gambatte, 6 in slopgb. The entire difference is the
+**inactive trigger's reload**: gambatte's first step lands `period + 4 - align`
+granules after the trigger, ours lands at `period + 5 - lf_div`, one cycle
+later, uniformly.
+
+`base + 5 - lf_div` (gambatte's exact value, and NOT one of the refuted forms)
+scores **+11 / −6** on gambatte but breaks seven same-suite rows that SameBoy
+passes, so it is out as a uniform change. Tracing the six it breaks separates
+two further defects: `sound/*_ds_1,_ds_3` have the right interval but our
+`lf_div` reads 1 where gambatte's `align` reads 0, while `speedchange5*_1` has
+the right alignment but one granule too many in its interval (229827 vs
+229826). Three separable bugs, not one — and the reload's +1 was cancelling the
+`lf_div` disagreement on exactly the rows that broke. Settle the reload against
+SameBoy first (same-suite pins it, and gambatte does not overrule that), then
+the `lf_div` disagreement, then the five-switch interval.
+
+Older framing, still true but superseded — and the kernels are already
 disassembled for you in `docs/hardware-state/apu.md` § "The kernel,
 disassembled": one code body at `$0150`, whose only free variables are the
 switch sequence, the rung's padding NOP and a per-family `ld b,NN` delay (108 /

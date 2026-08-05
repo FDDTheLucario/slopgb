@@ -396,6 +396,65 @@ error has to come from the switches. And a family's correction is not a function
 of its switch count alone, because each family also sits at a different distance
 from its own expiry to start with.
 
+#### Differential trace against gambatte (2026-08-05)
+
+gambatte builds standalone and can be instrumented, which turns this family from
+a fitting problem into a differencing one. Recipe:
+
+```sh
+git clone --depth 1 https://github.com/pokemon-speedrunning/gambatte-core   # outside the tree
+g++ -O1 -fno-exceptions -fno-rtti -DHAVE_STDINT_H \
+    -I libgambatte/include -I libgambatte/src -I common -o gbprobe main.cpp \
+    $(find libgambatte/src -name '*.cpp' | grep -vE 'cinterface|file_zip')
+```
+
+`main.cpp` is a dozen lines against `gambatte.h` (`GB::load`, `runFor` in a
+loop). Counting granules in `PSG::generateSamples` and printing in
+`DutyUnit::nr4Change` + `PSG::speedChange` gives the reference timeline;
+counting in `Apu::run_granule` and printing in `Pulse::trigger` gives ours.
+Compare INTERVALS, not absolutes — the two have different origins (slopgb's
+post-boot warmup runs ~2.1 M granules before the ROM starts).
+
+What that found, on `speedchange3` (a failing family):
+
+- the granule counts agree **exactly** at every switch (trigger→enter2 = 98322
+  granules in both) and over the whole trigger→retrigger span (131523 in both),
+  so the granule grid built above is right and the clock is not the bug;
+- the alignment bit agrees (`lf_div` 1 / 0 on the `_1` / `_2` rungs, matching
+  gambatte's `(cc - ref) % 2`);
+- the duty position at the deciding retrigger is 7 in gambatte and 6 in slopgb.
+
+The whole difference is the **inactive trigger's reload**. gambatte
+(`duty_unit.cpp`): `nextPosUpdate_ = cc - (cc - ref) % 2 + period + 4 -
+(master << 1)`, so the first step lands `period + 4 - align` granules after an
+inactive trigger. slopgb loads `base + 6 - lf_div` and an expiry consumes
+`countdown + 1`, so ours lands at `period + 5 - lf_div` — **one cycle later,
+uniformly**, in both alignment phases (confirmed on a ROM with `align` 0 and one
+with `align` 1).
+
+`base + 5 - lf_div` — gambatte's exact value, and NOT one of the previously
+refuted forms (`base + 4 + lf_div`, flat `base + 5`) — scores **+11 / −6** on
+gambatte but breaks seven same-suite rows (`channel_1/2_align`,
+`_align_cpu`, `_duty`, `channel_1_freq_change_timing-A`). SameBoy passes those,
+so the uniform change is out under the cross-oracle rule.
+
+Tracing the six gambatte rows it breaks separates two further defects, and they
+are NOT the same bug:
+
+| row | interval vs gambatte | `lf_div` vs gambatte `align` |
+|---|---|---|
+| `sound/…_ds_1`, `_ds_3` | equal (451) | **1 where gambatte has 0** |
+| `speedchange5*_1` | **229827 vs 229826** | equal |
+
+So the family is three separable defects: the inactive reload is one cycle long
+everywhere; `lf_div` disagrees with gambatte's alignment in some
+double-speed configurations; and the granule accounting gains a cycle in
+five-switch configurations. The uniform reload change only looked wrong before
+because its +1 error was cancelling the `lf_div` disagreement on exactly the
+rows that broke. Fix them in that order, re-measuring between each — and settle
+the reload against SameBoy first, since same-suite pins it and gambatte does
+not get to overrule that.
+
 The remaining candidate named in gambatte's source is the frame-sequencer
 re-base on the *entering* side — `cycleCounter_ = cc - divCycles/2 -
 lastUpdate_ % 2` (`PSG::speedChange`) — but read it before spending a session on
