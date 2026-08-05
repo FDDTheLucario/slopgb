@@ -533,9 +533,16 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # discriminator is not present in the model at all, which is why fifteen shapes
 # have now failed on it. The one modelled quantity that differs between the two
 # situations is `Apu::set_double_speed_lag`, the one-machine-cycle APU re-pace a
-# switching STOP installs. Whether that lag should also shift the length clock's
-# position relative to the CPU read is the question to answer next — and it is a
-# mechanism, not a history flag.
+# switching STOP installs — but gating the rule on a post-switch alignment flag
+# changes NOTHING (still 16 speedchange + 4 sound), because the `sound _ds_` ROMs
+# reach double speed through a switching STOP as well, so the flag is set for both
+# sides. Even "did a switch happen" does not separate them.
+# Sixteen shapes eliminated. The state of knowledge: the pre/post law is exact and
+# measured, the DS-scoped form recovers four rows, and the last discriminator is
+# absent from the model AND from every proxy tried for it. Resolving it needs the
+# frame sequencer's step to carry a real T-position within the machine cycle,
+# derived from hardware rather than inferred from these rows — the gbdev
+# frame-sequencer timing, or a SameBoy trace of the same ROMs.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
