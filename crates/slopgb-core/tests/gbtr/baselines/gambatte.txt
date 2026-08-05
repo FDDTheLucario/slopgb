@@ -520,7 +520,6 @@ gambatte/window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3.gbc [Cgb]
 # respectively, with everything above passing), so the constants come from the
 # fetcher's own refetch cost rather than a sweep.
 gambatte/window/late_disable_late_scx03_wx0f_2_dmg08_out3_cgb04c_out0.gbc [Cgb]
-gambatte/window/on_screen/wx17_weoff_wxA5_weon.gbc [Cgb]
 
 # --- mode-3 write-effect wave swaps -------------------------------------
 # These entries regressed when the mode-3 write strobe, the SCX position-
@@ -623,6 +622,13 @@ gambatte/m1/lyc143_late_m2enable_lycdisable_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/m2enable/lyc1_m2irq_late_lycdisable_ds_1_cgb04c_out2.gbc [Cgb]
 gambatte/m2enable/m2_late_m0disable_ds_1_cgb04c_out2.gbc [Cgb]
 gambatte/scy/scy_during_m3_ds_6.gbc [Cgb]
+# `wx17_weoff_wxA5_weon`: exactly one BG tile column (x 104-111) wrong on 120
+# rows — slopgb resumes the background one tile early after the window is
+# switched off. At the abort the fetcher holds lx 96, a full tile queued
+# (bg_count 8) and no discard, so the re-anchor puts the next fetch at column 13
+# where the reference wants 14. Adding the queued tile to that sum does NOT fix
+# it (960 px either way), so the missing 8 pixels are not in `fetch_x`.
+gambatte/window/on_screen/wx17_weoff_wxA5_weon.gbc [Cgb]
 gambatte/window/on_screen/late_wx_ds_2.gbc [Cgb]
 
 # --- mode-0 event-grid re-derivation: documented swaps (2026-06) ---
