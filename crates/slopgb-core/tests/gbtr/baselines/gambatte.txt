@@ -232,6 +232,15 @@ gambatte/dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02.gbc [Cgb]
 # REFUTED: forcing `cpu_halted` around the in-pause `run_vram_dma` does nothing
 # (that call is not reached), and re-evaluating the window live at the
 # `halt_hdma` snapshot does nothing either (High alone does not set bit 7).
+# Also refuted: servicing an HBlank block DURING the pause. At PAUSE-BEGIN the
+# CPU IS halted (ly 66, dot 260, mode still ArmedLcdOn), so a block serviced
+# there would take the abort arm — but nothing is serviced, the halt gate
+# suppressing requests outright, and forcing one costs 13 rows (5 -> 18) whether
+# it fires once or once per dot. gambatte only fires in-pause when the request
+# was already pending at the STOP, which it is not here. So bit 7 arrives by some
+# route other than a serviced block — look at the wake re-check
+# (`vram_dma_unhalt`), and at whether FF55 bit 7 should read from `hdma_mode`
+# rather than from the stored byte.
 gambatte/dma/hdma_transition_speedchange_hdmalen00_hdma5_scx1_cgb04c_out80.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_hdmalen01_hdma5_scx1_cgb04c_out81.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_hdmalen01_hdmadst10_scx1_cgb04c_out00.gbc [Cgb]
