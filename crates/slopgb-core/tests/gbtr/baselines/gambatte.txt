@@ -432,6 +432,14 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # the FF04 write path is itself correct — it samples the selected bit for a
 # falling edge before zeroing, so the reset cannot swallow an increment. What is
 # left is the divider's phase during the pause.
+# And here is WHY it is exactly one, traced on speedchange_tima02_2a (TAC 06,
+# so bit 5 is selected and edges land every 0x40 T): the pause runs 0x7FFF
+# M-cycles = 131068 T, which is 2047.9 edges. The divider's phase at the pause
+# start decides whether the ROM sees 2047 or 2048 — the off-by-one IS that
+# rounding boundary. So the fix is a sub-M-cycle phase correction, not a
+# placement swap, which is why all four placements tried make it worse: reset
+# before the skipped-byte read (34 -> 51), reset one M-cycle later (34 -> 49),
+# flip before the internal cycle (34 -> 70), pause +-1 M (34 -> 93 / 99).
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
