@@ -484,10 +484,15 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # machine cycle — so an access sees the APU as of the cycle's start — costs nine
 # rows (20 -> 29). That was the hypothesis worth fearing, and it is now measured
 # instead. Nine eliminations on this family.
-# What has NOT been tried: giving the length clock a position WITHIN the machine
-# cycle and comparing the read's own cc against it, the way the PPU's flip and
-# read positions are compared. Every shape tried so far moves a whole M-cycle;
-# the evidence says the boundary is inside one.
+# That shape is tried and eliminated too: snapshotting the pre-clock channel bits
+# and returning them from FF26 whenever the length clock landed in the same
+# machine cycle costs two rows (20 -> 22). It has to — `1b` wants the POST-clock
+# value from the same machine cycle `1a` wants the PRE-clock one.
+# So the requirement is now exact, and it is the last shape standing: the FF26
+# read needs a sub-M-cycle POSITION compared against the length clock's own
+# position, the way `Ppu::read_pos_hd` is compared against the render's flip.
+# slopgb's APU has no such read position — that is the piece to build, and it is
+# a bounded one. Ten shapes eliminated getting here.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
