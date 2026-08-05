@@ -433,6 +433,13 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # repositioning the divider without clocking, each cost 6 rows.
 # TAC 00 is excluded and that part is measured, not explained — see the comment
 # on `stop_div_presample`.
+# What is LEFT in speedchange after that fix is 20 rows, and 15 of them are APU:
+# nine `ch1_duty0_pos6_to_pos7_timing` variants and six `ch2_nr52`. The nr52 rows
+# want F2 and read F0 — channel 2 switched off, so its length counter clocked one
+# step too many, the mirror of the timer's missing edge. The timer's remedy does
+# NOT transfer: giving the APU the same +4 T divider view before its own
+# `div_write` costs a row (20 -> 21). The rest are two `ly44_m3_stat` and one
+# `nop_m2int_m3stat_scx1`.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
