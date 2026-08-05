@@ -480,9 +480,14 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # Two more shapes eliminated: shifting which step the NRx4 write samples
 # (both directions cost eight rows, and they are blargg-pinned), and deferring
 # the length clock by one machine cycle (20 -> 22). Eight eliminations total.
-# What is left is the tick order itself: the APU is stepped for the whole machine
-# cycle before the access commits. Changing that touches every subsystem, so it
-# wants its own session and a full-matrix guard, not a patch here.
+# The tick order is REFUTED too, and cheaply: deferring the whole APU step by one
+# machine cycle — so an access sees the APU as of the cycle's start — costs nine
+# rows (20 -> 29). That was the hypothesis worth fearing, and it is now measured
+# instead. Nine eliminations on this family.
+# What has NOT been tried: giving the length clock a position WITHIN the machine
+# cycle and comparing the read's own cc against it, the way the PPU's flip and
+# read positions are compared. Every shape tried so far moves a whole M-cycle;
+# the evidence says the boundary is inside one.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
