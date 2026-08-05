@@ -384,6 +384,12 @@ gambatte/scx_during_m3/scx_during_m3_spx2_ds.gbc [Cgb]
 # pass today (ds_1, ds_4, ds_7, spx08_ds_1, spx08_ds_2) without fixing any of
 # these. Note the ring is indexed per FETCHER STEP, not per tile — eight steps
 # wrap a slot, so a lead of 1-2 moves the sample inside the same tile fetch.
+# Re-tested with the ring WIDENED to 16 entries so a lead can reach past a whole
+# tile (verified equivalent at lead 0): leads 4, 6, 8, 10 and 12 all leave the
+# set at 15 failures with no recoveries. So it is not a shallow-ring artefact
+# either — the mid-mode-3 SCY sample is not the mechanism at all, and the
+# one-tile error lives somewhere else (the map column or the destination, not
+# the row).
 gambatte/scy/scy_during_m3_ds_3.gbc [Cgb]
 gambatte/scy/scy_during_m3_spx08_ds_3.gbc [Cgb]
 gambatte/scy/scy_during_m3_spx08_ds_4.gbc [Cgb]
