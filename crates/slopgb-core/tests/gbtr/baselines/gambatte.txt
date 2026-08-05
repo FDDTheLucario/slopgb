@@ -440,6 +440,13 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # placement swap, which is why all four placements tried make it worse: reset
 # before the skipped-byte read (34 -> 51), reset one M-cycle later (34 -> 49),
 # flip before the internal cycle (34 -> 70), pause +-1 M (34 -> 93 / 99).
+# Narrowed further: a uniform phase nudge cannot fix it either. Adding 1-3 timer
+# substeps at the pause start changes nothing (edges are 64 T apart), and adding
+# a full 4 makes the failing rows overshoot to +1 while breaking the passing ones
+# by +2. Since the DIV reset zeroes the phase identically for every ROM, the
+# failing and passing rows cannot differ by their pre-STOP phase — they straddle
+# the 2047/2048 boundary on the WAKE side. That is where to look: the alignment
+# between the pause end and the ROM's first post-switch read.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
