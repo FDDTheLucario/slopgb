@@ -1,9 +1,11 @@
 # Third-party licenses & attributions
 
-slopgb is licensed under the MIT License (see [`LICENSE`](LICENSE)). This file
-reproduces the license notices of third-party projects whose **code** slopgb
-incorporates or ports, as those licenses require, and lists the projects it
-merely **studied** (reference implementations and documentation) for
+slopgb is licensed under the **GNU General Public License, version 2** (see
+[`LICENSE`](LICENSE)). It is GPL-2.0 because parts of the emulator core are
+derived from gambatte, which is GPL-2.0 — see the gambatte section below. This
+file reproduces the license notices of third-party projects whose **code**
+slopgb incorporates or ports, as those licenses require, and lists the projects
+it merely **studied** (documentation and behavioural references) for
 transparency. No third-party code, ROM, or asset is bundled in this repository;
 test ROMs are fetched separately by `test-roms/download.sh`.
 
@@ -45,6 +47,31 @@ Upstream: <https://github.com/LIJI32/SameBoy> — Expat/MIT. (SameBoy's `iOS/`
 and `HexFiend/` directories carry additional terms; slopgb ports only Core
 files, which are under the Expat grant above.)
 
+### gambatte
+
+Parts of the core — chiefly the HDMA/OAM-DMA engine, the STAT interrupt and
+mode-event model, and corners of the PPU fetch and window machinery — were
+written while reading gambatte's source, and the comments quote its internals
+directly (for example `ioamhram_[0x155] = halted() ? ioamhram_[0x155] | 0x80`
+in `interconnect/hdma.rs`, and identifiers such as `haltHdmaState_`,
+`dmaSource_`, `eventTimes_`, `flagGdmaReq`). That knowledge is not obtainable
+from running the test ROMs, so these parts are treated as **derived from**
+gambatte rather than independently reimplemented.
+
+gambatte is distributed under the GNU General Public License, version 2. GPL-2.0
+requires derivative works to be distributed under the same terms, which is why
+slopgb as a whole is GPL-2.0-only.
+
+Upstream: <https://github.com/sinamas/gambatte> — GPL-2.0. gambatte's test ROMs
+are run via a slopgb-authored harness implementing the documented
+`testrunner.cpp` protocol; no gambatte source files are vendored in this
+repository.
+
+> An earlier revision of this file described gambatte as "studied, not copied"
+> with "no license obligation on slopgb". That was inaccurate — the comment
+> citations quote gambatte source — and the project was relicensed from MIT to
+> GPL-2.0-only when it was checked.
+
 ---
 
 ## Linked crates.io dependencies (fetched by cargo, not vendored here)
@@ -74,13 +101,9 @@ file when preparing a binary distribution.
 
 The projects below were used as behavioural oracles and documentation. slopgb's
 implementation is independent Rust informed by them; no source code was copied,
-so their licenses impose no condition on slopgb. They are credited here (and in
+so their licenses impose no condition beyond the notices reproduced above. They are credited here (and in
 the README) out of respect and for provenance.
 
-- **gambatte** (Sindre Aamås) — GPL-2.0. Referenced in comments for
-  undocumented-corner timing; its test ROMs are run via a slopgb-authored
-  harness that implements the documented `testrunner.cpp` protocol. No gambatte
-  source is included. <https://github.com/sinamas/gambatte>
 - **mooneye-gb** (Joonas Javanainen / Gekkio) — GPLv3 (the emulator). Referenced
   for test methodology only; no code copied. The separate **mooneye-test-suite**
   (MIT) test ROMs are run, not bundled.
@@ -97,3 +120,14 @@ game-boy-test-roms (c-sp) and its constituents — blargg, mealybug-tearoom-test
 & acid2 (Matt Currie), SameSuite (Lior Halphon), AGE (Christoph Sprenger),
 gbmicrotest (Austin Appleby), and wilbertpol's additions. See the README for
 links.
+
+---
+
+## Workspace crates under a different licence
+
+`crates/slopfp` (dep-free file-picker state machine) and
+`crates/slopgb-plugin-api` (the guest SDK that Rust->wasm plugins compile
+against) contain no gambatte- or SameBoy-derived code — verified by grep, zero
+references — and remain under the **MIT** licence declared in their own
+manifests. Keeping the guest SDK permissive means a plugin author is not forced
+to license their plugin under the GPL.

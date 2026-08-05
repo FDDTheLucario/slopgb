@@ -118,7 +118,9 @@ their respective owners; none of the projects below are bundled here.
   (`display.c`, `sm83_cpu.c`), and is the primary accuracy reference.
 - [**gambatte**](https://github.com/sinamas/gambatte) (Sindre Aamås, GPL-2.0) —
   the reference for undocumented-corner timing and the source of the gambatte
-  hardware-test baselines.
+  hardware-test baselines. Parts of the HDMA/OAM-DMA engine and the STAT
+  interrupt model are **derived from** its source; this is why slopgb is
+  GPL-2.0.
 - [**mooneye-gb**](https://github.com/Gekkio/mooneye-gb) (Joonas Javanainen /
   Gekkio, MIT) — reference emulator and test methodology.
 
@@ -151,6 +153,11 @@ their respective owners; none of the projects below are bundled here.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). Third-party license notices (the SameBoy timing
-port's MIT notice + reference-project attributions) are in
+**GPL-2.0-only** — see [`LICENSE`](LICENSE). Parts of the core are derived from
+gambatte (GPL-2.0), which requires derivative works to carry the same licence;
+the SameBoy timing port is Expat/MIT and its notice is reproduced as that
+licence requires. Both, plus the reference-project attributions, are in
 [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+
+`crates/slopfp` and `crates/slopgb-plugin-api` carry no derived code and stay
+MIT, so plugin authors are not pulled into the GPL by the guest SDK.
