@@ -544,6 +544,11 @@ pub struct Ppu {
     /// `m0_flip_events` in render/mode0.rs), and can drop back mid-line when
     /// a late write arms a new stall (`m0_unflip`).
     line_render_done: bool,
+    /// The IRQ-side companion of [`Self::line_render_done`]. They move together
+    /// except on a WX = 0xA6 line, where the window renders nothing: the IRQ
+    /// latch flips at the bare-line end while the CPU-visible mode bits keep the
+    /// window's extension (SameBoy's `mode_for_interrupt` vs `STAT & 3`).
+    irq_done: bool,
     /// The dot `line_render_done` fired on this line (0 =
     /// not fired yet / dropped by `m0_unflip`). The half-dot bare-exit law
     /// (`vis_mode_read`) anchors the CPU-visible mode-3→0 exit to the RENDER's

@@ -82,6 +82,7 @@ impl Ppu {
             read_carried: false,
             halt_refetch: false,
             line_render_done: true,
+            irq_done: true,
             flip_dot: 0,
             vis_early: false,
             vis_hold_until: 0,

@@ -71,6 +71,7 @@ impl Ppu {
     /// 1..=143 arms.
     fn clear_line_flip_state(&mut self) {
         self.line_render_done = false;
+        self.irq_done = false;
         self.flip_dot = 0;
         self.vis_early = false;
         self.vis_hold_until = 0;

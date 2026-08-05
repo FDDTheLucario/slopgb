@@ -617,7 +617,7 @@ impl Ppu {
         // the `StatUpdate` mode-0 STAT IF one dot late and broke
         // `hblank_ly_scx_timing` (kernel `m0int` and the canonical both hold at
         // 254). So `prev_done` reads `line_render_done` directly, no lag.
-        let prev_done = self.enabled && self.line <= 143 && self.line_render_done;
+        let prev_done = self.enabled && self.line <= 143 && self.irq_done;
         self.mode_for_interrupt = if !self.enabled {
             0
         } else if self.glitch_line {

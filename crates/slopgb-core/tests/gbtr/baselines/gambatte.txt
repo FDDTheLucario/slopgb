@@ -228,15 +228,6 @@ gambatte/dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02.gbc [Cgb]
 # `hdma_transition_speedchange_hdmalen*` rows plus
 # `hdma_late_m3speedchange_hdma5_scx{1,2}_2`. Scoped to a STOP that ENTERS double
 # speed: the `_ds_1` legs leave it and want the transfer to survive.
-# The dma remainder does NOT follow from it. Measured with those rows unfloored:
-# `hdma_late_m3speedchange_ly_scx1_{2,4,6}` want LY 93 and read 92 — one line
-# short, on the EVEN rungs only — and they are independent of the abort
-# predicate (3 failures with it on or off). `hdma_late_m3speedchange_inc_scx1_2`
-# and `hdma_transition_speedchange_7fffstop_inc` want one more increment (02 vs
-# 01), which looks like a short pause, but lengthening the pause by one M-cycle
-# recovers a single row while breaking two — so the 0x7FFF count is not
-# uniformly wrong. `..._oamdma` errs the other way (want 71, read 72) and
-# `..._ldaaimm_scx1_ds` is unrelated (want 03, read 31).
 gambatte/dma/hdma_transition_speedchange_ldaaimm_scx1_cgb04c_outFF.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_ldaaimm_scx1_ds_cgb04c_out03.gbc [Cgb]
 # A block serviced inside the speed-switch pause advances the frozen OAM
@@ -309,8 +300,6 @@ gambatte/lycEnable/lyc153_late_ff45_enable_ds_3_cgb04c_outE0.gbc [Cgb]
 gambatte/lycEnable/lyc_ff45_trigger_delay_2_dmg08_out0_cgb04c_out2.gbc [Cgb]
 gambatte/lycint_ly/lycint_ly_ds_1_cgb04c_out5.gbc [Cgb]
 gambatte/m0enable/disable_scx5_ds_2_cgb04c_out3.gbc [Cgb]
-gambatte/m0enable/enable_wxA6_2x_spxA7_ds_1_cgb04c_out2.gbc [Cgb]
-gambatte/m0enable/enable_wxA6_2x_spxA7_ds_2_cgb04c_out2.gbc [Cgb]
 gambatte/m1/ly143_late_m2enable_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1.gbc [Cgb]
 gambatte/m1/lycint_vblankirq_late_retrigger_2_dmg08_cgb04c_out0.gbc [Cgb]
@@ -506,48 +495,16 @@ gambatte/window/late_enable_afterVblank_lcdoffset1_1_cgb04c_out3.gbc [Cgb]
 # opposite verdict from the same ROM). The double-speed leg does not follow.
 gambatte/window/late_reenable_scx5_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/window/late_wx_ds_2_cgb04c_out3.gbc [Cgb]
-# The four `m2int_wxA6_*_m0irq_2` rows are NOT a window-length question: the
-# sibling pair differs by one inserted NOP, and the instruction it shifts is
-# `LDH A,(FF0F)` — the ROM reads IF, and the wanted 2 is the STAT flag, not a
-# STAT mode. On `m2int_wxA6_m0irq` the two legs read IF at ly 1 dot 252 (`_1`,
-# wants the flag clear) and dot 256 (`_2`, wants it set), so the mode-0 STAT
-# raise belongs between them; slopgb's flip on that line is dot 261, where a
-# bare line would be ~254. The gap is the off-screen window's extension: it
-# renders nothing, so the IRQ latch should flip at the bare end while the
-# visible mode bits keep the extension `Ppu::vis_exit_hd` already models — the
-# two-latch split. Refuted placements: raising `m0_src`/`m0_rise_dot` early
-# changes nothing (the IRQ keys on `line_render_done`), moving
-# `line_render_done` early makes it worse (4 -> 6/7/9 rows at leads 6/7/8), and
-# dropping the off-screen window's activation stall entirely costs 14 rows.
-# Re-checked since, with the branch verified to fire: raising `m0_src` +
-# `m0_rise_dot` early (leads 0..12, rise moved to dot 256 at lead 8) changes
-# these rows not at all, and letting the off-screen window skip the fetcher
-# takeover — keeping only `win_active` for the read laws — costs 14 rows. So the
-# raise for these lines runs through the STAT WRITE-trigger path in
-# `stat_irq.rs` (`crossed`/`m0_pending`), not the per-dot event source, and that
-# path is shared with ~30 passing rows. Start there, not in the renderer.
-# Traced end to end since, which sharpens it: on the measurement frame the ROM
-# clears IF at ly1 dot 69, reads it at dot 252 (`_1`, wants 0) or 256 (`_2`,
-# wants 2), and slopgb raises NOTHING in between — its mode-0 raise for that line
-# lands in the following frame. So the requirement is exact: the raise must fall
-# inside (252, 256), which is the bare end (~254) rather than the window-extended
-# flip at 261. The raise is not ack-squashed and no STAT dispatch clears it; the
-# IF path is fine. What does not work is setting `m0_src`/`m0_rise_dot` early —
-# the rise moves but no row changes, so the IF edge is taken somewhere that does
-# not observe it. Find that observer first.
-# The observer IS `mode_for_interrupt` (`stat_irq/reclock.rs`), whose mode-0 arm
-# keys on `line_render_done` through `prev_done` — not `m0_src`, which is why
-# moving that changed nothing. And the fix that follows from there is REFUTED:
-# adding a separate IRQ-side latch that flips at the bare end on off-screen
-# window lines (verified byte-identical while it mirrors `line_render_done`)
-# makes the set WORSE at every lead tried — 5 -> 7/7/6/6/6/6 at leads 4..14. So
-# the two-latch split, in the form this family's diagnosis suggests, is not the
-# answer: the extension these lines carry is wanted on the IRQ side too, and the
-# missing raise comes from somewhere else again.
-gambatte/window/m2int_wxA6_m0irq2_2_dmg08_cgb04c_out2.gbc [Cgb]
-gambatte/window/m2int_wxA6_m0irq_2_dmg08_cgb04c_out2.gbc [Cgb]
-gambatte/window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2.gbc [Dmg]
-gambatte/window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2.gbc [Cgb]
+# The `m2int_wxA6_*_m0irq_2` rows are SOLVED, and they were never a
+# window-length question: the sibling pair differs by one inserted NOP shifting
+# `LDH A,(FF0F)`, so the wanted 2 is the STAT interrupt FLAG. The ROM clears IF
+# at ly1 dot 69 and reads it at dot 252 or 256, and slopgb raised at 261 — the
+# window-extended flip — so both legs read 0. A WX = 0xA6 window renders
+# nothing, so its IRQ latch belongs at the bare-line end (254 + SCX&7) while the
+# visible mode bits keep the extension: SameBoy's two-latch split, now built as
+# `Ppu::irq_done` feeding `mode_for_interrupt`'s `prev_done`. Recovered the four
+# m0irq rows plus m0enable/enable_wxA6_2x_spxA7_ds_{1..4}. `spxA7_m3stat_4`
+# below does NOT follow — it reads a STAT mode, not the flag.
 gambatte/window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3.gbc [Cgb]
 # `late_scx03_wx0f_2` [Cgb]. Its family's SS legs were recovered by re-anchoring
 # an abort landing before the window's first tile-number read, and the DS legs by
@@ -652,7 +609,6 @@ gambatte/speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2.gbc [Cgb]
 #   conditional blocking predicates differ from the plain blocking level
 #   (e.g. m0irq_ly44_lcdstat28 expects the m0 IRQ to fire with the m2
 #   enable set) — needs the per-source doM0Event/doM2Event predicates.
-gambatte/m0enable/enable_wxA6_2x_spxA7_ds_3_cgb04c_out2.gbc [Cgb]
 gambatte/m1/ly143_late_m2enable_ds_lcdoffset1_1_cgb04c_out3.gbc [Cgb]
 gambatte/m1/lyc143_late_m2enable_lycdisable_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/m2enable/lyc1_m2irq_late_lycdisable_ds_1_cgb04c_out2.gbc [Cgb]
@@ -693,7 +649,6 @@ gambatte/enable_display/ly0_late_scx7_m3stat_scx1_2_dmg08_cgb04c_out84.gbc [Cgb]
 gambatte/enable_display/ly0_late_scx7_m3stat_scx1_2_dmg08_cgb04c_out84.gbc [Dmg]
 gambatte/lcd_offset/offset1_lyc99int_m0stat_count_scx3_1_cgb04c_out90.gbc [Cgb]
 gambatte/lcd_offset/offset2_lyc99int_m0stat_count_scx2_1_cgb04c_out90.gbc [Cgb]
-gambatte/m0enable/enable_wxA6_2x_spxA7_ds_4_cgb04c_out2.gbc [Cgb]
 gambatte/m0int_m0stat/m0int_m0stat_scx5_ds_2_cgb04c_out2.gbc [Cgb]
 gambatte/speedchange/speedchange2_nop_m2int_m3stat_scx1_1_cgb04c_out3.gbc [Cgb]
 

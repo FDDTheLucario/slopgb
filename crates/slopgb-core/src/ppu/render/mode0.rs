@@ -84,6 +84,7 @@ impl Ppu {
                     self.m0_src = true;
                     self.m0_rise_dot = true;
                     self.line_render_done = true;
+                    self.irq_done = true;
                     self.flip_dot = self.dot;
                 }
             }
@@ -164,10 +165,29 @@ impl Ppu {
         if !self.ds && !self.vis_early && proj <= lead + early_lead {
             self.vis_early = true;
         }
+        // A WX = 0xA6 window renders nothing, so the IRQ-side latch flips where
+        // the line would have ended without it — the bare-line end, 254 + SCX&7
+        // — while the CPU-visible mode bits keep the window's extension that
+        // `Ppu::vis_exit_hd` models. SameBoy's two-latch split
+        // (`mode_for_interrupt` against `STAT & 3`) in the one configuration
+        // where the two genuinely separate.
+        // Pins gambatte/window/m2int_wxA6{,_spxA7}_m0irq*_2 and
+        // m0enable/enable_wxA6_2x_spxA7_ds_{1..4}, whose STAT reads straddle the
+        // raise: those rows bracket the base to 253..255, and 254 is the bare
+        // flip the rest of the PPU already uses.
+        if !self.irq_done
+            && self.render.win_active
+            && self.eff.wx >= 0xA6
+            && self.line < 144
+            && self.dot >= 254 + u16::from(self.eff.scx & 7)
+        {
+            self.irq_done = true;
+        }
         if proj <= lead {
             self.m0_src = true;
             self.m0_rise_dot = true;
             self.line_render_done = true;
+            self.irq_done = true;
             self.flip_dot = self.dot;
             // The window vis-HOLD foundation. SameBoy
             // extends a TRIGGERING window's CPU-visible mode-3 to ≈ `263 + SCX&7`
@@ -299,6 +319,7 @@ impl Ppu {
             self.m0_src = false;
             self.m0_rise_dot = false;
             self.line_render_done = false;
+            self.irq_done = false;
             self.flip_dot = 0;
             // The visible back-date drops with the dispatch. See the
             // `vis_early` field docs.
