@@ -523,8 +523,19 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # gambatte/sound DS rows (ch2_late_div_write_nr52_ds_1b/2b, ch2_late_reset_nr52
 # _ds_1b, ch2_reset_length_counter_timing_nr52_ds_2) which are ALSO same-cycle DS
 # reads and want POST. The one thing separating those from the speedchange ones is
-# that the speedchange reads follow a speed SWITCH. That is the last discriminator
-# to pin. Fourteen shapes eliminated.
+# that the speedchange reads follow a speed SWITCH.
+# And the sub-cycle offset does NOT separate them either — measured: the two
+# cases are identical in every quantity the model holds.
+#   speedchange _1a   clk cyc 94238, div C000, div&3 = 0, DS, read 94238, wants PRE
+#   sound ch2_late_div_write_nr52_ds_1b
+#                     clk cyc 94284, div C000, div&3 = 0, DS, read 94284, wants POST
+# Same cycle, same divider phase, same speed, opposite answers. So the
+# discriminator is not present in the model at all, which is why fifteen shapes
+# have now failed on it. The one modelled quantity that differs between the two
+# situations is `Apu::set_double_speed_lag`, the one-machine-cycle APU re-pace a
+# switching STOP installs. Whether that lag should also shift the length clock's
+# position relative to the CPU read is the question to answer next — and it is a
+# mechanism, not a history flag.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
