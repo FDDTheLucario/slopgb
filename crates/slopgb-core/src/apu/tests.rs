@@ -141,6 +141,61 @@ fn leaving_double_speed_restarts_div_without_a_frame_event() {
     }
 }
 
+/// The APU advances in whole 2 MHz granules, on a grid that an NR52 power-on
+/// can leave trailing the CPU's cycle counter ([`Apu::lag`]). A DIV-APU edge
+/// raised inside a granule takes effect only at the next boundary, which in
+/// double speed is the next machine cycle: that is what lets an FF26 read in
+/// the length clock's own cycle still see the channel on (the gambatte
+/// `speedchange*_ch2_nr52` `1a`/`1b` straddle).
+#[test]
+fn a_trailing_granule_grid_defers_the_frame_sequencer_step_one_cycle() {
+    for trailing in [false, true] {
+        let mut a = Apu::new(true);
+        a.write(0xFF26, 0x00); // power off
+        // The power-on anchors the grid against the speed it lands in: single
+        // speed leaves it a cycle short of the machine-cycle grid.
+        a.tick(0, !trailing);
+        a.write(0xFF26, 0x80);
+        assert_eq!(a.lag, u8::from(trailing));
+        let before = a.div_divider;
+        a.tick(0x2000, true); // DIV-APU bit 13 rises
+        a.tick(0x4000, true); // ...and falls: the frame-sequencer edge
+        assert_eq!(
+            a.div_divider == before,
+            trailing,
+            "trailing {trailing}: step deferred past its own machine cycle"
+        );
+        a.tick(0x4004, true);
+        assert_ne!(a.div_divider, before, "the step lands at the next boundary");
+    }
+}
+
+/// A STOP that leaves double speed re-anchors the granule grid across the
+/// CPU's cycle counter without leaving the APU a granule in debt
+/// ([`Apu::leave_double_speed`]): the pace stays one granule per double-speed
+/// machine cycle either side of the switch.
+#[test]
+fn leaving_double_speed_flips_the_granule_grid_without_owing_a_granule() {
+    let mut a = Apu::new(true);
+    a.write(0xFF26, 0x00);
+    a.tick(0, false);
+    a.write(0xFF26, 0x80); // power on in single speed: the grid trails by one
+    a.write(0xFF12, 0xF0); // NR12: DAC on
+    a.write(0xFF14, 0x80); // NR14: trigger, frequency 0 (longest period)
+    assert_eq!(a.lag, 1);
+    for want_lag in [0, 1] {
+        a.leave_double_speed();
+        assert_eq!(a.lag, want_lag);
+        let before = a.ch1.sample_countdown;
+        a.tick(0, true);
+        assert_eq!(
+            before - a.ch1.sample_countdown,
+            1,
+            "one 2 MHz cycle per double-speed machine cycle across the re-anchor"
+        );
+    }
+}
+
 /// A STOP that ENTERS double speed re-paces the frequency units one machine
 /// cycle after the CPU and PPU, so the first cycle of its pause still divides
 /// for single speed and the 2 MHz grid gains one cycle over that pause (see

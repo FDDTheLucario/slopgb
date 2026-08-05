@@ -47,7 +47,7 @@ const SUITE_DIR: &str = "age-test-roms";
 /// * the five `*-ds` rows are class A (CGB double-speed sub-cycle phase;
 ///   the whole-dot contract cannot place second-half commits inside the
 ///   2-dot ds cell);
-/// * the four `spsw-*` rows are class B (speed-switch sub-M-cycle seam;
+/// * the two `spsw-*` rows are class B (speed-switch sub-M-cycle seam;
 ///   their gambatte `speedchange/` siblings document the A/B trades);
 /// * the remaining stat-int/stat-mode*/oam-*/vram-read/lcd-align/ei-halt
 ///   ladders are class H: their failing rungs are one-dot STAT-event /
@@ -69,7 +69,6 @@ const BASELINE: &[&str] = &[
     "age-test-roms/oam/oam-write-dmgC.gb [Dmg]",
     "age-test-roms/oam/oam-write-ncmBCE.gb [Cgb]",
     "age-test-roms/speed-switch/caution/spsw-interrupts-cgbBC.gb [Cgb]",
-    "age-test-roms/speed-switch/spsw-ch2-lc-delay-cgbBCE.gb [Cgb]",
     "age-test-roms/speed-switch/spsw-mode0-cgbBCE.gb [Cgb]",
     "age-test-roms/stat-interrupt/stat-int-dmgC-cgbBCE.gb [Cgb]",
     "age-test-roms/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE.gb [Cgb]",

@@ -167,6 +167,11 @@ impl Interconnect {
             // after the read + internal cycle instead.
             self.double_speed = false;
             self.ppu.set_double_speed(false);
+            // The APU re-anchors its 2 MHz granule grid one CPU cycle behind
+            // the CPU's counter in this direction only (`Apu::leave_double_
+            // speed`); entering double speed re-paces with a whole extra
+            // granule instead (`Apu::set_double_speed_lag`, below).
+            self.apu.leave_double_speed();
         }
         if !interrupt_pending {
             // The skipped byte costs one real read M-cycle (SameBoy

@@ -561,11 +561,48 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # 5/21 recovered against broken. It has to be: `generateSamples` advances the
 # WHOLE PSG to the read's cycle, so duty position, envelope and sweep all move
 # with it, and patching only the length bits desynchronises the rest.
-# The real fix is adopting the lazy model — hold a `last_update` cycle, advance
-# the APU on demand to `(cc - last_update) >> (1 + ds)` granules whenever a
-# sound register is read or written, and stop ticking it eagerly per machine
-# cycle. That is a restructure of how the APU is driven rather than a patch, and
-# it is the shape the remaining fifteen rows need.
+# BUILT (2026-08-05), and it clears all six `ch2_nr52` rows. The lazy model does
+# not need lazy CALL SITES: `generateSamples` is monotone in `cc` and idempotent,
+# so advancing per machine cycle gives every observer at a machine-cycle boundary
+# — which is every slopgb access, under tick-then-access — the same state a
+# call-site-driven advance would. What it does need is the TRUNCATION: the APU
+# runs whole 2 MHz granules (2 CPU cycles single speed, 4 double) off a grid that
+# can sit a cycle away from the CPU's, so `Apu::lag` (0 or 1) holds the remainder
+# and a DIV-APU edge raised inside a granule is deferred to the next boundary
+# (`Apu::pending_edge`). In double speed a granule IS a machine cycle, so a
+# deferred length clock lands in the next one and the `1a` read sees the channel
+# still on while `1b` sees it off (age spsw-ch2-lc-delay-cgbBCE comes with them).
+# The deferral is DOUBLE-SPEED-scoped: at single speed both granules sit inside
+# the raising machine cycle, so no observation moves, but stepping the sequencer
+# between them costs same-suite channel_1_sweep_restart_2 — a row SameBoy passes,
+# which outranks a gambatte-derived intra-cycle order. Two events move the grid, both from
+# gambatte sound.cpp: `PSG::reset` (the NR52 power-on, `lastUpdate_ =
+# ((lastUpdate_ + 3) & -4) - !ds` -> the grid trails by one cycle in single
+# speed) and `PSG::speedChange` (`lastUpdate_ -= ds`: only the LEAVING direction
+# moves it). With the grid in step the whole model is byte-identical to the eager
+# clock — verified by running the matrix with both re-anchors disabled.
+# The nine `ch1_duty0_pos6_to_pos7_timing` rows are NOT cleared and are bracketed
+# two-sided by that leave. They turn on whether the re-anchor also hands the APU
+# the granule DEBT gambatte's subtraction implies (slopgb re-anchors an M-cycle
+# earlier than gambatte times it, so the grid can move without one). Measured, on
+# top of the shipped model:
+#   re-anchor moves the grid only (shipped)   +6 / -0
+#   with the debt (literal `lastUpdate_ -= 1`) +10 / -4: it also takes
+#     speedchange2/3 `_2` but breaks speedchange{4,5}* `_1`, whose pairs are two
+#     granules apart in single speed so one granule flips only one of them
+#   debt alternating in sign per leave        +10 / -1 (breaks
+#     speedchange_ch1_duty0_..._nop_ds_2) — fits the corpus, has no source in
+#     gambatte, and is NOT shipped
+# A constant (enter, leave, power-on) shift cannot satisfy the duty family and
+# the nr52 family at once: the nr52 rows pin the grid to trail after enters 1 and
+# 3 and to be in step after enter 2, which forces the leave to flip parity, and
+# every parity-flipping shift gives all of speedchange2..5 the same granule delta
+# while the duty rows want +1 for 2/3 and 0 for 4/5. Swept: enter 0..4 x leave
+# 0..3, best net +6 (20 points, none zero-regression except the shipped shape).
+# The next lever is what separates a second leave from a first — the FS-phase
+# re-base gambatte does on the ENTERING side (`cycleCounter_ = cc - divCycles/2
+# - lastUpdate_ % 2`, sound.cpp), which is grid-parity-keyed and not modelled
+# here because slopgb derives the frame sequencer from DIV instead.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
@@ -699,12 +736,6 @@ gambatte/dma/hdma_late_m3speedchange_read_hdmadst00_scx2_ds_2_cgb04c_out9F.gbc [
 gambatte/dma/hdma_late_m3speedchange_tima_scx1_ds_3_cgb04c_outF6.gbc [Cgb]
 gambatte/dma/hdma_m0speedchange_late_m3wakeup_scx1_2_cgb04c_out00.gbc [Cgb]
 gambatte/dma/hdma_m0speedchange_late_m3wakeup_scx2_2_cgb04c_out00.gbc [Cgb]
-gambatte/speedchange/speedchange2_ch2_nr52_ds_1a_cgb04c_outF2.gbc [Cgb]
-gambatte/speedchange/speedchange2_ch2_nr52_ds_2a_cgb04c_outF2.gbc [Cgb]
-gambatte/speedchange/speedchange5_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb]
-gambatte/speedchange/speedchange5_ch2_nr52_2a_cgb04c_outF2.gbc [Cgb]
-gambatte/speedchange/speedchange_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb]
-gambatte/speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2.gbc [Cgb]
 
 # --- window-machine wave swaps ------------------------------------------
 # These entries regressed when the gambatte window machine landed (WX

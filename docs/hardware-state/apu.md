@@ -230,67 +230,84 @@ by the *zero-switch* rungs `ch1_duty0_pos6_to_pos7_timing_ds_{5,6}` and
 retrigger, and both score `+6/−6` and `+10/−5` on the corpus: they take
 same-suite `channel_1/2_align{,_cpu}` with them. The `- lf_div` term stays.
 
-## The lazy-advance rewrite (specified, not built)
+## The granule grid (2026-08-05)
 
-The fifteen `speedchange` APU rows need a change to how the APU is *driven*, not
-to any rule inside it. Sixteen shapes were tried against them and every one
-failed; the reason is structural and is written up in the class notes of
-`tests/gbtr/baselines/gambatte.txt`.
+The APU does not advance a machine cycle at a time. It advances in whole 2 MHz
+**granules** — 2 CPU cycles at single speed, 4 at double, 4 CPU cycles being one
+machine cycle at either speed — off a grid that can sit one cycle away from the
+CPU's own counter. `Apu::lag` holds that remainder (0 or 1), and whatever falls
+inside the unfinished granule is not observable yet.
 
-### Why the current model cannot express them
-
-slopgb ticks the APU eagerly: `Interconnect::tick_machine` calls
-`Apu::tick(div, ds)` once per machine cycle, which detects the DIV-APU edge (and
-with it clocks lengths) and then advances the channels four dots, or two in
-double speed. Register accesses happen *after* that tick, so a read always
-observes the whole machine cycle including any length clock inside it.
-
-gambatte advances lazily instead. `memory.cpp` case `0x26` — the NR52 read —
-calls `psg_.generateSamples(cc, isDoubleSpeed())` first, and `sound.cpp`:
+This is gambatte's model, `sound.cpp` `PSG::generateSamples`:
 
 ```cpp
 unsigned long const cycles = (cpuCc - lastUpdate_) >> (1 + doubleSpeed);
 lastUpdate_ += cycles << (1 + doubleSpeed);
 ```
 
-The PSG is brought up to the read's own CPU cycle, truncated to a whole APU
-granule — two CPU cycles per step at single speed, four at double. A read
-landing inside a granule sees the APU as of that granule's start, so it can
-observe state from *before* a length clock that the machine cycle already
-contains. Two reads one machine cycle apart therefore straddle the clock, which
-is exactly what `ch2_nr52_1a` (wants the channel still on) and `_1b` (wants it
-off) measure.
+gambatte calls it lazily — from the `0xFF10..=0xFF3F` access sites in
+`memory.cpp` — but the call sites are not the mechanism. The advance is monotone
+in `cc` and idempotent, so running it once per machine cycle (as
+`Interconnect::tick_machine` already does) hands every observer at a
+machine-cycle boundary the same state a per-access advance would, and under
+tick-then-access every slopgb access is at one. The truncation is the mechanism.
 
-Crucially the length counters advance *with* the channels in gambatte
-(`length_counter.cpp` events run from the channel's own update), not from an
-eager frame sequencer. That is why the length state can lag a machine cycle
-while the divider does not.
+**A DIV-APU edge is deferred to a granule boundary.** `Apu::pending_edge` holds
+the edge with how far ahead of the APU's clock it was raised; `Apu::run_granule`
+fires it at the first boundary at or past that point. In double speed a granule
+*is* a machine cycle, so an edge raised on a trailing grid lands in the next
+machine cycle — which is how two FF26 reads a machine cycle apart straddle the
+length clock that disables channel 2 (`gambatte/speedchange/*ch2_nr52_1a` reads
+the channel still on, `_1b` reads it off). All six of those rows pass, and
+age `spsw-ch2-lc-delay-cgbBCE` comes with them.
 
-### The change
+The deferral is scoped to **double speed** (`Apu::raise_edge`). At single speed
+both granules of a machine cycle sit inside the cycle that raised the edge, so
+moving the step from the first to the second changes no observation the machine
+can make — but it does move the step against the channels, and that costs
+same-suite `channel_1_sweep_restart_2`. SameBoy passes that row, so it outranks
+a gambatte-derived intra-cycle order (never drop a row SameBoy passes).
 
-1. Give `Apu` a `last_update` cycle and an `advance_to(cc, ds)` that runs
-   `(cc - last_update) >> (1 + ds)` granules and stores the truncated
-   `last_update` back. Move the channel stepping and the length counters onto
-   it.
-2. Stop calling `Apu::tick` from `tick_machine`. Call `advance_to` from the
-   three places that observe APU state: the `0xFF10..=0xFF3F` read and write
-   arms in `interconnect/memory.rs`, and wherever audio samples are drained.
-3. Keep the DIV-APU edge where it is — driven by the divider per machine cycle —
-   but let it *schedule* the frame-sequencer step rather than perform it, so the
-   step lands when `advance_to` reaches its granule.
-4. `speed_lag` (the one-machine-cycle single-speed pace after a switching STOP)
-   becomes an offset on the first granule after the switch.
-5. Save state gains `last_update` and any pending step; `STATE_VERSION` bumps.
+**Two events move the grid**, both from gambatte `sound.cpp`:
 
-### Verification, in order
+| event | effect | source |
+|---|---|---|
+| NR52 power-on | grid trails by one cycle in single speed, in step in double | `PSG::reset`: `lastUpdate_ = ((lastUpdate_ + 3) & -4) - !ds` |
+| STOP *leaving* double speed | grid moves one cycle across the CPU's counter | `PSG::speedChange`: `lastUpdate_ -= ds` (leaving only) |
 
-Each step must hold the previous gate before the next begins.
+Entering double speed moves the grid's remainder not at all; its re-pace is the
+whole extra granule of `Apu::set_double_speed_lag` (above). With both re-anchors
+disabled the whole model is byte-identical to the eager clock — that is how it
+was verified, by running the gambatte matrix with the grid pinned in step.
 
-- `cargo test -p slopgb-core --lib apu` — the unit tests are the tightest net.
-- blargg `dmg_sound` and `cgb_sound` — the acceptance bar; both currently pass.
-- The 164 `gambatte/sound/` ROMs — ~50 pass today and are the first thing a
-  timing shift will break.
-- `same_suite` APU rows, then the full `gbtr` battery and `golden_fingerprint`.
+Save state carries `lag` and the pending edge; `STATE_VERSION` is 18.
+
+### Residual: the nine `ch1_duty0_pos6_to_pos7_timing` rows
+
+They turn on whether the leaving re-anchor also hands the APU the granule
+**debt** gambatte's subtraction implies. slopgb re-anchors at the STOP's toggle,
+a machine cycle ahead of where gambatte times it, so the grid can move without
+one. Measured on top of the shipped model, and two-sided:
+
+| leave re-anchor | score |
+|---|---|
+| moves the grid only (shipped) | +6 / −0 |
+| with the debt (literal `lastUpdate_ -= 1`) | +10 / −4 |
+| debt alternating in sign per leave | +10 / −1, no source, NOT shipped |
+
+The debt form takes speedchange2/3 `_2` and breaks speedchange{4,5} `_1`: a
+`_1`/`_2` pair is two granules apart in single speed, so one granule flips only
+one of them. No constant (enter, leave, power-on) shift satisfies both families
+— the nr52 rows force the leave to flip the grid's parity, and every
+parity-flipping shift gives speedchange2..5 the same granule delta while the
+duty rows want +1 for 2/3 and 0 for 4/5. Swept enter 0..4 x leave 0..3 (20
+points): best net +6, and only the shipped shape is regression-free.
+
+The lever left is whatever separates a second leave from a first. The unmodelled
+candidate is the frame-sequencer re-base gambatte does on the *entering* side —
+`cycleCounter_ = cc - divCycles/2 - lastUpdate_ % 2` (`PSG::speedChange`), keyed
+on the grid's parity — which has no counterpart here because slopgb derives the
+frame sequencer from DIV rather than from the PSG's own counter.
 
 ### What is already ruled out
 

@@ -192,17 +192,17 @@ const STATE_MAGIC: &[u8; 4] = b"SLPS";
 /// Save-state format version (bumped on any layout change). v3 dropped the
 /// APU output queues (`samples`/`raw_samples`) from the payload; v6 dropped
 /// two retired clock-mode flag bytes from the interconnect + PPU payloads; v7
-/// records an is-SGB-model flag byte right after the header so a cross-model
-/// load (SGB state into DMG/CGB or vice versa) is rejected with
-/// `StateError::ModelMismatch` instead of silently dropping SGB-only payload;
-/// v8 appends the SGB raw-packet tee queue to
-/// the joypad payload (the ICD2 mailbox feed; the SNES-fed pad latches stay
-/// transient — a live coprocessor re-feeds them on the next step); v10 moves the
-/// SNES-coprocessor tail behind its own presence flag at the very end, since the
-/// tail exists only when a coprocessor is installed, not per model; v11 adds the
-/// PPU's pure-LYC STAT halt mask; v12 adds the renderer's object-fetch abort
-/// countdown; v13 adds the OAM scan's one-dot-lagged LCDC.2 snapshot.
-const STATE_VERSION: u16 = 17;
+/// records an is-SGB-model flag byte right after the header, so a cross-model
+/// load is rejected with `StateError::ModelMismatch` instead of silently
+/// dropping SGB-only payload; v8 appends the SGB raw-packet tee queue to the
+/// joypad payload (the ICD2 mailbox feed; the SNES-fed pad latches stay
+/// transient — a live coprocessor re-feeds them on the next step); v10 moves
+/// the SNES-coprocessor tail behind its own presence flag at the very end,
+/// since the tail exists only when a coprocessor is installed, not per model;
+/// v11 adds the PPU's pure-LYC STAT halt mask; v12 adds the renderer's
+/// object-fetch abort countdown; v13 adds the OAM scan's one-dot-lagged LCDC.2
+/// snapshot; v18 adds the APU's granule-grid lag and its pending DIV-APU edge.
+const STATE_VERSION: u16 = 18;
 
 /// A debugger memory watchpoint (bgb's "Set watchpoint"): the free run halts
 /// after the CPU accesses `addr` with a matching access kind. A frontend/

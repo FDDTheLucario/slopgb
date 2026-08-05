@@ -47,6 +47,18 @@ enum SkipDivEvent {
     Skipped,
 }
 
+/// A DIV-APU edge the APU's own clock has not reached yet. The frame
+/// sequencer is observable only at the 2 MHz granule boundaries the APU
+/// advances on (see [`Apu::lag`]), so an edge raised inside a granule takes
+/// effect at the next boundary, not at the machine cycle that raised it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DivEdge {
+    /// Falling edge of the DIV-APU bit: a frame-sequencer step.
+    Falling,
+    /// Rising edge: the "secondary event" that arms envelope ticks.
+    Rising,
+}
+
 #[derive(Clone)]
 pub struct Apu {
     cgb: bool,
@@ -85,6 +97,25 @@ pub struct Apu {
     /// ([`Self::set_double_speed_lag`]). Raised and dropped inside one
     /// switching STOP, so no save state can observe it set.
     speed_lag: bool,
+    /// How far the APU's own clock trails the CPU's, in CPU cycles (4 per
+    /// machine cycle at either speed). The APU advances in whole 2 MHz
+    /// granules — 2 CPU cycles at single speed, 4 at double — and whatever
+    /// is left over stays behind, so the machine observes the APU as of the
+    /// last granule boundary rather than as of its own cycle (gambatte
+    /// sound.cpp `PSG::generateSamples`: `cycles = (cpuCc - lastUpdate_) >>
+    /// (1 + doubleSpeed)`, `lastUpdate_ += cycles << (1 + doubleSpeed)`).
+    /// Zero — the two grids in step — except after an NR52 power-on or a
+    /// STOP that leaves double speed, the two events that re-anchor the
+    /// granule grid ([`Self::power_on`], [`Self::leave_double_speed`]), so it
+    /// only ever holds 0 or 1. A trailing grid is what lets two reads a
+    /// machine cycle apart straddle a length clock: the earlier one lands
+    /// inside the granule that carries the clock and reads the channel still
+    /// on (gambatte speedchange ch2_nr52 `1a`/`1b`).
+    lag: u8,
+    /// A DIV-APU edge waiting for the APU's clock, with how far ahead of the
+    /// APU's position it was raised (counted down a granule at a time, so it
+    /// fires at the first boundary at or past it).
+    pending_edge: Option<(i8, DivEdge)>,
     // Output stage.
     cycles_per_sample: f64,
     sample_frac: f64,
@@ -210,6 +241,8 @@ impl Apu {
             prev_div: 0,
             last_double_speed: false,
             speed_lag: false,
+            lag: 0,
+            pending_edge: None,
             cycles_per_sample: 0.0,
             sample_frac: 0.0,
             sum_l: 0.0,
@@ -260,8 +293,9 @@ impl Apu {
         }
     }
 
-    /// Advance one M-cycle (4 T-cycles). `div` is the timer's internal DIV
-    /// counter after this cycle; `double_speed` selects the DIV-APU bit.
+    /// Advance one M-cycle (4 CPU cycles at either speed). `div` is the
+    /// timer's internal DIV counter after this cycle; `double_speed` selects
+    /// the DIV-APU bit and the granule width.
     pub fn tick(&mut self, div: u16, double_speed: bool) {
         // DIV-APU: falling edge of DIV register bit 4 (bit 5 in double
         // speed). DIV is the top byte of the internal counter, so that is
@@ -273,24 +307,61 @@ impl Apu {
         self.last_double_speed = double_speed;
         if self.power {
             if was == 1 && now == 0 {
-                self.div_event(false);
+                self.raise_edge(DivEdge::Falling, double_speed);
             } else if was == 0 && now == 1 {
                 // Rising edge: the "secondary event" (SameBoy timing.c —
                 // falling edge of the DIV-APU bit fires GB_apu_div_event,
                 // rising edge GB_apu_div_secondary_event) arms the envelope
                 // ticks of active channels whose countdown reached 0.
-                self.ch1.envelope.arm(self.ch1.enabled);
-                self.ch2.envelope.arm(self.ch2.enabled);
-                self.ch4.envelope.arm(self.ch4.enabled);
+                self.raise_edge(DivEdge::Rising, double_speed);
             }
         }
-        // One CPU M-cycle is 4 dots of APU time, 2 in double speed — but the
-        // first machine cycle after a switching STOP entered double speed
-        // still runs at the single-speed pace (see
-        // [`Self::set_double_speed_lag`]).
-        let lag = std::mem::take(&mut self.speed_lag);
-        let dots = if double_speed && !lag { 2 } else { 4 };
-        for _ in 0..dots {
+        // The APU consumes the machine cycle's 4 CPU cycles two at a time
+        // (four in double speed) — but the first machine cycle after a
+        // switching STOP entered double speed still divides for single speed
+        // (see [`Self::set_double_speed_lag`]).
+        let single_pace = std::mem::take(&mut self.speed_lag);
+        let granule = if double_speed && !single_pace { 4 } else { 2 };
+        let available = self.lag + 4;
+        self.lag = available % granule;
+        for _ in 0..available / granule {
+            self.run_granule(granule);
+        }
+    }
+
+    /// Raise a DIV-APU edge at the CPU's current cycle, which is [`Self::lag`]
+    /// cycles ahead of where the APU's own clock stands — so a trailing grid
+    /// carries it into the next granule.
+    ///
+    /// Only in double speed, where a granule spans the whole machine cycle and
+    /// the deferral is therefore observable: at single speed both granules sit
+    /// inside the raising cycle, and moving the step between them costs
+    /// same-suite `channel_1_sweep_restart_2` (a row SameBoy passes, so it
+    /// outranks a gambatte-derived intra-cycle order — see
+    /// docs/hardware-state/apu.md).
+    fn raise_edge(&mut self, edge: DivEdge, double_speed: bool) {
+        let offset = if double_speed { self.lag as i8 } else { 0 };
+        self.pending_edge = Some((offset, edge));
+    }
+
+    /// One 2 MHz granule: the DIV-APU edge it has reached, if any, then the
+    /// two dots of channel time the granule covers. `granule` is its width in
+    /// CPU cycles, which is how far it carries a pending edge's countdown.
+    fn run_granule(&mut self, granule: u8) {
+        if let Some((offset, edge)) = self.pending_edge {
+            if offset <= 0 {
+                self.pending_edge = None;
+                match edge {
+                    DivEdge::Falling => self.div_event(false),
+                    DivEdge::Rising => {
+                        self.ch1.envelope.arm(self.ch1.enabled);
+                        self.ch2.envelope.arm(self.ch2.enabled);
+                        self.ch4.envelope.arm(self.ch4.enabled);
+                    }
+                }
+            }
+        }
+        for _ in 0..2 {
             if self.power {
                 self.phase = (self.phase + 1) & 3;
                 if self.phase & 1 == 0 {
@@ -315,6 +386,25 @@ impl Apu {
             }
             self.output_cycle();
         }
+        if let Some((offset, _)) = &mut self.pending_edge {
+            *offset -= granule as i8;
+        }
+    }
+
+    /// The APU side of a switching STOP that LEAVES double speed: the 2 MHz
+    /// granule grid re-anchors one CPU cycle across the CPU's own counter
+    /// (gambatte sound.cpp `PSG::speedChange`: `lastUpdate_ -= ds`, with `ds`
+    /// the speed being left, so only this direction moves it — entering
+    /// subtracts nothing, its re-pace being the whole extra granule of
+    /// [`Self::set_double_speed_lag`]). The re-anchor moves the grid, not the
+    /// APU's position: slopgb re-anchors at the STOP's toggle, an M-cycle
+    /// ahead of where gambatte times it, so the granule gambatte's subtraction
+    /// leaves owed is one the pause below has already run. Handing the
+    /// re-anchor that debt as well costs four
+    /// `speedchange{4,5}*ch1_duty0_pos6_to_pos7_timing_1` rungs (measured; see
+    /// the APU block in `tests/gbtr/baselines/gambatte.txt`).
+    pub fn leave_double_speed(&mut self) {
+        self.lag ^= 1;
     }
 
     /// A switching STOP that ENTERS double speed re-paces the frequency
@@ -572,6 +662,9 @@ impl Apu {
     /// cleared too. Wave RAM is unaffected.
     fn power_off(&mut self) {
         self.power = false;
+        // The divider chain is held in reset while off, so an edge that has
+        // not reached the APU's clock yet never arrives.
+        self.pending_edge = None;
         let clear_len = self.cgb;
         self.ch1.power_off(clear_len);
         self.ch2.power_off(clear_len);
@@ -593,6 +686,13 @@ impl Apu {
     fn power_on(&mut self) {
         self.power = true;
         self.phase = 2; // divider chain reset: lf_div restarts at 1
+        // The 2 MHz granule grid re-anchors to the CPU's cycle counter, one
+        // cycle short of it in single speed (gambatte sound.cpp `PSG::reset`:
+        // `lastUpdate_ = ((lastUpdate_ + 3) & -4) - !ds` — the APU's clock
+        // rounds up to the machine-cycle grid, then backs off by the single
+        // speed's odd cycle; the round-up is a no-op here, where the grid is
+        // never more than a granule out).
+        self.lag = u8::from(!self.last_double_speed);
         let bit = if self.last_double_speed { 13 } else { 12 };
         if (self.prev_div >> bit) & 1 == 1 {
             self.skip_div_event = SkipDivEvent::Skip;
@@ -852,77 +952,8 @@ impl Apu {
     }
 }
 
-// --- Save state (see `crate::state`). The output-stage config
-// (cycles_per_sample / max_samples) is NOT serialized: it is re-derived from
-// the live sample rate, so a state loads at the host's current rate. ---
-impl Apu {
-    pub(super) fn write_state(&self, w: &mut crate::state::Writer) {
-        w.bool(self.cgb);
-        w.bool(self.power);
-        self.ch1.write_state(w);
-        self.ch2.write_state(w);
-        self.ch3.write_state(w);
-        self.ch4.write_state(w);
-        w.u8(self.nr50);
-        w.u8(self.nr51);
-        w.u8(self.mute_mask);
-        w.u8(self.div_divider);
-        w.u8(match self.skip_div_event {
-            SkipDivEvent::Inactive => 0,
-            SkipDivEvent::Skip => 1,
-            SkipDivEvent::Skipped => 2,
-        });
-        w.u8(self.phase);
-        w.u16(self.prev_div);
-        w.bool(self.last_double_speed);
-        w.u64(self.sample_frac.to_bits());
-        w.u32(self.sum_l.to_bits());
-        w.u32(self.sum_r.to_bits());
-        w.u32(self.sum_count);
-        w.u32(self.hp_charge.to_bits());
-        w.u32(self.hp_cap_l.to_bits());
-        w.u32(self.hp_cap_r.to_bits());
-        // `samples`/`raw_samples` are the drained-per-frame OUTPUT queues, not
-        // emulation state — a save must not carry them (raw_samples alone caps
-        // at ~2 frames ≈ 1 MB of transient audio). Reset empty on load; the
-        // stream resumes fresh, an imperceptible gap. (cf. `cycles_per_sample`,
-        // also re-derived not serialized.)
-    }
-    pub(super) fn read_state(
-        &mut self,
-        r: &mut crate::state::Reader<'_>,
-    ) -> Result<(), crate::state::StateError> {
-        self.cgb = r.bool()?;
-        self.power = r.bool()?;
-        self.ch1.read_state(r)?;
-        self.ch2.read_state(r)?;
-        self.ch3.read_state(r)?;
-        self.ch4.read_state(r)?;
-        self.nr50 = r.u8()?;
-        self.nr51 = r.u8()?;
-        self.mute_mask = r.u8()?;
-        self.div_divider = r.u8()?;
-        self.skip_div_event = match r.u8()? {
-            0 => SkipDivEvent::Inactive,
-            1 => SkipDivEvent::Skip,
-            _ => SkipDivEvent::Skipped,
-        };
-        self.phase = r.u8()?;
-        self.prev_div = r.u16()?;
-        self.last_double_speed = r.bool()?;
-        self.sample_frac = f64::from_bits(r.u64()?);
-        self.sum_l = f32::from_bits(r.u32()?);
-        self.sum_r = f32::from_bits(r.u32()?);
-        self.sum_count = r.u32()?;
-        self.hp_charge = f32::from_bits(r.u32()?);
-        self.hp_cap_l = f32::from_bits(r.u32()?);
-        self.hp_cap_r = f32::from_bits(r.u32()?);
-        // Output queues are not serialized (see `write_state`) — start fresh.
-        self.samples.clear();
-        self.raw_samples.clear();
-        Ok(())
-    }
-}
+#[path = "state.rs"]
+mod state;
 
 #[cfg(test)]
 #[path = "tests.rs"]

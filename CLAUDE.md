@@ -116,12 +116,10 @@ When a **hardware** question comes up, consult in order:
   off, run `golden_fingerprint` — if golden changes it's LIVE, the claim is false). A
   stale/false core comment is a regression trap, not a nit.
 - Commit + push frequently. **Every commit MUST be SSH-signed** (`gpg.format=ssh`,
-  key = the RSA `~/.ssh/id_rsa` in `user.signingkey`, committer
-  `daxuya.zumi+code@protonmail.com`, `gpg.ssh.allowedSignersFile=~/.ssh/allowed_signers`
-  so `%G?` can verify; commit `-S` and check `%G?`=G). The default `git` here is 2.30.2,
-  which **cannot** SSH-sign — use the guix-store git ≥2.34
-  (`/gnu/store/li2qq4l9skr8vxk4hrjrknj652jbcgs1-git-minimal-2.52.0/bin/git`).
-  `export SSH_AUTH_SOCK=/tmp/agent.socket` before committing; signing that fails with
+  key = `~/.ssh/id_ed25519.pub` in `user.signingkey`, committer
+  `richard@richardmoch.xyz`, `gpg.ssh.allowedSignersFile` set so `%G?` can verify;
+  commit `-S` and check `%G?`=G). `export SSH_AUTH_SOCK=/run/user/1000/ssh-agent.socket`
+  before committing (env does not persist across tool calls); signing that fails with
   `ssh_askpass` means the agent is down — ask the user to start it in-session.
 - Each iteration: run `/rust-diff-review` on that iteration's diff, fix every finding
   before the next iteration.
@@ -156,7 +154,8 @@ emulated s.
 ## State
 
 Baseline (all green, on `main`): mooneye **439/439** (rom×model), gbtr v7.0
-**221/221** suite tests green with **372** baselined floor cases, core lib +
+**221/221** suite tests green with **349** baselined floor cases (every entry in
+`tests/gbtr/baselines/*.txt` plus the in-source `BASELINE` arrays), core lib +
 frontend green, clippy clean. Missing ROMs skip unless `SLOPGB_REQUIRE_ROMS=1` (run
 `test-roms/download.sh` first). Per-area detail:
 [`docs/ui-state/`](docs/ui-state/README.md) + [`docs/hardware-state/`](docs/hardware-state/README.md).
@@ -166,7 +165,7 @@ no `spc700.wasm` + `w65c816.wasm` (or either disabled in Options→Plugins) the
 coprocessor slot stays empty and an SGB machine plays no SGB music. The GB APU, the
 SGB border, palettes and the ATTR/PAL packet handling are core PPU/APU HLE and are
 unaffected. Save states carry the SNES tail only when a coprocessor is installed
-(`STATE_VERSION` 17; older states are rejected outright, there is no migration).
+(`STATE_VERSION` 18; older states are rejected outright, there is no migration).
 UI theming (contemporary Light default / Dark / Classic + custom-theme API; colour-only,
 `T` toggles Light↔Dark): [`docs/ui-state/theming.md`](docs/ui-state/theming.md).
 Known residuals (all SameBoy-FAIL/floored, NOT regressions): DS mid-dot render floor,
