@@ -448,6 +448,11 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # the event count — it is where the ROM's NR24 length-enable write falls relative
 # to a length step. That is the extra-length-clock quirk meeting the switch, not
 # the divider pacing.
+# A fourth is out too: suppressing the length clock on the write-induced
+# div_event costs a row (20 -> 21). Note the phase term these rows turn on is
+# `Apu::next_step_clocks_length`, plain divider parity — and the switch's
+# `div_write` both advances that divider and clocks lengths, so it moves the
+# parity a later NRx4 write is judged against. That coupling is where to look.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
