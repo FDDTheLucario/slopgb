@@ -588,11 +588,19 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
 # position 6 — every one correct — and every `_2` rung on 7 (pass) or 6 (fail).
 # So each failure is the same single 2 MHz cycle, and every UNIFORM shift is
 # refuted without running one: advancing the duty unit a granule everywhere puts
-# all 22 `_1` rungs on 7 and fails them. The enter-side pace is settled too, by
-# construction: `Apu::set_double_speed_lag` gives the entering STOP one granule
-# more than gambatte's `generateSamples(cc + 8, old speed)`; removing it drops
-# every `_2` rung one (the passing ones fail), adding another raises every `_1`
-# rung one (those fail). What is left is bracketed two-sided by the leave. They turn on whether the re-anchor also hands the APU
+# all 22 `_1` rungs on 7 and fails them. The entering pace IS a live lever here
+# though — measured: `Apu::set_double_speed_lag` one granule LESS (gambatte's
+# literal `generateSamples(cc + 8, old speed)`) scores -6/+0, one granule MORE
+# scores +9/-8 (fixes speedchange{,2,3}*_2, fails speedchange{3,4,5}*_1), and
+# with the leave debt on top +9/-9. That +9/-8 row reads exactly as one granule
+# per ENTERING switch: k=1,2 (one enter) move the expiry from after `_2` to
+# between the rungs (pure fix), k=3 (two enters) move it two and lose `_1`, and
+# k=4,5 were already between their rungs so any advance only costs them. The
+# corpus therefore wants +1 for speedchange 1/2/3 and 0 for 4/5, which NO
+# per-switch accumulating term generates (k=3 and k=4 share their two enters and
+# differ only by a trailing leave; k=2 and k=3 differ by an enter yet want the
+# same). Suspect the per-switch-count FRAME: each rung carries its own `dec b`
+# delay constant, so disassemble the kernels before fitting another term. They turn on whether the re-anchor also hands the APU
 # the granule DEBT gambatte's subtraction implies (slopgb re-anchors an M-cycle
 # earlier than gambatte times it, so the grid can move without one). Measured, on
 # top of the shipped model:

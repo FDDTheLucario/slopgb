@@ -306,13 +306,39 @@ rungs end there and pass; switch count splits 1/2/3 failing against 4/5 passing;
 the `nop` position, the frequency ($C0 vs $E0) and the final grid parity each cut
 across both sets.
 
-The enter-side pace is NOT the lever, and that is now settled by construction
-rather than by sweep. `Apu::set_double_speed_lag` gives the entering STOP one
-granule more than gambatte's `generateSamples(cc + 8, old speed)` jump does.
-Removing that granule moves every `_2` rung down one — the passing ones fail;
-adding a second moves every `_1` rung up one — those fail. The knob is already at
-its only two-sided-correct value (+8/−0 when it landed), so the residual is not
-a per-switch pace term.
+The enter-side pace IS a live lever on this family — measured, not argued
+(an earlier derivation here claimed otherwise and was wrong).
+`Apu::set_double_speed_lag` gives the entering STOP one granule more than
+gambatte's `generateSamples(cc + 8, old speed)` jump does. Moving it:
+
+| entering pace | score | what moves |
+|---|---|---|
+| one granule less (gambatte's literal jump) | −6 / +0 | fails `speedchange{2,4,5}*_2` |
+| shipped | — | — |
+| one granule more | +9 / −8 | fixes `speedchange{,2,3}*_2`, fails `speedchange{3,4,5}*_1` |
+| one granule more + the leave debt | +9 / −9 | — |
+
+Read the +9/−8 row against the position data and the per-enter accounting comes
+out exactly: an extra granule per entering switch moves the expiry one granule
+earlier, and a family flips only when that crosses one of its rungs. `k` = 1 and
+2 (one enter) move the expiry from "after `_2`" to "between the rungs" — a pure
+fix. `k` = 3 (two enters) moves it two, from "after `_2`" to "before `_1`" —
+`_2` gains, `_1` loses. `k` = 4 and 5 were already between their rungs, so any
+advance only costs them.
+
+So the corpus wants **+1 granule for `speedchange` 1/2/3 and 0 for 4/5**, and no
+per-switch accumulating term generates that: `k` = 3 and `k` = 4 have the same
+two entering switches and differ only by a trailing leave, while `k` = 2 and
+`k` = 3 differ by an entering switch yet want the same delta. Every combination
+of a per-enter and a per-leave term was tried against those five values and none
+fits.
+
+The frame that is probably wrong is "delta per switch count" itself. Each rung
+carries its own `dec b` delay constant, tuned so the expiry lands between the
+rungs on hardware, so two families with the same switch structure need not want
+the same correction. **Disassemble the kernels and compare their delay constants
+before fitting another term** (`/rom-disasm-gaps`); the twelve failures may not
+share one cause at all.
 
 The leave-side debt is the one lever that moves rows, and it is bracketed:
 
@@ -330,8 +356,7 @@ parity-flipping shift gives speedchange2..5 the same granule delta while the
 duty rows want +1 for 2/3 and 0 for 4/5. Swept enter 0..4 x leave 0..3 (20
 points): best net +6, and only the shipped shape is regression-free.
 
-What is left is a per-configuration term finer than the granule the model runs
-on. The unmodelled candidate named in gambatte's source is the frame-sequencer
+The remaining candidate named in gambatte's source is the frame-sequencer
 re-base on the *entering* side — `cycleCounter_ = cc - divCycles/2 -
 lastUpdate_ % 2` (`PSG::speedChange`) — but read it before spending a session on
 it: the DIV reset immediately preceding it leaves `divCycles` at the four

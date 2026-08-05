@@ -48,14 +48,32 @@ correct; every `_2` rung is on 7 (pass) or 6 (fail). Each failure is therefore
 the same single 2 MHz cycle, and **every uniform shift is refuted a priori** —
 advancing the duty unit a granule everywhere puts all 22 `_1` rungs on 7.
 
-The enter-side pace is settled by construction, not by sweep:
-`Apu::set_double_speed_lag` gives the entering STOP one granule more than
-gambatte's `generateSamples(cc + 8, old speed)` jump. Removing it drops every
-`_2` rung one (the passing ones fail); adding another raises every `_1` rung one
-(those fail). It is already at its only two-sided-correct value.
+The entering pace IS a live lever on this family, measured across the matrix:
 
-The remaining lever turns on whether the leaving re-anchor also hands the APU the granule
-**debt** gambatte's `lastUpdate_ -= ds` implies. Measured, two-sided:
+| entering pace | score |
+|---|---|
+| one granule less (gambatte's literal `cc + 8` jump) | −6 / +0 |
+| shipped (`Apu::set_double_speed_lag`) | — |
+| one granule more | **+9 / −8** |
+| one granule more + the leave debt | +9 / −9 |
+
+The +9/−8 row reads exactly as one granule per ENTERING switch: `k`=1,2 (one
+enter) move the expiry from after `_2` to between the rungs — pure fix; `k`=3
+(two enters) move it two and lose `_1`; `k`=4,5 were already between their rungs
+so any advance only costs them. So the corpus wants **+1 for speedchange 1/2/3
+and 0 for 4/5**, and no per-switch accumulating term generates that — `k`=3 and
+`k`=4 share their two enters and differ only by a trailing leave, while `k`=2
+and `k`=3 differ by an enter yet want the same delta.
+
+**Suspect the frame, not the constant.** Each rung carries its own `dec b` delay
+constant, tuned so the expiry lands between the rungs on hardware, so two
+families with the same switch structure need not want the same correction —
+"delta per switch count" may be the wrong axis entirely. Disassemble the twelve
+kernels and compare their delay constants (`/rom-disasm-gaps`) BEFORE fitting
+another term; the twelve failures may not share one cause.
+
+The leave-side lever turns on whether the re-anchor also hands the APU the
+granule **debt** gambatte's `lastUpdate_ -= ds` implies. Measured, two-sided:
 
 | leave re-anchor | score |
 |---|---|
@@ -63,12 +81,11 @@ The remaining lever turns on whether the leaving re-anchor also hands the APU th
 | with the debt (literal `lastUpdate_ -= 1`) | +10 / −4 |
 | debt alternating in sign per leave | +10 / −1, no source, NOT shipped |
 
-The wanted granule delta per switch count is +1 for `speedchange2`/`3` and 0 for
-`speedchange4`/`5`, and **no constant (enter, leave, power-on) shift delivers
-that** while keeping the nr52 rows: those pin the grid to trail after enters 1
-and 3 and to be in step after enter 2, which forces the leave to flip parity,
-and every parity-flipping shift gives speedchange2..5 the same delta. Swept
-enter 0..4 × leave 0..3 (20 points, full matrix each): best net +6.
+No constant (enter, leave, power-on) shift delivers the wanted vector while
+keeping the nr52 rows: those pin the grid to trail after enters 1 and 3 and to
+be in step after enter 2, which forces the leave to flip parity, and every
+parity-flipping shift gives speedchange2..5 the same delta. Swept enter 0..4 ×
+leave 0..3 (20 points, full matrix each): best net +6.
 
 **The lever is whatever separates a second leave from a first**, and it is finer
 than the granule the model runs on. Before spending a session on gambatte's
