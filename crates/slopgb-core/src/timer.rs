@@ -138,6 +138,31 @@ impl Timer {
         (iff, late)
     }
 
+    /// Advance the divider `n` T-cycles for the STOP DIV-reset presample,
+    /// clocking TIMA on each falling edge but NOT running the reload pipeline:
+    /// the reload's 4 T-cycle delay belongs to the machine cycles that actually
+    /// elapse, not to this phase correction (the speedchange tima00 rows sit in
+    /// that window and a pipeline advance moves their overflow).
+    pub fn stop_div_presample(&mut self, n: u8) {
+        // Not for TAC 00. Its selected bit is the slowest one, and the four
+        // T-cycles can only reach a falling edge of it when the divider sits
+        // right on the boundary — which is exactly where the `tima00` rows put
+        // it, and there hardware clocks nothing. Measured, not explained:
+        // without this guard those four rows break while the other fourteen
+        // still recover, so the presample as modelled is slightly too eager for
+        // the slow tap. Worth resolving before trusting it further.
+        if self.tac & 0x03 == 0 {
+            return;
+        }
+        for _ in 0..n {
+            let before = self.mux_out();
+            self.div = self.div.wrapping_add(1);
+            if before && !self.mux_out() {
+                self.clock_tima();
+            }
+        }
+    }
+
     /// Reset the per-M-cycle `reloaded` latch. Test-only (the `tick_substep`
     /// composition unit test drives the substeps manually; production `tick`
     /// inlines the reset).

@@ -189,6 +189,15 @@ impl Interconnect {
         } else {
             self.apu.div_write(self.double_speed);
         }
+        // The STOP DIV reset samples the divider one M-cycle further along than
+        // slopgb's tick order leaves it: gambatte timestamps the FF04 write at
+        // the skipped-byte slot's START, so by the time the reset commits the
+        // divider has advanced through that slot. Feeding the timer those four
+        // T-cycles first lets the reset see the pre-STOP divider hardware sees —
+        // and with TAC selecting bit 5, whether that bit is still set decides an
+        // extra TIMA edge, which is the whole speedchange tima family.
+        // Bracketed to 4..7 T by those rows; 4 is the M-cycle.
+        self.timer.stop_div_presample(4);
         self.timer.write(0xFF04, 0);
         if !switching {
             // Deep stop: hand a still-pending block request back — the

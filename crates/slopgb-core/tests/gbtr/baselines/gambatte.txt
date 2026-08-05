@@ -419,47 +419,25 @@ gambatte/sound/ch2_init_reset_env_counter_timing_7_dmg08_outaudio1_cgb04c_outaud
 gambatte/sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0.gbc [Dmg]
 gambatte/sound/ch2_late_reset_nr52_2b_dmg08_cgb04c_out0.gbc [Cgb]
 gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]
-# The speedchange TIMA family is ONE off-by-one, not eleven separate rows:
-# speedchange{,2}_tima0{1,2,3}_* all want N and read N-1 — a single lost timer
-# increment across the switch. Two obvious causes are ruled out, each sharply
-# optimal where it already is: the STOP DIV reset (removing it takes the cluster
-# 34 -> 54, moving it before the skipped-byte read 34 -> 51) and the pause length
-# (0x7FFF is a sharp minimum, +-1 M-cycle gives 93 and 99). So the lost increment
-# is in the timer's own divider phase across the clock-rate change, not in when
-# DIV is cleared or how long the pause runs.
-# A third is ruled out too: flipping `double_speed` BEFORE the internal M-cycle
-# that precedes the pause, rather than after it, takes the cluster 34 -> 70. And
-# the FF04 write path is itself correct — it samples the selected bit for a
-# falling edge before zeroing, so the reset cannot swallow an increment. What is
-# left is the divider's phase during the pause.
-# And here is WHY it is exactly one, traced on speedchange_tima02_2a (TAC 06,
-# so bit 5 is selected and edges land every 0x40 T): the pause runs 0x7FFF
-# M-cycles = 131068 T, which is 2047.9 edges. The divider's phase at the pause
-# start decides whether the ROM sees 2047 or 2048 — the off-by-one IS that
-# rounding boundary. So the fix is a sub-M-cycle phase correction, not a
-# placement swap, which is why all four placements tried make it worse: reset
-# before the skipped-byte read (34 -> 51), reset one M-cycle later (34 -> 49),
-# flip before the internal cycle (34 -> 70), pause +-1 M (34 -> 93 / 99).
-# Narrowed further: a uniform phase nudge cannot fix it either. Adding 1-3 timer
-# substeps at the pause start changes nothing (edges are 64 T apart), and adding
-# a full 4 makes the failing rows overshoot to +1 while breaking the passing ones
-# by +2. Since the DIV reset zeroes the phase identically for every ROM, the
-# failing and passing rows cannot differ by their pre-STOP phase — they straddle
-# the 2047/2048 boundary on the WAKE side. That is where to look: the alignment
-# between the pause end and the ROM's first post-switch read.
+# The speedchange TIMA family is SOLVED (`Timer::stop_div_presample`). The STOP
+# DIV reset was sampling the divider one M-cycle behind where hardware has it:
+# gambatte timestamps the FF04 write at the skipped-byte slot's START, so by the
+# time the reset commits the divider has run through that slot. Feeding the timer
+# those four T-cycles before the reset lets it see the pre-STOP divider hardware
+# sees, and with a fast TAC tap whether the selected bit is still set decides one
+# TIMA edge — which was the whole off-by-one. Recovered 14 gambatte rows plus
+# age-test-roms/speed-switch/spsw-tima-cgbBC.
+# The correction is bracketed to 4..7 T (1..3 are byte-identical, 8 overshoots),
+# and 4 is the M-cycle. Two cheaper shapes are refuted: evaluating the reset's
+# edge against the later divider without clocking the intermediate T, and
+# repositioning the divider without clocking, each cost 6 rows.
+# TAC 00 is excluded and that part is measured, not explained — see the comment
+# on `stop_div_presample`.
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange2_ly44_m3_stat_4_cgb04c_outC2.gbc [Cgb]
 gambatte/speedchange/speedchange2_nop_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
-gambatte/speedchange/speedchange2_tima01_1_cgb04c_out09.gbc [Cgb]
-gambatte/speedchange/speedchange2_tima01_2_cgb04c_out0A.gbc [Cgb]
-gambatte/speedchange/speedchange2_tima01_nop_1_cgb04c_out0A.gbc [Cgb]
-gambatte/speedchange/speedchange2_tima01_nop_2_cgb04c_out0B.gbc [Cgb]
-gambatte/speedchange/speedchange2_tima02_2a_cgb04c_out03.gbc [Cgb]
-gambatte/speedchange/speedchange2_tima02_2b_cgb04c_out04.gbc [Cgb]
-gambatte/speedchange/speedchange2_tima03_2a_cgb04c_out01.gbc [Cgb]
-gambatte/speedchange/speedchange2_tima03_2b_cgb04c_out02.gbc [Cgb]
 gambatte/speedchange/speedchange3_ch1_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange3_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange3_nop_ch1_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1.gbc [Cgb]
@@ -468,12 +446,6 @@ gambatte/speedchange/speedchange_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outa
 gambatte/speedchange/speedchange_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange_ch1_nr4init_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1.gbc [Cgb]
 gambatte/speedchange/speedchange_ly44_m3_stat_2_cgb04c_outC2.gbc [Cgb]
-gambatte/speedchange/speedchange_tima01_nop_1_cgb04c_out07.gbc [Cgb]
-gambatte/speedchange/speedchange_tima01_nop_2_cgb04c_out08.gbc [Cgb]
-gambatte/speedchange/speedchange_tima02_2a_cgb04c_out03.gbc [Cgb]
-gambatte/speedchange/speedchange_tima02_2b_cgb04c_out04.gbc [Cgb]
-gambatte/speedchange/speedchange_tima03_2a_cgb04c_out01.gbc [Cgb]
-gambatte/speedchange/speedchange_tima03_2b_cgb04c_out02.gbc [Cgb]
 gambatte/sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2.gbc [Dmg]
 gambatte/sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2.gbc [Cgb]
 gambatte/sprites/enable/late_disable_ds_3_cgb04c_out3.gbc [Cgb]
