@@ -228,6 +228,15 @@ gambatte/dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02.gbc [Cgb]
 # `hdma_transition_speedchange_hdmalen*` rows plus
 # `hdma_late_m3speedchange_hdma5_scx{1,2}_2`. Scoped to a STOP that ENTERS double
 # speed: the `_ds_1` legs leave it and want the transfer to survive.
+# The dma remainder does NOT follow from it. Measured with those rows unfloored:
+# `hdma_late_m3speedchange_ly_scx1_{2,4,6}` want LY 93 and read 92 — one line
+# short, on the EVEN rungs only — and they are independent of the abort
+# predicate (3 failures with it on or off). `hdma_late_m3speedchange_inc_scx1_2`
+# and `hdma_transition_speedchange_7fffstop_inc` want one more increment (02 vs
+# 01), which looks like a short pause, but lengthening the pause by one M-cycle
+# recovers a single row while breaking two — so the 0x7FFF count is not
+# uniformly wrong. `..._oamdma` errs the other way (want 71, read 72) and
+# `..._ldaaimm_scx1_ds` is unrelated (want 03, read 31).
 gambatte/dma/hdma_transition_speedchange_ldaaimm_scx1_cgb04c_outFF.gbc [Cgb]
 gambatte/dma/hdma_transition_speedchange_ldaaimm_scx1_ds_cgb04c_out03.gbc [Cgb]
 # A block serviced inside the speed-switch pause advances the frozen OAM
