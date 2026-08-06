@@ -1,115 +1,89 @@
-slopgb — next task: point the differencing rig at the PPU/DMA clusters
+slopgb — next task: keep differencing the PPU read frame against SameBoy
 
-## Repo state (verified 2026-08-05)
+## Repo state (verified 2026-08-06)
 
-`main` @ `86ad0c7e`, clean tree, pushed, no open branch. The APU granule-grid
-work is merged and the branch is deleted.
+`main` @ `c007bdd5`, clean tree, no open branch.
 
-gbtr **221/221**; mooneye **93/93** suite tests (439/439 rom×model); core lib
-**910**; frontend **676**; clippy + fmt clean; `golden_fingerprint` current.
+gbtr **221/221** with **339** baselined floor cases (was 349); mooneye
+**93/93** suite tests (439/439 rom×model); core lib **911**; frontend **676**;
+clippy + fmt clean; `golden_fingerprint` recaptured (13 cases drifted, all in
+the CGB STAT-read cluster, no verdict changes).
 
-gambatte baseline **250 keys**, **349** baselined floor cases across all suites.
-By cluster:
+`docs/hardware-state/floor-census.tsv` is current: 338 rows, **245** with a
+SameBoy verdict (the CGB classifier was writing where nobody read — fixed in
+`bb755f63`, which is what raised coverage from 78). Chaseable = SameBoy PASS +
+we fail:
 
-| cluster | rows | of which `_ds` | | cluster | rows |
-|---|---|---|---|---|---|
-| `dma` | 44 | 9 | | `enable_display` | 10 |
-| `m1` | 20 | 7 | | `scy` | 9 |
-| `lcd_offset` | 19 | 5 | | `scx_during_m3` | 8 |
-| `lycEnable` | 17 | 11 | | `oamdma` | 8 |
-| `speedchange` | 14 | — | | `m2enable` | 8 |
-| `sprites` | 13 | — | | `dmgpalette_during_m3` | 8 |
-| `halt` | 11 | — | | `bgtilemap` | 8 |
-| `sound` | 10 | — | | `window`, `ly0` | 7, 7 |
-
-109 of the 250 are `_ds`. The `dma` cluster is mostly the
-`hdma_transition_*` / `hdma_late_m3speedchange_*` families — the speed-switch +
-HDMA seam (class B), not the DS pixel pipe.
+| cluster | chaseable | | cluster | chaseable |
+|---|---|---|---|---|
+| `dma` | 15 | | `window` | 6 |
+| `mealybug/ppu` | 12 | | `lycEnable` | 6 |
+| `lcd_offset` | 8 | | `m1` | 5 |
+| `enable_display` | 8 | | `sprites`, `m2enable` | 4, 4 |
+| `bgtilemap` | 8 | | `bgtiledata`, `ly0` | 4, 4 |
+| `scx_during_m3` | 7 | | `speedchange` | 3 |
+| `halt` | 7 | | | |
 
 ## READ FIRST
 
-- The floor-class index header in `tests/gbtr/baselines/gambatte.txt` — every
-  baselined cluster is an A/B-swept trade; one-sided "fixes" regress the green
-  siblings.
-- `docs/hardware-state/apu.md` § **"Differential trace against gambatte"** — the
-  rig, both build recipes, and the method that closed the APU work.
+- `docs/hardware-state/ppu-timing.md` § **"The FF41 read frame"** — the law just
+  landed, its two load-bearing scopes, and the measurement that produced it.
+- The floor-class index header in `tests/gbtr/baselines/gambatte.txt`.
+- `docs/sameboy-port/tools/README.md` — the SameBoy ground-truth rig.
 
-## THE ASSET: two reference emulators, buildable in one command each
+## THE METHOD THAT WORKED (repeat it)
 
-This is what changed last session and it is the reason to pick these clusters up
-now. Both references build standalone on this box and can be instrumented:
+Do not sweep a constant. Difference the read against SameBoy:
 
-```sh
-# gambatte (GPL-2.0, same terms as this project)
-g++ -O1 -fno-exceptions -fno-rtti -DHAVE_STDINT_H \
-    -I libgambatte/include -I libgambatte/src -I common -o gbprobe main.cpp \
-    $(find libgambatte/src -name '*.cpp' | grep -vE 'cinterface|file_zip')
+1. `docs/sameboy-port/tools/build_sameboy_tracers.sh` (cached at
+   `~/.cache/sbbuild`), then `SB_TRACE=1 sameboy_tester --cgb --length 4 <rom>`.
+   `SBMODE` = visible mode change, `SBREAD ff41` = the read instant. **Difference
+   `fp=` (absolute 8 MHz), never `cfl`/`dc`** — those reset per line and gave a
+   1-dot phantom jitter here.
+2. Anchor both sides on the same event (mode-3 entry works; the line-start event
+   carries a 4-dot ambiguity). The anchor cancels out of the resulting
+   inequality, so a wrong anchor is survivable but a mixed one is not.
+3. Our side: `cargo run -p slopgb-core --example probe_statread -- <rom> <pc>`
+   prints the value the read actually latched (register A), which is the only
+   thing that matters — a post-step `debug_read(0xFF41)` is a DIFFERENT read one
+   or two M-cycles later and disagreed with A on exactly the failing rows.
+4. Find the read PC by `cmp -l` on the `_1`/`_2` ROM pair: they differ by one
+   inserted NOP, so the read instruction moves by one byte between rungs.
+5. A/B with `SLOPGB_GBTR_CENSUS=<file>` per variant and diff the two dumps per
+   row; the suite's own pass/fail summary hides which rows traded.
 
-# SameBoy (needs rgbasm/rgblink for its boot ROMs — present on this box)
-make tester -j4 CONF=release        # -> build/bin/tester/sameboy_tester <rom>
-```
-
-Clone both OUTSIDE the repo tree; nothing is vendored. `main.cpp` is a dozen
-lines against `gambatte.h`. Printing internal state from either turns a floor
-row from a fitting problem into a differencing problem — which is how the APU
-granule grid was found (+7 rows) and how the duty family was closed.
+gambatte builds the same way and is worth instrumenting for a second opinion
+(`LCD::getStat`, `m0TimeOfCurrentLine`) but it is NOT the oracle: it passed
+these rows with an m0 time 2 dots off SameBoy's edge and its own `cc + 2`
+read lead cancelling it.
 
 ## TASK
 
-Pick a cluster and difference it, biggest first. `dma` (44) and `lycEnable` (17,
-two thirds `_ds`) are the obvious candidates; `m1` and `lcd_offset` sit on the
-same double-speed sub-cycle seam the APU grid turned out to be.
+Take the next chaseable cluster. `dma` still has 15, but they are now the
+HDMA-seam / speed-switch families (class B), not the read frame. The read-frame
+vein that just paid: `lcd_offset` (8) and `enable_display` (8) are the same
+shape of read on a shifted/enable frame, and `bgtilemap`/`bgtiledata`/
+`scx_during_m3` (19 together) are render-length rows a pixel diff against
+SameBoy's framebuffer would localize the same way.
 
-**Gate every row before investing in it**: run it through both references first.
-A row SameBoy also fails is class G (upstream tie-break needed) and is not
-chaseable — the twelve APU duty rows burned most of a session before that check
-was run. It costs two commands now.
-
-## Method notes that earned their place
-
-- **Check both references' verdicts BEFORE chasing a row.** The single most
-  expensive omission of last session.
-- **Build a no-op control first.** Running the matrix with the new mechanism
-  pinned inert proved the APU restructure byte-identical before any row moved;
-  without it a "+10/−4" is uninterpretable.
-- **Compare intervals, not absolutes.** slopgb's post-boot warmup runs ~2.1 M
-  APU granules before the ROM starts; align on a shared event and difference.
-- **Levers do NOT compose.** `lf_div` rides the APU's granule parity, so a
-  one-granule clock change flips it and moves the trigger delay the other way.
-  Two separately measured deltas do not add — re-measure every combination.
-- **Read the frozen state, not the pass/fail bit.** `ch1.duty_pos` gave the
-  distance directly and killed a whole class of candidate fixes in one run.
-- **Diff censuses per row.** `SLOPGB_GBTR_CENSUS=<file>` per variant, then diff.
-- **Fast iteration**: run the test binary directly
-  (`target/<dir>/debug/deps/gbtr-*`) with `SLOPGB_GBTR_FILTER=<substring>` —
-  ~30 s versus ~400 s for a full `cargo test` invocation.
-- **One `CARGO_TARGET_DIR` per concurrent run**, or they serialize on the lock
-  (a 16-point sweep managed one point in 25 minutes this way).
-- **Never `pkill` a build sharing a `CARGO_TARGET_DIR`** — repo law, and it was
-  violated last session. If it happens: `cargo test --no-run` to rebuild, then
-  re-run a known-green baseline before trusting any number.
-- **Restore baselines with `git checkout --`, never a `/tmp` copy.**
+Gate every row through both references before investing in it — a row SameBoy
+also fails is class G and is not chaseable.
 
 ## Constraints
 
-- **Zero regressions.** Growing a baseline is a regression (harness law).
-- **Never drop a row SameBoy passes** for a gambatte-derived change. This
-  already cost the single-speed half of the APU edge deferral.
-- Verify in order for core changes: unit tests → the affected suite → full gbtr
-  + `golden_fingerprint` → mooneye → frontend.
+- **Zero regressions.** Growing a baseline is a regression.
+- Verify in order: unit tests → the affected suite → full gbtr +
+  `golden_fingerprint` → mooneye → frontend.
+- Recapture golden with `SLOPGB_GOLDEN=capture` only after reading the drift
+  list and confirming every drifted case is in the cluster you touched.
 - Standing repo law: no new deps, no unsafe, files <1000 lines, SSH-signed
   commits (`export SSH_AUTH_SOCK=/run/user/1000/ssh-agent.socket`),
   `/rust-diff-review` per iteration.
+- One `CARGO_TARGET_DIR` per concurrent run; never `pkill` a build sharing one.
 
 ## Last session
 
 | commit | law | rows |
 |---|---|---|
-| `8f729584` | the APU observes itself on a 2 MHz granule grid a power-on or a leaving speed switch can offset by a cycle | +7 |
-
-Plus: the twelve `ch1_duty0_pos6_to_pos7_timing` rows closed as **class G** —
-SameBoy fails them too, one 2 MHz cycle in the opposite direction from us, with
-gambatte's expectation between the two. The sign flip this port drops is
-provably the exact compensation for tick-then-access sampling the write at the
-machine cycle's end rather than its start. Do not re-open without hardware
-evidence; the full lever table is in `apu.md`.
+| `c007bdd5` | a polled CGB FF41 read sees mode 0 from `flip - 5`, not `flip - 3` | +10 |
+| `bb755f63` | the CGB classifier now writes where `census.py` reads | +167 measured |
