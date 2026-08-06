@@ -47,20 +47,27 @@ if not os.path.isdir(ROOT):
 # Scratch dir for the per-ROM copy + the tester's BMP; the writes below assume it.
 os.makedirs('/tmp/s7', exist_ok=True)
 rows=[l.strip() for l in open(sys.argv[1]) if l.strip()]
+# Output prefix, same contract as classify_dmg.py (census.py reads
+# <pref>_bug/_floor/_unk.txt); default keeps the standalone /tmp/s7 names.
+pref=sys.argv[2] if len(sys.argv)>2 else '/tmp/s7/cls'
 bug=[];floor=[];unk=[]
 for rel in rows:
     m=re.search(r'cgb04c_out([0-9A-Fa-f]+)\.gb',rel)
-    if not m: unk.append(rel); continue
+    if not m: unk.append((rel,'','')); continue
     want=m.group(1).upper()
     src=os.path.join(ROOT,rel)
-    if not os.path.exists(src): unk.append(rel); continue
+    if not os.path.exists(src): unk.append((rel,'','')); continue
     shutil.copy(src,'/tmp/s7/cls.gbc')
+    # A row whose tester run writes no BMP must not be judged on the previous
+    # row's leftover frame.
+    if os.path.exists('/tmp/s7/cls.bmp'): os.remove('/tmp/s7/cls.bmp')
     subprocess.run([SBT,'--cgb','--length','4','/tmp/s7/cls.gbc'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    if not os.path.exists('/tmp/s7/cls.bmp'): unk.append(rel); continue
+    if not os.path.exists('/tmp/s7/cls.bmp'): unk.append((rel,'','')); continue
     sb=ocr('/tmp/s7/cls.bmp',len(want))
     if '?' in sb: unk.append((rel,sb,want)); continue
     if sb==want: bug.append(rel)
     else: floor.append((rel,sb,want))
 print(f"BUG(sb==want, must FIX)={len(bug)}  FLOOR/DIFF(sb!=want, baseline at flip)={len(floor)}  UNK={len(unk)}")
-open('/tmp/s7/buglist.txt','w').write('\n'.join(bug))
-open('/tmp/s7/floorlist.txt','w').write('\n'.join(f"{r}\tsb={s}\twant={w}" for r,s,w in floor))
+open(pref+'_bug.txt','w').write('\n'.join(bug)+'\n')
+open(pref+'_floor.txt','w').write('\n'.join(f"{r}\tsb={s}\twant={w}" for r,s,w in floor)+'\n')
+open(pref+'_unk.txt','w').write('\n'.join(f"{r}\tsb={s}\twant={w}" for r,s,w in unk)+'\n')

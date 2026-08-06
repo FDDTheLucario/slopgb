@@ -12,8 +12,11 @@ verdict, on-screen glyphs, or a pixel reference — so there is one tool per sha
 | `classify_dmg.py` | the same for DMG (`dmg08_out<hex>` / the shared `dmg08_cgb04c_out<hex>` form), with the +1px DMG glyph x-shift trial |
 | `classify_pixel.py` | pixel-reference legs (gambatte/mealybug): palette-quantized diff of the tester's BMP against the sibling reference PNG. Needs `numpy` + `Pillow`. |
 
-`classify_dmg.py` / `classify_pixel.py` take `rowlist.txt outprefix`;
-`classify_cgb_regr.py` takes only the row list. All three refuse to run without a
+All three take `rowlist.txt outprefix` and write `<outprefix>_bug/_floor/_unk.txt`
+(`classify_cgb_regr.py` defaults the prefix to `/tmp/s7/cls` when it is run by
+hand) — that is the contract `census.py` reads them through, so a classifier that
+writes elsewhere silently leaves every one of its rows `unknown`. All three
+refuse to run without a
 `sameboy_tester` (`SBT=` overrides the path) — classifying with a missing tester
 is a vacuous result, not a bar.
 
