@@ -184,13 +184,6 @@ gambatte/bgtilemap/bgtilemap_spx09_ds_1.gbc [Cgb]
 gambatte/bgtilemap/bgtilemap_spx09_ds_4.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_read_m3start_ds_1_cgb04c_out00.gbc [Cgb]
 gambatte/cgbpal_m3/cgbpal_write_m3start_ds_1_cgb04c_out01.gbc [Cgb]
-gambatte/display_startstate/stat_scx3_2_cgb04c_out84.gbc [Cgb]
-gambatte/dma/gdma_cycles_long_scx2_2_cgb04c_out0.gbc [Cgb]
-gambatte/dma/gdma_cycles_long_scx3_2_cgb04c_out0.gbc [Cgb]
-gambatte/dma/gdma_cycles_short_scx2_2_cgb04c_out0.gbc [Cgb]
-gambatte/dma/gdma_cycles_short_scx3_2_cgb04c_out0.gbc [Cgb]
-gambatte/dma/hdma_cycles_scx2_2_cgb04c_out0.gbc [Cgb]
-gambatte/dma/hdma_cycles_scx3_2_cgb04c_out0.gbc [Cgb]
 gambatte/dma/hdma_disable_display_1_cgb04c_out1.gbc [Cgb]
 gambatte/dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_4_cgb04c_out03.gbc [Cgb]
 gambatte/dma/hdma_late_enable_ds_1_cgb04c_out1.gbc [Cgb]
@@ -993,7 +986,6 @@ gambatte/oam_access/prewrite_lcdoffset1_1_cgb04c_out1.gbc [Cgb]
 # SameBoy non-black). Floor classes: A (CGB ds/lcdoffset sub-dot),
 # B (m1/lycEnable/m0enable/m2enable dispatch-frame cgb04c-vs-SameBoy),
 # window render-length.
-gambatte/display_startstate/stat_scx2_2_cgb04c_out84.gbc [Cgb]
 gambatte/lcd_offset/offset1_lyc99int_m0stat_count_scx2_ds_2_cgb04c_out90.gbc [Cgb]
 gambatte/lcd_offset/offset3_lyc98int_ly_count_1_cgb04c_out99.gbc [Cgb]
 gambatte/lcd_offset/offset3_lyc99int_m0stat_count_scx1_2_cgb04c_out90.gbc [Cgb]
@@ -1031,3 +1023,12 @@ gambatte/m2enable/late_m1disable_ly0_2_dmg08_out2_cgb04c_out0.gbc [Cgb]
 gambatte/miscmstatirq/lycstatwirq_trigger_ly00_10_50_1_dmg08_cgb04c_outE0.gbc [Cgb]
 gambatte/miscmstatirq/lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_4_dmg08_cgb04c_outE0.gbc [Dmg]
 gambatte/scy/scy_during_m3_ds_5.gbc [Cgb]
+# --- polled bare-line mode-0 read edge (2026-08-06) ---
+# The CGB polled bare-line FF41 exit moved from `2*flip + 2` to `2*flip - 2`
+# half-dots: SameBoy's own trace of these ROMs puts its visible mode-0 edge at
+# `173 + SCX&7` dots from the mode-3 entry and its read at 172 (`_1`, mode 3) /
+# 176 (`_2`, mode 0), which the slopgb read frame reaches at `flip - 5`. Lifted
+# 8 rows here (dma/{g,h}dma_cycles_*_scx{2,3}_2, display_startstate/
+# stat_scx{2,3}_2) + 2 in wilbertpol.txt, no row lost. DMG polled reads and
+# post-STOP shifted frames keep their old constants — see
+# docs/hardware-state/ppu-timing.md "The FF41 read frame".

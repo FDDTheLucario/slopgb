@@ -240,12 +240,12 @@ impl Ppu {
         // (folded into the returned exit); the exit is a per-speed half-dot
         // line constant:
         //
-        //   SS: exit_hd = 2*flip + 2, EMERGENT from the render's own recorded
-        //       flip (`flip_dot`) or its projection — NOT a live-`scx` closed
-        //       form: a mid-line SCX write moves the exit exactly as the
-        //       fine-scroll hunt resolved it (late_scx4 / scx_m3_extend; a
-        //       closed form broke them). For a clean steady line
-        //       this equals `510 + 2*(SCX&7)` (flip 254+SCX&7).
+        //   SS: exit_hd = 2*flip + `over` (see below), EMERGENT from the
+        //       render's own recorded flip (`flip_dot`) or its projection —
+        //       NOT a live-`scx` closed form: a mid-line SCX write moves the
+        //       exit exactly as the fine-scroll hunt resolved it (late_scx4 /
+        //       scx_m3_extend; a closed form broke them). For a clean steady
+        //       line the flip is `254 + SCX&7`.
         //   DS: exit_hd = 508 + 2*(SCX&7) + 2*(SCX&1) — the full-carry
         //       law rewritten exactly on the half-dot grid.
         //
@@ -258,11 +258,13 @@ impl Ppu {
         // SS reads add the carried LCD phase (the per-leave m3stat read-frame
         // surplus over the machine epoch; 0 for never-switched ROMs); DS
         // keeps 0 — the DS post-leave segments are epoch-only.
-        // The DS branch includes LINE 0: the gdma_cycles post-stall
-        // polls land at ly0 (the corrected DS line-153 wake moved them −2
-        // onto the flip straddle: `_1` dot252 want3 / `_2` dot254 want0 —
-        // exactly the emergent exit 508 hd). SS keeps `line >= 1`.
-        if (self.line >= 1 || self.ds)
+        // Both speeds cover LINE 0: the gdma_cycles post-stall polls land at
+        // ly0 and straddle the flip there exactly as they do on any other
+        // visible line (DS `_1` dot252 want3 / `_2` dot254 want0; the SS pairs
+        // are the `*dma_cycles_*_scx{2,3}` rows). `self.enabled` keeps an
+        // LCD-off read out: with the LCD off STAT's mode bits read 0 and there
+        // is no mode-3 exit to compare against (Pan Docs STAT).
+        if self.enabled
             && self.line < 144
             && !self.render.win_active
             && !self.render.win_aborted
@@ -378,26 +380,32 @@ impl Ppu {
                     );
                 } else {
                     let phase = i32::from(self.lcd_phase_hd);
-                    // The emergent bare exit's `+2` over-holds a POLLED read
-                    // that lands EXACTLY on the flip boundary. Production reads
-                    // mode 0 AT `flip_dot` (the flip is inclusive), so the true
-                    // CPU-visible mode-0 boundary sits at rphd `2*flip`, not
-                    // `2*flip + 2`. sprite0's polled measurement read is the one
-                    // ROM that reads at exactly rphd `2*flip` (its whole point is
-                    // to bracket the flip): `ppu_sprite0_scx{2,6}_b` reads
-                    // rphd 512/520 = `2*flip` and want mode 0, but `+2` (514/522)
-                    // forces mode 3. The carried m2int/scx weld-partners
-                    // (`late_scx4_1`, `m2int_m3stat_1`) read the SAME rphd 512 yet
-                    // carry `= 4` — their `- carry` already lands exit `2*flip - 2`
-                    // — and want mode 3, so the split is `read_carried`, NOT a
-                    // uniform read-frame bias (which would shift both and
-                    // shuffle). Drop the `+2` only for the DMG
-                    // polled read; every other case still keeps `+2`, carried
-                    // reads untouched (`- carry` owns them).
-                    let over = if !self.model.is_cgb() && !self.read_carried {
-                        0
-                    } else {
+                    // `over`: where a POLLED read's mode-0 boundary sits
+                    // relative to the render's whole-dot flip. Measured against
+                    // SameBoy's own trace of the same ROMs (`SBMODE` visible
+                    // mode-0 edge vs the `SBREAD ff41` instant, both on the
+                    // absolute 8 MHz clock): on a bare CGB line SameBoy's edge
+                    // is `flip - 5` in this frame's dots — `2*flip - 2` on the
+                    // half-dot grid once `read_pos_hd`'s +8 hd read debt is
+                    // added. `gdma_cycles_*_scx{2,3}_1/_2` bracket it to the
+                    // dot: `_1` reads dot 248 (want 3), `_2` dot 252 (want 0),
+                    // and at SCX 2/3 only `- 2` puts the edge between them.
+                    // DMG polled reads sit one dot later, at `2*flip`
+                    // (`ppu_sprite0_scx{2,6}_b` read exactly there and want
+                    // mode 0). A post-STOP shifted frame (`lcd_shift_dots`)
+                    // keeps `+2`: its flip sits a half-dot past the whole-dot
+                    // sample, which the shifted-frame arms in `read_laws.rs`
+                    // already compensate (`lcd_offset/offset{1,2}_lyc99int_
+                    // m0stat_count_scx{1,2}_1`). Carried reads are untouched —
+                    // `- carry` owns their frame.
+                    let over = if self.read_carried {
                         2
+                    } else if !self.model.is_cgb() {
+                        0
+                    } else if self.lcd_shift_dots != 0 {
+                        2
+                    } else {
+                        -2
                     };
                     fold(&mut exit, 2 * i32::from(flip) + over - carry - phase);
                 }

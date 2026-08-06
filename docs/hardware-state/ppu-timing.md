@@ -52,6 +52,42 @@ STAT IRQs are **per-source events with predicates** (`Ppu::stat_update_tick` in 
 - line-0 dispatch-late.
 - m0 half-cycle halt law.
 
+### The FF41 read frame — the polled bare-line mode-0 edge
+
+A polled CGB read on a bare (no sprite, no window, no glitch) line reads mode 0
+from **five dots before** the render's flip (`254 + SCX&7`), i.e. the bare arm's
+half-dot exit is `2*flip - 2`, not `2*flip + 2` (`read_laws_exit.rs`, `over`).
+The arm covers every visible line at both speeds, LCD on.
+
+Measured, not swept — SameBoy's own trace of the same ROMs
+(`SB_TRACE=1 sameboy_tester`, `SBMODE` visible mode-0 edge vs the `SBREAD ff41`
+instant, differenced on the absolute 8 MHz `fp` clock, since `cfl`/`dc` reset
+per line):
+
+| | SameBoy, dots from the line's mode-3 entry |
+|---|---|
+| visible mode-0 edge | `173 + SCX&7` |
+| `*dma_cycles_*_1` read (wants mode 3) | 172 |
+| `*dma_cycles_*_2` read (wants mode 0) | 176 |
+
+so SameBoy's verdict is `read >= edge`, and the slopgb read (cc+0, +8 hd debt)
+lands on that edge exactly at `flip - 5`. The old `+2` put the boundary two dots
+late, which only shows where a ROM reads inside those two dots: the
+`{g,h}dma_cycles_*_scx{2,3}` pairs read dot 248 (`_1`, want 3) and dot 252
+(`_2`, want 0) with the edge at 251/252.
+Scores **+10/−0** (6 `dma/*_cycles_*`, 2 `display_startstate/stat_scx{2,3}_2`, 2
+wilbertpol `hblank_ly_scx_timing_variant_nops` [Cgb]/[Agb]); golden drift is 13
+cases confined to the CGB STAT-read cluster, no verdict changes. Unit test
+`polled_bare_cgb_mode0_edge_is_five_dots_before_the_flip`.
+
+Two scopes are load-bearing: **DMG** polled reads keep `2*flip`
+(`gbmicrotest/ppu_sprite0_scx{2,6}_b` read exactly there and want mode 0), and a
+**post-STOP shifted frame** (`lcd_shift_dots != 0`) keeps `+2` — its flip sits a
+half-dot past the whole-dot sample and the shifted-frame arms in `read_laws.rs`
+already compensate; dropping that scope costs
+`lcd_offset/offset{1,2}_lyc99int_m0stat_count_scx{1,2}_1` (+10/−2 instead of
++10/−0). Carried (ISR) reads are untouched — `isr_read_carry_hd` owns them.
+
 ### FF41 reads — the line-144 VBlank-entry hold
 
 The line-144 dots-0..3 mode-0 hold in `vis_mode` is raw FSM state no read ever

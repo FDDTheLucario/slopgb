@@ -1,5 +1,5 @@
 key	suite	cluster	model	ours	want	sameboy	provenance	bucket	evidence
-cgb-acid-hell/cgb-acid-hell.gbc [Cgb]	acid	acid	Cgb	2px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
+cgb-acid-hell/cgb-acid-hell.gbc [Cgb]	acid	acid	Cgb	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 age-test-roms/lcd-align-ly/lcd-align-ly-cgbBC.gb [Cgb]	age	age/lcd-align-ly	Cgb	B=00,C=6B,D=14,E=06,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:cgbBC	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/m3-bg-bgp/m3-bg-bgp.gb [Dmg]	age	age/m3-bg-bgp	Dmg	2px-diff	reference-png	unknown	hw-age	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/m3-bg-lcdc/m3-bg-lcdc-nocgb.gb [Cgb]	age	age/m3-bg-lcdc	Cgb	256px-diff	reference-png	unknown	hw-age	BUG	hardware-captured want; SameBoy verdict unmeasured
@@ -11,9 +11,7 @@ age-test-roms/oam/oam-write-cgbBCE.gb [Cgb]	age	age/oam	Cgb	B=00,C=6B,D=14,E=06,
 age-test-roms/oam/oam-write-dmgC.gb [Dmg]	age	age/oam	Dmg	B=00,C=6B,D=14,E=06,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:dmgC	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/oam/oam-write-ncmBCE.gb [Cgb]	age	age/oam	Cgb	B=00,C=6B,D=14,E=19,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:ncmBCE	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/speed-switch/caution/spsw-interrupts-cgbBC.gb [Cgb]	age	age/speed-switch	Cgb	B=00,C=6B,D=14,E=06,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:cgbBC	BUG	hardware-captured want; SameBoy verdict unmeasured
-age-test-roms/speed-switch/spsw-ch2-lc-delay-cgbBCE.gb [Cgb]	age	age/speed-switch	Cgb	B=00,C=6B,D=14,E=06,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:cgbBCE	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/speed-switch/spsw-mode0-cgbBCE.gb [Cgb]	age	age/speed-switch	Cgb	B=00,C=6B,D=14,E=06,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:cgbBCE	BUG	hardware-captured want; SameBoy verdict unmeasured
-age-test-roms/speed-switch/spsw-tima-cgbBC.gb [Cgb]	age	age/speed-switch	Cgb	B=00,C=6B,D=14,E=06,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:cgbBC	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/stat-interrupt/stat-int-dmgC-cgbBCE.gb [Cgb]	age	age/stat-interrupt	Cgb	B=00,C=6B,D=14,E=06,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:dmgC	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE.gb [Cgb]	age	age/stat-mode-sprites	Cgb	B=00,C=6B,D=14,E=06,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:dmgC	BUG	hardware-captured want; SameBoy verdict unmeasured
 age-test-roms/stat-mode-sprites/stat-mode-sprites-dmgC-cgbBCE.gb [Dmg]	age	age/stat-mode-sprites	Dmg	B=00,C=6B,D=14,E=06,H=98,L=10	fib:03/05/08/0D/15/22	unknown	hw-age:dmgC	BUG	hardware-captured want; SameBoy verdict unmeasured
@@ -45,14 +43,6 @@ gambatte/bgtilemap/bgtilemap_spx09_ds_1.gbc [Cgb]	gambatte	gambatte/bgtilemap	Cg
 gambatte/bgtilemap/bgtilemap_spx09_ds_4.gbc [Cgb]	gambatte	gambatte/bgtilemap	Cgb	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/cgbpal_m3/cgbpal_read_m3start_ds_1_cgb04c_out00.gbc [Cgb]	gambatte	gambatte/cgbpal_m3	Cgb	FF	00	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/cgbpal_m3/cgbpal_write_m3start_ds_1_cgb04c_out01.gbc [Cgb]	gambatte	gambatte/cgbpal_m3	Cgb	00	01	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/display_startstate/stat_scx2_2_cgb04c_out84.gbc [Cgb]	gambatte	gambatte/display_startstate	Cgb	87	84	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/display_startstate/stat_scx3_2_cgb04c_out84.gbc [Cgb]	gambatte	gambatte/display_startstate	Cgb	87	84	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/dma/gdma_cycles_long_scx2_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — a pure-LYC STAT rise carries no second-half halt-late mask, so the ordinary-line anchors wake one M-cycle early — see cpu-interrupts.md
-gambatte/dma/gdma_cycles_long_scx3_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — a pure-LYC STAT rise carries no second-half halt-late mask, so the ordinary-line anchors wake one M-cycle early — see cpu-interrupts.md
-gambatte/dma/gdma_cycles_short_scx2_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — a pure-LYC STAT rise carries no second-half halt-late mask, so the ordinary-line anchors wake one M-cycle early — see cpu-interrupts.md
-gambatte/dma/gdma_cycles_short_scx3_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — a pure-LYC STAT rise carries no second-half halt-late mask, so the ordinary-line anchors wake one M-cycle early — see cpu-interrupts.md
-gambatte/dma/hdma_cycles_scx2_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — a pure-LYC STAT rise carries no second-half halt-late mask, so the ordinary-line anchors wake one M-cycle early — see cpu-interrupts.md
-gambatte/dma/hdma_cycles_scx3_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lyc-anchor	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	derived: the LYC anchor dispatch dot, not the DMA (the transfer span is exact) — a pure-LYC STAT rise carries no second-half halt-late mask, so the ordinary-line anchors wake one M-cycle early — see cpu-interrupts.md
 gambatte/dma/hdma_disable_display_1_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/dma	Cgb	0	1	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_4_cgb04c_out03.gbc [Cgb]	gambatte	gambatte/dma	Cgb	02	03	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_late_enable_ds_1_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/dma	Cgb	0	1	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
@@ -62,9 +52,7 @@ gambatte/dma/hdma_late_m3halt_m2unhalt_inc_scx1_2_cgb04c_out02.gbc [Cgb]	gambatt
 gambatte/dma/hdma_late_m3halt_m2unhalt_inc_scx2_2_cgb04c_out02.gbc [Cgb]	gambatte	gambatte/dma	Cgb	01	02	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_late_m3halt_m2unhalt_ly_scx1_4_cgb04c_out03.gbc [Cgb]	gambatte	gambatte/dma	Cgb	02	03	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_late_m3halt_m2unhalt_ly_scx2_4_cgb04c_out03.gbc [Cgb]	gambatte	gambatte/dma	Cgb	02	03	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/hdma_late_m3speedchange_hdma5_scx1_2_cgb04c_out80.gbc [Cgb]	gambatte	gambatte/dma	Cgb	00	80	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_late_m3speedchange_hdma5_scx1_ds_2_cgb04c_outFF.gbc [Cgb]	gambatte	gambatte/dma	Cgb	00	FF	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/dma/hdma_late_m3speedchange_hdma5_scx2_2_cgb04c_out80.gbc [Cgb]	gambatte	gambatte/dma	Cgb	00	80	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_late_m3speedchange_hdma5_scx2_ds_2_cgb04c_outFF.gbc [Cgb]	gambatte	gambatte/dma	Cgb	00	FF	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_late_m3speedchange_inc_scx1_2_cgb04c_out02.gbc [Cgb]	gambatte	gambatte/dma	Cgb	01	02	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_late_m3speedchange_ly_scx1_2_cgb04c_out93.gbc [Cgb]	gambatte	gambatte/dma	Cgb	92	93	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
@@ -89,11 +77,6 @@ gambatte/dma/hdma_transition_halt_late_unhalt_ldaaimm_hdma_scx1_2_cgb04c_out02.g
 gambatte/dma/hdma_transition_halt_late_unhalt_scx1_1_cgb04c_out00.gbc [Cgb]	gambatte	gambatte/dma	Cgb	FF	00	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_transition_halt_m0unhalt_ldaaimm_scx1_cgb04c_out02.gbc [Cgb]	gambatte	gambatte/dma	Cgb	01	02	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_transition_speedchange_7fffstop_inc_cgb04c_out02.gbc [Cgb]	gambatte	gambatte/dma	Cgb	01	02	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/dma/hdma_transition_speedchange_hdmalen00_hdma5_scx1_cgb04c_out80.gbc [Cgb]	gambatte	gambatte/dma	Cgb	00	80	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/dma/hdma_transition_speedchange_hdmalen01_hdma5_scx1_cgb04c_out81.gbc [Cgb]	gambatte	gambatte/dma	Cgb	01	81	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/dma/hdma_transition_speedchange_hdmalen01_hdmadst10_scx1_cgb04c_out00.gbc [Cgb]	gambatte	gambatte/dma	Cgb	01	00	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/dma/hdma_transition_speedchange_hdmalen7f_hdma5_scx1_cgb04c_outFF.gbc [Cgb]	gambatte	gambatte/dma	Cgb	7F	FF	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/dma/hdma_transition_speedchange_hdmalen7f_hdmadst10_scx1_cgb04c_out00.gbc [Cgb]	gambatte	gambatte/dma	Cgb	01	00	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_transition_speedchange_ldaaimm_scx1_cgb04c_outFF.gbc [Cgb]	gambatte	gambatte/dma	Cgb	31	FF	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_transition_speedchange_ldaaimm_scx1_ds_cgb04c_out03.gbc [Cgb]	gambatte	gambatte/dma	Cgb	31	03	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/dma/hdma_transition_speedchange_oamdma_cgb04c_out71.gbc [Cgb]	gambatte	gambatte/dma	Cgb	72	71	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
@@ -174,10 +157,6 @@ gambatte/lycEnable/lycwirq_trigger_ly00_stat50_ds_lcdoffset1_2_cgb04c_outE2.gbc 
 gambatte/lycint_ly/lycint_ly_ds_1_cgb04c_out5.gbc [Cgb]	gambatte	gambatte/lycint_ly	Cgb	6	5	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/lycint_lycflag/lycint_lycflag_4_dmg08_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lycint_lycflag	Cgb	4	0	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/m0enable/disable_scx5_ds_2_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/m0enable	Cgb	1	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/m0enable/enable_wxA6_2x_spxA7_ds_1_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/m0enable	Cgb	0	2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/m0enable/enable_wxA6_2x_spxA7_ds_2_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/m0enable	Cgb	0	2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/m0enable/enable_wxA6_2x_spxA7_ds_3_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/m0enable	Cgb	0	2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/m0enable/enable_wxA6_2x_spxA7_ds_4_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/m0enable	Cgb	0	2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/m0enable/lycdisable_ff41_scx3_2_dmg08_out2_cgb04c_out0.gbc [Dmg]	gambatte	gambatte/m0enable	Dmg	0	2	FAIL	hw-capture:dmg08	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/m0enable/lycdisable_ff45_2_dmg08_out2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/m0enable	Cgb	2	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/m0enable/lycdisable_ff45_scx1_2_dmg08_out2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/m0enable	Cgb	2	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
@@ -258,37 +237,17 @@ gambatte/sound/ch2_late_reset_nr52_ds_2b_cgb04c_out0.gbc [Cgb]	gambatte	gambatte
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange2_ch1_duty0_pos6_to_pos7_timing_nop_ds_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/speedchange/speedchange2_ch2_nr52_ds_1a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange2_ch2_nr52_ds_2a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/speedchange/speedchange2_ly44_m3_stat_4_cgb04c_outC2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	C0	C2	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/speedchange/speedchange2_nop_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange2_nop_m2int_m3stat_scx1_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/speedchange/speedchange2_tima01_1_cgb04c_out09.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	08	09	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange2_tima01_2_cgb04c_out0A.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	09	0A	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange2_tima01_nop_1_cgb04c_out0A.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	08	0A	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange2_tima01_nop_2_cgb04c_out0B.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	09	0B	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange2_tima02_2a_cgb04c_out03.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	02	03	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange2_tima02_2b_cgb04c_out04.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	03	04	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange2_tima03_2a_cgb04c_out01.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	00	01	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange2_tima03_2b_cgb04c_out02.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	01	02	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/speedchange/speedchange3_ch1_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange3_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange3_nop_ch1_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/speedchange/speedchange5_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange5_ch2_nr52_2a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/speedchange/speedchange_ch1_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange_ch1_duty0_pos6_to_pos7_timing_ds_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange_ch1_duty0_pos6_to_pos7_timing_nop_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
 gambatte/speedchange/speedchange_ch1_nr4init_duty0_pos6_to_pos7_timing_2_cgb04c_outaudio1.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	constant-output	sound	unknown	hw-capture:cgb04c	BUG	hardware-captured want; SameBoy verdict unmeasured
-gambatte/speedchange/speedchange_ch2_nr52_1a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange_ch2_nr52_2a_cgb04c_outF2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	F0	F2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/speedchange/speedchange_ly44_m3_stat_2_cgb04c_outC2.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	C0	C2	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/speedchange/speedchange_tima01_nop_1_cgb04c_out07.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	06	07	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange_tima01_nop_2_cgb04c_out08.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	07	08	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange_tima02_2a_cgb04c_out03.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	02	03	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange_tima02_2b_cgb04c_out04.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	03	04	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange_tima03_2a_cgb04c_out01.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	00	01	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/speedchange/speedchange_tima03_2b_cgb04c_out02.gbc [Cgb]	gambatte	gambatte/speedchange	Cgb	01	02	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	0	2	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/sprites/10spritesPrLine_10xposA7_m0irq_2_dmg08_cgb04c_out2.gbc [Dmg]	gambatte	gambatte/sprites	Dmg	0	2	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/sprites/enable/late_disable_ds_3_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
@@ -304,39 +263,13 @@ gambatte/sprites/space/10spritesPrLine_late_scx4_ds_2_cgb04c_out3.gbc [Cgb]	gamb
 gambatte/sprites/space/1pos8_8pos9_wx08_m3stat_ds_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/sprites	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/vram_m3/preread_lcdoffset2_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/vram_m3	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/vram_m3/prewrite_lcdoffset2_1_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/vram_m3	Cgb	0	1	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx20_2_dmg08_out3_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/window	Cgb	3	0	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/window/arg/late_scx_late_wy_FFto4_ly4_wx20_3_dmg08_cgb04c_out0.gbc [Dmg]	gambatte	gambatte/window	Dmg	3	0	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/window/arg/late_wy_1_dmg08_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/window	Cgb	3	0	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/late_disable_ds_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/window	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/late_disable_late_scx00_wx0f_ds_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/window	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/late_disable_late_scx00_wx10_ds_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/window	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/window/late_disable_late_scx03_wx0f_2_dmg08_out3_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/window	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/late_disable_scx2_1_dmg08_out3_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/window	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/late_disable_scx3_1_dmg08_out3_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/window	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/late_disable_scx5_1_dmg08_out3_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/window	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/late_disable_scx5_ds_2_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/window/late_enable_afterVblank_ds_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/window/late_enable_afterVblank_ds_lcdoffset1_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/window/late_enable_afterVblank_lcdoffset1_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/window/late_reenable_ds_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/window	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/late_reenable_scx5_2_dmg08_out3_cgb04c_out0.gbc [Dmg]	gambatte	gambatte/window	Dmg	0	3	PASS	hw-capture:dmg08	BUG	SameBoy reproduces the captured value; we do not
 gambatte/window/late_reenable_scx5_ds_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/window/late_wx_ds_2_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/window/late_wx_scx5_ds_2_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/window/late_wy_1_dmg08_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/window	Cgb	3	0	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/late_wy_lcdoffset1_1_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/window	Cgb	3	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/m2int_wxA6_m0irq2_2_dmg08_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	2	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/window/m2int_wxA6_m0irq_2_dmg08_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	2	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	2	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/m2int_wxA6_spxA7_m0irq_2_dmg08_cgb04c_out2.gbc [Dmg]	gambatte	gambatte/window	Dmg	0	2	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/window/on_screen/late_wx_ds_2.gbc [Cgb]	gambatte	gambatte/window	Cgb	22880px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/window/on_screen/wx17_weoff_wxA5_weon.gbc [Cgb]	gambatte	gambatte/window	Cgb	960px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/window/on_screen/wxA6_late_we_reenable_1.gbc [Dmg]	gambatte	gambatte/window	Dmg	6388px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/on_screen/wxA6_late_we_reenable_2.gbc [Dmg]	gambatte	gambatte/window	Dmg	6388px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/on_screen/wxA6_late_we_reenable_3.gbc [Dmg]	gambatte	gambatte/window	Dmg	6384px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/on_screen/wxA6_weoff_at_xposA6.gbc [Dmg]	gambatte	gambatte/window	Dmg	4096px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/window/on_screen/wxA6_wy01_weoff_ly02_weon_ly60.gbc [Dmg]	gambatte	gambatte/window	Dmg	124px-diff	reference-png	FAIL	hw-capture:png	EXCEED	hardware-captured want that SameBoy also misses
 gbmicrotest/dma_basic.gb [Dmg]	gbmicrotest	gbmicrotest	Dmg	0xe0	0x46	unknown	defect:self-overwriting-result	JUNK	defective asset (self-overwriting-result)
 gbmicrotest/halt_op_dupe_delay.gb [Dmg]	gbmicrotest	gbmicrotest	Dmg	0x01	0x55	unknown	hw-verdict:gbmicrotest-hram	BUG	hardware-captured want; SameBoy verdict unmeasured
 gbmicrotest/line_144_oam_int_b.gb [Dmg]	gbmicrotest	gbmicrotest	Dmg	0xe0	0xff	unknown	hw-verdict:gbmicrotest-hram	BUG	hardware-captured want; SameBoy verdict unmeasured
@@ -350,8 +283,8 @@ mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb [Dmg]	mealybug	mealybug/ppu	D
 mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	192px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change2.gb [Cgb]	mealybug	mealybug/ppu	Cgb	109px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb [Dmg]	mealybug	mealybug/ppu	Dmg	146px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
-mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb [Cgb]	mealybug	mealybug/ppu	Cgb	144px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
-mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb [Dmg]	mealybug	mealybug/ppu	Dmg	250px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
+mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb [Cgb]	mealybug	mealybug/ppu	Cgb	224px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
+mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb [Dmg]	mealybug	mealybug/ppu	Dmg	202px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	55px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change.gb [Dmg]	mealybug	mealybug/ppu	Dmg	70px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_size_change_scx.gb [Cgb]	mealybug	mealybug/ppu	Cgb	140px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
@@ -360,7 +293,7 @@ mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change.gb [Cgb]	mealybug	mealybug/pp
 mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change2.gb [Cgb]	mealybug	mealybug/ppu	Cgb	261px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
 mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	652px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
 mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change2.gb [Cgb]	mealybug	mealybug/ppu	Cgb	272px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
-mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Dmg]	mealybug	mealybug/ppu	Dmg	504px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
+mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Dmg]	mealybug	mealybug/ppu	Dmg	175px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	60px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change2.gb [Cgb]	mealybug	mealybug/ppu	Cgb	70px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	32px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
@@ -371,8 +304,6 @@ same-suite/apu/channel_4/channel_4_align.gb [Cgb]	same-suite	same-suite/apu	Cgb	
 same-suite/apu/channel_4/channel_4_freq_change.gb [Cgb]	same-suite	same-suite/apu	Cgb	B=42,C=42,D=42,E=42,H=42,L=42	fib:03/05/08/0D/15/22	unknown	upstream:same-suite	CONFLICT	upstream-documented revision/unit-specific behavior
 mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-C.gb [Agb]	wilbertpol	wilbertpol/acceptance	Agb	B=04,C=93,D=42,E=08,H=FF,L=40	fib:03/05/08/0D/15/22	unknown	weak:wilbertpol-2016	JUNK	weak provenance, SameBoy unmeasured — NOT exemptible yet
 mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-C.gb [Cgb]	wilbertpol	wilbertpol/acceptance	Cgb	B=04,C=93,D=42,E=08,H=FF,L=40	fib:03/05/08/0D/15/22	unknown	weak:wilbertpol-2016	JUNK	weak provenance, SameBoy unmeasured — NOT exemptible yet
-mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Agb]	wilbertpol	wilbertpol/acceptance	Agb	B=0A,C=45,D=42,E=08,H=FF,L=40	fib:03/05/08/0D/15/22	unknown	weak:wilbertpol-2016	JUNK	weak provenance, SameBoy unmeasured — NOT exemptible yet
-mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Cgb]	wilbertpol	wilbertpol/acceptance	Cgb	B=0A,C=45,D=42,E=08,H=FF,L=40	fib:03/05/08/0D/15/22	unknown	weak:wilbertpol-2016	JUNK	weak provenance, SameBoy unmeasured — NOT exemptible yet
 mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Dmg]	wilbertpol	wilbertpol/acceptance	Dmg	B=0A,C=45,D=42,E=08,H=FF,L=40	fib:03/05/08/0D/15/22	unknown	weak:wilbertpol-2016	JUNK	weak provenance, SameBoy unmeasured — NOT exemptible yet
 mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Mgb]	wilbertpol	wilbertpol/acceptance	Mgb	B=0A,C=45,D=42,E=08,H=FF,L=40	fib:03/05/08/0D/15/22	unknown	weak:wilbertpol-2016	JUNK	weak provenance, SameBoy unmeasured — NOT exemptible yet
 mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Sgb]	wilbertpol	wilbertpol/acceptance	Sgb	B=0A,C=45,D=42,E=08,H=FF,L=40	fib:03/05/08/0D/15/22	unknown	weak:wilbertpol-2016	JUNK	weak provenance, SameBoy unmeasured — NOT exemptible yet

@@ -28,8 +28,11 @@
 #    TEST2 reads 0) — pending a sub-M-cycle vblank-LY-load skew model,
 #    age (2022, CPU-CGB-04-verified) wins the tie-break.
 #  - acceptance/gpu, hblank_ly_scx_timing: the -C variant plus the
-#    all-model _variant_nops build (the plain -GS variant and the _nops
-#    build pass since the mode-0 event-grid re-derivation). The -C
+#    _variant_nops build on the DMG-family models (the plain -GS variant
+#    and the _nops build pass since the mode-0 event-grid re-derivation;
+#    the _nops [Cgb]/[Agb] legs pass since the polled bare-line mode-0
+#    read edge moved to `flip - 5` — docs/hardware-state/ppu-timing.md
+#    "The FF41 read frame"). The -C
 #    build's per-SCX halt-wake ladder decodes to the CGB mode-0 IRQ
 #    rising one dot later than DMG (255+SCX%8 bare; gambatte's
 #    m3StartLineCycle is 83+cgb) with the half-cycle halt law shifted
@@ -54,8 +57,6 @@
 # --- acceptance/gpu ---
 mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-C.gb [Agb]
 mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing-C.gb [Cgb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Agb]
-mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Cgb]
 mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Dmg]
 mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Mgb]
 mooneye-test-suite-wilbertpol/acceptance/gpu/hblank_ly_scx_timing_variant_nops.gb [Sgb2]

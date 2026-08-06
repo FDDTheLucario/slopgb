@@ -683,3 +683,25 @@ fn window_activation_samples_wy_at_the_fine_scroll_shifted_instant() {
     // A write a boundary earlier is already latched at the match.
     assert!(acts(0, 92), "compare at 96 latches before the match");
 }
+
+/// A polled FF41 read on a bare CGB line reads mode 0 from five dots
+/// before the render's flip (`254 + SCX&7`), the CPU-visible mode-0 edge
+/// SameBoy places at `flip - 5` in the cc+0 read frame. The
+/// `gambatte/dma/{g,h}dma_cycles_*_scx{2,3}_{1,2}` pairs bracket it: the
+/// `_1` rung reads dot 248 and wants mode 3, its `_2` sibling reads dot
+/// 252 and wants mode 0 — which at SCX 2/3 only this edge separates.
+#[test]
+fn polled_bare_cgb_mode0_edge_is_five_dots_before_the_flip() {
+    let read_mode = |scx: u8, dot: u16| {
+        let mut p = cgb();
+        p.write(0xFF40, 0x91); // LCD on, BG on
+        p.write(0xFF43, scx);
+        run_to(&mut p, 1, dot);
+        p.read(0xFF41) & 3
+    };
+    for scx in [0u8, 2, 3, 5] {
+        let edge = 254 + u16::from(scx) - 5;
+        assert_eq!(read_mode(scx, edge - 1), 3, "SCX {scx}: one dot before");
+        assert_eq!(read_mode(scx, edge), 0, "SCX {scx}: on the edge");
+    }
+}
