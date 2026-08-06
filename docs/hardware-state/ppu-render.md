@@ -156,6 +156,30 @@ against the replay to find the missing term) — not a sixth guess at the setup.
 
 Parked: the rising-late CGB LCDC fetch view — tried and rejected. See the mealybug note below: it fits most `_cgb_c` photo columns but contradicts hardware-captured gambatte bgtiledata spx0B rows. Current law samples `eff` clean at the read dot on both families instead.
 
+### Measured, NOT landed: the fine-scroll hunt latches one M-cycle early on the LCD-enable line (2026-08-06)
+
+`enable_display/ly0_late_scx7_m3stat_scx1_2` (both models, SameBoy passes both)
+is the only failing member of its family, and it is a **render-length** row, not
+a read-frame one. The kernel enables the LCD, writes SCX = 7 late into line 0's
+mode 3, and reads STAT; the `_1`/`_2` rungs move that write by one M-cycle and
+read at the **same absolute instant** (SameBoy `SBREAD ff41 … fp=26311304` in
+both).
+
+| ROM | SCX write | SameBoy at the read | slopgb `hunt_fine` → flip |
+|---|---|---|---|
+| `…_scx1_1` (want 3) | our dot 84 / SB cfl 92 | mode **3** | 1 (old) → 253 |
+| `…_scx1_2` (want 0) | our dot 88 / SB cfl 96 | mode **0** | 1 (old) → 253 |
+
+So SameBoy's hunt still takes the NEW SCX for a write at cfl 92 (mode 3 extends
+by `7`) and keeps the old one at cfl 96. slopgb takes the old value in both, and
+the `_1` rung passes only because its read lands short of our flip anyway. Our
+threshold sits one M-cycle early: `scx0_1` (write dot 80) latches 7 while
+`scx1_1` (write dot 84) latches 1. The latch dot is base-SCX dependent (the hunt
+is a live position comparator — `scx3_1`, also written at dot 84, does take 7),
+so this is a comparator-position fix in `render.rs`, not a constant. Not
+attempted: the hunt drives every line's mode-3 length, so it needs its own
+A/B pass over the whole corpus.
+
 ## Mealybug ppu state
 
 Status of the `m3_*` ppu_state tests:

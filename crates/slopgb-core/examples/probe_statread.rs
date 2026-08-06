@@ -2,9 +2,17 @@
 // Copyright (C) 2026 Richard Moch
 
 //! Report what a gambatte test ROM's result read actually latched: run the
-//! ROM under the suite's 16-frame protocol and, every time the instruction at
-//! `read_pc` executes, print the dot, LY, the value left in A (the read's own
-//! result) and the register state one instruction later.
+//! ROM under the suite's 16-frame protocol and print `cc` + the value left in
+//! A every time the instruction at `read_pc` executes. A is the read's own
+//! result — a later `debug_read` of the same register is a DIFFERENT read one
+//! or two M-cycles on, and the two disagree on exactly the rows that straddle
+//! a mode edge.
+//!
+//! The marker goes to stderr so it interleaves in order with a temporary
+//! `eprintln!` in the register read being studied: the trace line printed
+//! FIRST in a marker's group is the cc+0 leading-edge sample
+//! (`Interconnect::leading_edge_sample`) the CPU actually latched; the one
+//! right before the marker is the post-tick trailing read.
 //!
 //! The counterpart on the reference side is SameBoy's `SB_TRACE` tracer
 //! (`docs/sameboy-port/tools/build_sameboy_tracers.sh`): comparing A here
@@ -36,13 +44,7 @@ fn main() {
         let pc = gb.cpu_regs().pc;
         gb.step();
         if pc == read_pc {
-            println!(
-                "READ cc={} ly={:02X} a={:02X} stat_after={:02X}",
-                gb.cycles(),
-                gb.debug_read(0xFF44),
-                gb.cpu_regs().a,
-                gb.debug_read(0xFF41),
-            );
+            eprintln!("READ cc={} a={:02X}", gb.cycles(), gb.cpu_regs().a);
         }
     }
 }

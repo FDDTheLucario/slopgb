@@ -57,14 +57,26 @@ gambatte builds the same way and is worth instrumenting for a second opinion
 these rows with an m0 time 2 dots off SameBoy's edge and its own `cc + 2`
 read lead cancelling it.
 
+## Already differenced this session — do NOT re-sweep these
+
+| family | verdict | evidence |
+|---|---|---|
+| `lcd_offset/*_m0stat_count_*` | **floor** — the per-offset brackets contradict at whole-dot resolution (`K > 12` vs `K <= 10`); swept `over` 4/6/8 = +0/−1, +2/−1, +2/−3 | ppu-timing.md "The shifted (post-STOP) frame's mode-0 edge" |
+| `lcd_offset/*_ly_count_*` | **floor** — fails on LY, not STAT: we drop LY=153 at 153:4, SameBoy holds it 8 dots in. Widening: +6/−18 (drops hardware age rows) | ppu-timing.md "Line 153's LY hold in a shifted frame" |
+| `enable_display/ly0_late_scx7_m3stat_scx1_2` | **open, localized** — a render-length row: our fine-scroll hunt latches a late SCX write one M-cycle earlier than SameBoy's on the LCD-enable line | ppu-render.md "the fine-scroll hunt latches one M-cycle early" |
+
 ## TASK
 
-Take the next chaseable cluster. `dma` still has 15, but they are now the
-HDMA-seam / speed-switch families (class B), not the read frame. The read-frame
-vein that just paid: `lcd_offset` (8) and `enable_display` (8) are the same
-shape of read on a shifted/enable frame, and `bgtilemap`/`bgtiledata`/
-`scx_during_m3` (19 together) are render-length rows a pixel diff against
-SameBoy's framebuffer would localize the same way.
+Best next lever: the **fine-scroll hunt latch position** above. It is measured,
+localized to `render.rs`'s live position comparator, and SameBoy's threshold is
+pinned to the M-cycle by a rung pair that reads at the same absolute instant.
+It drives every line's mode-3 length, so it needs a full-corpus A/B — that is
+the work, not the diagnosis.
+
+Otherwise: `bgtilemap`/`bgtiledata`/`scx_during_m3` (19 chaseable together) are
+pixel-reference rows, so difference SameBoy's framebuffer against ours rather
+than a register read; `dma`'s remaining 15 are the HDMA-seam / speed-switch
+families (class B), a different mechanism from anything here.
 
 Gate every row through both references before investing in it — a row SameBoy
 also fails is class G and is not chaseable.
@@ -87,3 +99,4 @@ also fails is class G and is not chaseable.
 |---|---|---|
 | `c007bdd5` | a polled CGB FF41 read sees mode 0 from `flip - 5`, not `flip - 3` | +10 |
 | `bb755f63` | the CGB classifier now writes where `census.py` reads | +167 measured |
+| (this commit) | three `lcd_offset`/`enable_display` families differenced: two measured floors, one localized render bug | 0 |

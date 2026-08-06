@@ -88,6 +88,48 @@ already compensate; dropping that scope costs
 `lcd_offset/offset{1,2}_lyc99int_m0stat_count_scx{1,2}_1` (+10/−2 instead of
 +10/−0). Carried (ISR) reads are untouched — `isr_read_carry_hd` owns them.
 
+One caveat on the derivation. The `{g,h}dma_cycles_*` reads sit **9** dots
+before SameBoy's equivalent instant, not the +4 read debt every other family
+shows (the `lcd_offset` polls measure exactly +4): our GDMA of 128 blocks
+retires in 4100 dots (1024 stolen M-cycles + the gambatte teardown M-cycle)
+against SameBoy's 4104 between its `SBWHDMA run` and `end` markers. That
+M-cycle is a gambatte-vs-SameBoy model disagreement, not a row this port drops
+— every `*_cycles_*` row passes with the gambatte length — but it means the
+constant above rests on the non-DMA members of the +10 (display_startstate,
+wilbertpol), and a future DMA-length change must re-check the six DMA rows.
+
+### The shifted (post-STOP) frame's mode-0 edge — MEASURED FLOOR
+
+`lcd_offset/offset{1,2,3}_lyc99int_m0stat_count_*` poll FF41 once per line and
+must read mode 3 (`_1`) / mode 0 (`_2`) on every visible line to VBlank, so each
+(offset, SCX) pair brackets the exit to one M-cycle. In the shifted frame those
+brackets **contradict each other** at whole-dot resolution — with the exit
+written `2*flip + K` (K folding `over` and `lcd_phase_hd`):
+
+| row | want | read dot | flip | needs |
+|---|---|---|---|---|
+| `offset1_…_scx3_1` | 3 | 259 | 257 | `K > 12` |
+| `offset2_…_scx2_1` | 3 | 258 | 256 | `K > 12` |
+| `offset3_…_scx0_2` | 0 | 255 | 254 | `K <= 10` |
+
+Swept end to end: `over` 4 → +0/−1, 6 → **+2/−1**, 8 → +2/−3. Every setting is a
+trade, so the family stays baselined (`over = 2`). Separating it needs the
+sub-dot poll phase the whole-dot flip cannot carry — the same precondition as
+floor class A.
+
+### Line 153's LY hold in a shifted frame — MEASURED FLOOR
+
+`lcd_offset/offset{1,2}_lyc98int_ly_count_1` fail one step earlier, on LY, not
+STAT: their kernel reads FF44 at line-153 dot 6/7 and requires `$99`. slopgb
+holds LY = 153 from 152:454 through 153:3 (`engine.rs`), so those reads get 0;
+SameBoy still returns `$99` 8 dots into line 153 (`SBREAD ff44 … val=99`, 16 hd
+after the line-153 boundary). Widening the hold is a two-sided trade, swept:
+wrap 8 → **+6/−18**, wrap 12 → +1/−19. The casualties include the
+hardware-captured `age/ly-dmgC-cgbBC` + `ly-ncmBC` and the whole DMG
+`wilbertpol ly_lyc_0-GS` / `ly_new_frame-GS` matrix, which the cross-oracle rule
+forbids dropping. Unchanged; lift needs the sub-M-cycle vblank-LY-load skew
+model the wilbertpol baseline header already names.
+
 ### FF41 reads — the line-144 VBlank-entry hold
 
 The line-144 dots-0..3 mode-0 hold in `vis_mode` is raw FSM state no read ever
