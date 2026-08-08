@@ -47,7 +47,8 @@ if [ -x "$TESTER" ] && grep -q 'SBMODE ly=%d cfl=%d dc=%d vis=%d fp=' "$DIR/Core
    && grep -q SBIF "$DIR/Core/display.c" 2>/dev/null \
    && grep -q SBWYCHK "$DIR/Core/display.c" 2>/dev/null \
    && grep -q SBWINACT "$DIR/Core/display.c" 2>/dev/null \
-   && grep -q SBWWY "$DIR/Core/memory.c" 2>/dev/null; then
+   && grep -q SBWWY "$DIR/Core/memory.c" 2>/dev/null \
+   && grep -q cgb_c "$DIR/Tester/main.c" 2>/dev/null; then
   echo "tester already built + patched: $TESTER"; exit 0
 fi
 
@@ -553,6 +554,48 @@ if "SBIF" not in disp:
     open(p,"w").write(disp)
     print("patched SBIF (su/m1oam/vbl/vbloam)")
 PYA
+
+# --cgb-c: run the tester at CPU CGB C, the revision `Model::Cgb` emulates. The
+# stock tester only ever inits GB_MODEL_CGB_E, but SameBoy splits real behaviour
+# on `model <= GB_MODEL_CGB_C` (apu.c, display.c fetcher-Y / ly_for_comparison /
+# a 2-vs-4-dot GB_SLEEP, memory.c), so a --cgb verdict is the wrong revision for
+# any such row -- and the CGB reference PNGs are `_cgb04c` / `_cgb_c` anyway.
+python3 - "$DIR" <<'PYC'
+import sys
+d=sys.argv[1]
+p=d+"/Tester/main.c"
+t=open(p).read()
+if "cgb_c" not in t:
+    old="""    bool dmg = false;
+    bool sgb = false;"""
+    new="""    bool dmg = false;
+    bool sgb = false;
+    bool cgb_c = false;"""
+    assert old in t, "tester model-flag anchor missing"
+    t=t.replace(old,new,1)
+    old='''        if (strcmp(argv[i], "--cgb") == 0) {
+            fprintf(stderr, "Using CGB mode\\n");
+            dmg = false;
+            sgb = false;
+            continue;
+        }'''
+    new=old+'''
+
+        if (strcmp(argv[i], "--cgb-c") == 0) {
+            fprintf(stderr, "Using CGB-C mode\\n");
+            dmg = false;
+            sgb = false;
+            cgb_c = true;
+            continue;
+        }'''
+    assert old in t, "tester --cgb anchor missing"
+    t=t.replace(old,new,1)
+    old="            GB_init(&gb, GB_MODEL_CGB_E);"
+    assert old in t, "tester GB_init anchor missing"
+    t=t.replace(old,"            GB_init(&gb, cgb_c ? GB_MODEL_CGB_C : GB_MODEL_CGB_E);",1)
+    open(p,"w").write(t)
+    print("patched Tester/main.c (--cgb-c)")
+PYC
 
 cd "$DIR" && make tester -j"$(nproc)"
 echo "BUILT: $TESTER"

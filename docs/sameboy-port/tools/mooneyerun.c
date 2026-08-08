@@ -12,7 +12,7 @@
  * on the signature and otherwise runs to the timeout and prints the registers
  * it ended on — enough to gate a row, which only asks whether SameBoy passes.
  *
- * Usage: mooneyerun [--dmg|--cgb|--agb|--mgb|--sgb|--sgb2] <rom> [boot.bin]
+ * Usage: mooneyerun [--dmg|--cgb|--cgbc|--agb|--mgb|--sgb|--sgb2] <rom> [boot.bin]
  * Build:  see the README (link against build/obj/Core/*.c.o).
  */
 #include "Core/gb.h"
@@ -42,6 +42,11 @@ int main(int argc, char **argv)
         if (strcmp(argv[i], "--dmg") == 0) { model = GB_MODEL_DMG_B; boot_default = "build/bin/tester/dmg_boot.bin"; continue; }
         if (strcmp(argv[i], "--mgb") == 0) { model = GB_MODEL_MGB;   boot_default = "build/bin/tester/dmg_boot.bin"; continue; }
         if (strcmp(argv[i], "--cgb") == 0) { model = GB_MODEL_CGB_E; boot_default = "build/bin/tester/cgb_boot.bin"; continue; }
+        /* Our Model::Cgb is CPU CGB C, and SameBoy splits real behaviour on
+           `model <= GB_MODEL_CGB_C` (the APU noise trigger, among others), so
+           a --cgb (= CGB_E, what the stock tester uses) verdict is the WRONG
+           revision for any such row. --cgbc is the matching one. */
+        if (strcmp(argv[i], "--cgbc") == 0) { model = GB_MODEL_CGB_C; boot_default = "build/bin/tester/cgb_boot.bin"; continue; }
         if (strcmp(argv[i], "--agb") == 0) { model = GB_MODEL_AGB;   boot_default = "build/bin/tester/agb_boot.bin"; continue; }
         if (strcmp(argv[i], "--sgb") == 0) { model = GB_MODEL_SGB;   boot_default = "build/bin/tester/sgb_boot.bin"; continue; }
         if (strcmp(argv[i], "--sgb2") == 0) { model = GB_MODEL_SGB2; boot_default = "build/bin/tester/sgb2_boot.bin"; continue; }
@@ -49,7 +54,7 @@ int main(int argc, char **argv)
         boot = argv[i];
     }
     if (!rom) {
-        fprintf(stderr, "usage: mooneyerun [--dmg|--mgb|--cgb|--agb|--sgb|--sgb2] <rom> [boot]\n");
+        fprintf(stderr, "usage: mooneyerun [--dmg|--mgb|--cgb|--cgbc|--agb|--sgb|--sgb2] <rom> [boot]\n");
         return 2;
     }
 

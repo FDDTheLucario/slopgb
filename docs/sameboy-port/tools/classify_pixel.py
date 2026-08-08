@@ -33,6 +33,11 @@ SBT = os.environ.get(
     _CACHE_SBT if os.path.exists(_CACHE_SBT)
     else '/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester',
 )
+# Our Model::Cgb is CPU CGB C and the CGB reference assets are `_cgb04c` /
+# `_cgb_c`, but the stock tester runs GB_MODEL_CGB_E. SameBoy splits real
+# behaviour on `model <= GB_MODEL_CGB_C` (apu.c, display.c fetcher/LY-compare),
+# so set SB_CGB_FLAG=--cgb-c to classify at the revision we emulate.
+CGB_FLAG = os.environ.get('SB_CGB_FLAG', '--cgb')
 _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 ROOT = os.environ.get(
@@ -133,7 +138,7 @@ def main():
         if os.path.exists(bmp):
             os.remove(bmp)
         shutil.copy(src, dst)
-        subprocess.run([SBT, '--cgb' if cgb else '--dmg', '--length', '4', dst],
+        subprocess.run([SBT, CGB_FLAG if cgb else '--dmg', '--length', '4', dst],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if not os.path.exists(bmp):
             unk.append((rel, tag, 'no-bmp', 0)); continue

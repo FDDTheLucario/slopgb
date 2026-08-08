@@ -39,6 +39,19 @@ is a vacuous result, not a bar.
 the `.log`, no kernel events in the trace), which reads as "SameBoy fails this
 row too" when SameBoy in fact passes it.
 
+**Always classify CGB rows at `--cgb-c`, not `--cgb`.** The stock tester's
+`--cgb` is `GB_MODEL_CGB_E`, but `Model::Cgb` is CPU **CGB C**, and SameBoy
+splits real behaviour on `model <= GB_MODEL_CGB_C` in `apu.c` (12 sites),
+`display.c` (8 — the fetcher-Y, the `ly_for_comparison` law, a `GB_SLEEP` of 2
+vs 4 dots), `memory.c` (6) and `sm83_cpu.c`. A `--cgb` verdict is therefore the
+WRONG revision for any such row, in BOTH directions: it calls rows chaseable
+that CGB-C hardware also fails, and floors rows CGB-C hardware passes. It also
+mismatches the assets — the CGB reference PNGs are `_cgb04c` / `_cgb_c`.
+Re-grounding the census at CGB-C flipped 28 of the 229 `[Cgb]` rows (7/29 fib,
+2/39 pixel, 19/161 glyph): 19 went from "floor" to chaseable — most of them in
+the `lcd_offset`, `ly0`, `lycEnable` and `m1` clusters — and 9 the other way. `sameboy_tester` and `mooneyerun` take `--cgb-c` / `--cgbc`;
+`classify_pixel.py` and `classify_cgb_regr.py` take `SB_CGB_FLAG=--cgb-c`.
+
 ## `mooneyerun.c` — mooneye-protocol register reader
 
 Same shape as `hramdump.c`, for the 62 census rows that report a Fibonacci

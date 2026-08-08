@@ -32,6 +32,9 @@ def _sbt():
     tmp = '/tmp/sbbuild/SameBoy-1.0.2/build/bin/tester/sameboy_tester'
     return cache if os.path.exists(cache) else tmp
 SBT=_sbt()
+# SB_CGB_FLAG=--cgb-c classifies at CPU CGB C, the revision Model::Cgb is
+# (the stock tester runs CGB_E; SameBoy splits behaviour on <= GB_MODEL_CGB_C).
+CGB_FLAG = os.environ.get('SB_CGB_FLAG', '--cgb')
 if not os.path.exists(SBT):
     sys.exit(f"sameboy_tester not found at {SBT} — run build_sameboy_tracers.sh or set SBT=. "
              "Classifying with a missing tester is a vacuous result, not a bar.")
@@ -61,7 +64,7 @@ for rel in rows:
     # A row whose tester run writes no BMP must not be judged on the previous
     # row's leftover frame.
     if os.path.exists('/tmp/s7/cls.bmp'): os.remove('/tmp/s7/cls.bmp')
-    subprocess.run([SBT,'--cgb','--length','4','/tmp/s7/cls.gbc'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    subprocess.run([SBT,CGB_FLAG,'--length','4','/tmp/s7/cls.gbc'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     if not os.path.exists('/tmp/s7/cls.bmp'): unk.append((rel,'','')); continue
     sb=ocr('/tmp/s7/cls.bmp',len(want))
     if '?' in sb: unk.append((rel,sb,want)); continue
