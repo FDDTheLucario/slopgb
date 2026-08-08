@@ -4,7 +4,7 @@ slopgb — next task: keep differencing the PPU read frame against SameBoy
 
 `main` @ `e58d2df7`, clean tree, no open branch.
 
-gbtr **221/221** with **321** baselined floor cases (349 at the start of this
+gbtr **221/221** with **319** baselined floor cases (349 at the start of this
 run); mooneye **93/93** suite tests (439/439 rom×model); core lib **913**;
 frontend **676**; clippy + fmt clean; `golden_fingerprint` recaptured after each
 lift, every drift confined to the rows that moved.
@@ -144,6 +144,17 @@ different mechanism from anything here.
 
 Gate every row through both references before investing in it — a row SameBoy
 also fails is class G and is not chaseable.
+
+## Localized, one measurement from a fix
+
+`miscmstatirq/lycstatwirq_trigger_ly00_10_50_1` **[Cgb]** (its [Dmg] leg is
+fixed). The two rungs stage in the engine's two-phase view at line 0 dot **5**
+(must not fire) and dot **9** (must fire), identical in every other field
+(`pre_high=false`, `mfi=NONE`, `lyc_interrupt_line=true`). So a fresh LYC-source
+enable is silent for ~4 dots after the line-0 LYC event and fires beyond it —
+the window lives in the `k >= 4` continuity arm of `stat_update_tick`, not in
+the write-instant table. Score any fix against `lcdoffset3_2` and
+`ds_lcdoffset1_2`, which fail with it.
 
 ## Scored this run, floors confirmed (don't re-sweep)
 

@@ -252,10 +252,17 @@ the vblank branch the already-enabled VBlank source suppresses it (`E0`, what
 hardware gives). Its `_2` sibling writes four dots later, in mode 2, and still
 fires. Pin `dmg_stat_write_at_line0_start_is_classified_as_vblank`.
 
-The row's [Cgb] leg still fails: on CGB that write instant is owned by the
-engine's two-phase FF41 view (`eng_boundary` in `stat_write_trigger_cgb`), a
-different path from the calibrated write-instant arms, so it needs its own
-measurement.
+The row's [Cgb] leg still fails through a different path, now measured: on CGB
+the write instant is owned by the engine's two-phase FF41 view (`eng_boundary`
+in `stat_write_trigger_cgb`), and the two rungs stage at line 0 dot **5**
+(fails, wants no fire) and dot **9** (passes, fires) — both with
+`pre_high=false`, `mfi=NONE` and `lyc_interrupt_line=true`, i.e. identical
+except the dot. So on CGB a fresh LYC-source enable is silent for a few dots
+after the line-0 LYC event at dot 4 and fires beyond it; the engine currently
+fires at both. The window is ~4 dots wide and lives in the `k >= 4` continuity
+arm of `stat_update_tick`, not in the write-instant table. The family's
+`lcdoffset3_2` and `ds_lcdoffset1_2` rows fail alongside it, so whatever fixes
+this should be scored against all three.
 
 ### FF41 writes — DMG vs CGB
 
