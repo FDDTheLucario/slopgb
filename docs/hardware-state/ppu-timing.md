@@ -162,6 +162,27 @@ population reads exactly there and wants 0, and rows at the *same* dot 452 want
 both answers. The split is the halt-wake sub-M-cycle phase this frame does not
 carry (floor class H — see the AXIS-1 note in `baselines/gambatte.txt`).
 
+### The CGB `getLyReg` +1 window — MEASURED FLOOR
+
+`halt/m1int_ly_2` [Cgb] (ours `90`, want `91`) is the clean statement of the
+gambatte `getLyReg` law (video.h:124-146: a CGB LY read in the line's last
+cycles already reads the next line). Its ladder pins the dot exactly — the three
+rungs read line 144 at dots **448 / 452 / 456** and want `90 / 91 / 91`, so the
+CGB LY increment must be visible from dot 452, four dots before the boundary.
+Its [Dmg] leg wants `90` there and passes, so the law is CGB-only.
+
+Implemented faithfully it is a heavy net loss, now measured rather than
+predicted: a `dot + 6 >= LINE_DOTS` window scores **+6/−49** and `+4` scores
+**+6/−47**, the casualties being the `dma/*_ly_*` halt/unhalt ladders' `_1`/`_5`
+rungs plus the hardware-captured `age/ly-dmgC-cgbBC` and `ly-ncmBC` [Cgb].
+Scoping it to the VBlank-entry line alone still scores **+1/−9**
+(`enable_display/frame{0,1}_ly_count_1`, `lcd_offset/…_ly_count_ds_1`,
+wilbertpol `ly143_144_145` and `vblank_if_timing` all read line 144's last dots
+and want the OLD LY).
+
+So rows at the SAME dot want both answers, which is the class-H signature: the
+split is sub-dot, not a window width. Floor confirmed for `m1int_ly_2`.
+
 ### FF41 reads — the line-144 VBlank-entry hold
 
 The line-144 dots-0..3 mode-0 hold in `vis_mode` is raw FSM state no read ever
