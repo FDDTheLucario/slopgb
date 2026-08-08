@@ -119,7 +119,7 @@ gambatte/lcd_offset/offset2_lyc98int_ly_count_2_cgb04c_out9A.gbc [Cgb]	gambatte	
 gambatte/lcd_offset/offset2_lyc98int_ly_count_3_cgb04c_out9A.gbc [Cgb]	gambatte	gambatte/lcd_offset	Cgb	99	9A	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/lcd_offset/offset2_lyc99int_m0stat_count_scx2_1_cgb04c_out90.gbc [Cgb]	gambatte	gambatte/lcd_offset	Cgb	00	90	FAIL	hw-capture:cgb04c	CONFLICT	SameBoy@CGB-C fails too (its --cgb=CGB-E passes) — revision split, floored
 gambatte/lcd_offset/offset2_lyc99int_m2irq_count_1_cgb04c_out98.gbc [Cgb]	gambatte	gambatte/lcd_offset	Cgb	01	98	FAIL	hw-capture:cgb04c	CONFLICT	SameBoy@CGB-C fails too (its --cgb=CGB-E passes) — revision split, floored
-gambatte/lcd_offset/offset3_lyc8fint_m1stat_1_cgb04c_outC0.gbc [Cgb]	gambatte	gambatte/lcd_offset	Cgb	C4	C0	PASS	hw-capture:cgb04c	BUG	SameBoy@CGB-C PASSES (its --cgb=CGB-E fails) — chaseable at our revision
+gambatte/lcd_offset/offset3_lyc8fint_m1stat_1_cgb04c_outC0.gbc [Cgb]	gambatte	gambatte/lcd_offset	Cgb	C4	C0	PASS	hw-capture:cgb04c	BUG	SameBoy@CGB-C passes; the CGB-C LYC invalid-gap law lifts it but trades 4 for 8 (ppu-timing.md) — blocked on the wilbertpol ly_lyc-C trio
 gambatte/lcd_offset/offset3_lyc98int_ly_count_1_cgb04c_out99.gbc [Cgb]	gambatte	gambatte/lcd_offset	Cgb	98	99	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/lcd_offset/offset3_lyc99int_m0stat_count_scx1_2_cgb04c_out90.gbc [Cgb]	gambatte	gambatte/lcd_offset	Cgb	00	90	PASS	hw-capture:cgb04c	BUG	SameBoy@CGB-C PASSES (its --cgb=CGB-E fails) — chaseable at our revision
 gambatte/lcd_offset/offset3_lyc99int_m2stat_count_2_cgb04c_out90.gbc [Cgb]	gambatte	gambatte/lcd_offset	Cgb	00	90	PASS	hw-capture:cgb04c	BUG	SameBoy@CGB-C PASSES (its --cgb=CGB-E fails) — chaseable at our revision
@@ -127,8 +127,8 @@ gambatte/lcd_offset/offset3_lyc99int_m3stat_count_2_cgb04c_out90.gbc [Cgb]	gamba
 gambatte/ly0/lycint152_ly0stat_2_dmg08_cgb04c_outC0.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	C1	C0	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/ly0/lycint152_ly153_ds_1_cgb04c_out98.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	99	98	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/ly0/lycint152_ly153_ds_4_cgb04c_out99.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	00	99	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/ly0/lycint152_lyc0flag_4_dmg08_cgb04c_outC0.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	C4	C0	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy@CGB-C PASSES (its --cgb=CGB-E fails) — chaseable at our revision
-gambatte/ly0/lycint152_lyc153flag_3_dmg08_cgb04c_outC1.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	C5	C1	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy@CGB-C PASSES (its --cgb=CGB-E fails) — chaseable at our revision
+gambatte/ly0/lycint152_lyc0flag_4_dmg08_cgb04c_outC0.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	C4	C0	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy@CGB-C passes; the CGB-C LYC invalid-gap law lifts it but trades 4 for 8 (ppu-timing.md) — blocked on the wilbertpol ly_lyc-C trio
+gambatte/ly0/lycint152_lyc153flag_3_dmg08_cgb04c_outC1.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	C5	C1	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy@CGB-C passes; the CGB-C LYC invalid-gap law lifts it but trades 4 for 8 (ppu-timing.md) — blocked on the wilbertpol ly_lyc-C trio
 gambatte/lyc153int_m2irq/lyc153int_m2irq_ifw_1_dmg08_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/lyc153int_m2irq	Cgb	0	2	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/lycEnable/ff45_enable_weirdpoint_ds_2_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/lycEnable	Cgb	3	1	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/lycEnable/ff45_enable_weirdpoint_ds_3_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/lycEnable	Cgb	3	1	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
@@ -148,7 +148,7 @@ gambatte/lycEnable/lyc153_late_m1disable_2_dmg08_outE2_cgb04c_outE0.gbc [Cgb]	ga
 gambatte/lycEnable/lyc_ff45_trigger_delay_2_dmg08_out0_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/lycEnable	Cgb	0	2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/lycEnable/lycwirq_trigger_ly00_stat50_ds_lcdoffset1_2_cgb04c_outE2.gbc [Cgb]	gambatte	gambatte/lycEnable	Cgb	E0	E2	PASS	hw-capture:cgb04c	BUG	SameBoy@CGB-C PASSES (its --cgb=CGB-E fails) — chaseable at our revision
 gambatte/lycint_ly/lycint_ly_ds_1_cgb04c_out5.gbc [Cgb]	gambatte	gambatte/lycint_ly	Cgb	6	5	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/lycint_lycflag/lycint_lycflag_4_dmg08_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lycint_lycflag	Cgb	4	0	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy@CGB-C PASSES (its --cgb=CGB-E fails) — chaseable at our revision
+gambatte/lycint_lycflag/lycint_lycflag_4_dmg08_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/lycint_lycflag	Cgb	4	0	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy@CGB-C passes; the CGB-C LYC invalid-gap law lifts it but trades 4 for 8 (ppu-timing.md) — blocked on the wilbertpol ly_lyc-C trio
 gambatte/m0enable/disable_scx5_ds_2_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/m0enable	Cgb	1	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/m0enable/lycdisable_ff41_scx3_2_dmg08_out2_cgb04c_out0.gbc [Dmg]	gambatte	gambatte/m0enable	Dmg	0	2	FAIL	hw-capture:dmg08	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/m0enable/lycdisable_ff45_2_dmg08_out2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/m0enable	Cgb	2	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses

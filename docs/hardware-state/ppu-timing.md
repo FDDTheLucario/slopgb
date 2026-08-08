@@ -323,6 +323,45 @@ Both port `lycRegChangeTriggersStatIrq` (held-compare target tables, m0/m1 block
 - **Parked:** wilbertpol `ly_lyc_0-C` / `ly_new_frame-C` — cross-suite LY=153-window contradiction with age (see the wilbertpol baseline note).
 - **Parked:** `hblank_ly_scx_timing-C` — needs the CGB mode-0 flip +1 dot in `render/mode0.rs`.
 
+## The CGB-C LYC invalid-gap read law (measured, NOT adopted)
+
+SameBoy's `GB_STAT_update` runs its LY=LYC branch when `ly_for_comparison` is
+valid **or** `model <= GB_MODEL_CGB_C && !double_speed`. In that extra CGB-C
+single-speed case the comparison is against the invalid `-1`, so it takes the
+else branch and **clears STAT bit 2** while leaving `lyc_interrupt_line` alone
+— a read-side-only gap. Our CGB readable table
+(`ppu/lyc.rs::compare_ly_shift`) has no such gap: it holds `L-1` through the
+line-start dots.
+
+The gap is real — it is exactly the +0x04 by which we miss four rows that
+SameBoy **at CGB-C** passes (the census had them floored because the stock
+tester runs CGB-E; see `docs/sameboy-port/tools/README.md`). But it is an A/B
+trade, not a free lift. Measured over the full matrix, with the gap applied in
+the shifted read frame:
+
+| gap window (shifted `(l, d)`) | fixed | broken |
+|---|---|---|
+| mid-frame `l∉{0,153}`, `d < 4` | 3 | 6 |
+| `l == 153`, `d ∈ 0..3, 8..11`   | 1 | 2 |
+| both of the above               | 4 | 8 |
+| `l == 0`, `d < 4`               | 0 | 0 |
+
+Fixed: `ly0/lycint152_lyc0flag_4`, `ly0/lycint152_lyc153flag_3`,
+`lycint_lycflag/lycint_lycflag_4`, `lcd_offset/offset3_lyc8fint_m1stat_1`.
+Broken: the wilbertpol `ly_lyc-C` / `ly_lyc_144-C` / `ly_lyc_153-C` trio
+(×[Cgb]+[Agb]) and `lcd_offset/offset{1,2}_lyc8fint_m1stat_1`.
+
+Both sides of the trade were re-checked against SameBoy **at CGB-C**, and it
+fails every one of the broken rows too: the wilbertpol trio outright, and on
+offset1/2 it returns `C0` where gambatte's own hardware reference wants `C4`.
+So the broken rows are ones we currently pass without reference support, and
+the trade is 4 reference-backed rows for 8 unsupported ones — net baseline
+growth, so it is NOT adopted. The lift condition is the same as the rest of
+class E: once the wilbertpol 2016 trio is retired or re-derived (its header
+already records age winning that tie-break), re-run the "both" variant — it is
+a +4 with the trio removed. The offset1/2 pair is a separate
+gambatte-vs-SameBoy disagreement and needs its own resolution.
+
 ## Mode-0 end-of-line event grid
 
 (The formerly **PARKED** flip/IF split, re-derived jointly.)
