@@ -381,28 +381,28 @@ impl Ppu {
                 } else {
                     let phase = i32::from(self.lcd_phase_hd);
                     // `over`: where a POLLED read's mode-0 boundary sits
-                    // relative to the render's whole-dot flip. Measured against
+                    // relative to the render's whole-dot flip — `2*flip - 2`,
+                    // i.e. five dots before the flip once `read_pos_hd`'s +8 hd
+                    // read debt is added, on BOTH models. Measured against
                     // SameBoy's own trace of the same ROMs (`SBMODE` visible
                     // mode-0 edge vs the `SBREAD ff41` instant, both on the
                     // absolute 8 MHz clock): on a bare CGB line SameBoy's edge
-                    // is `flip - 5` in this frame's dots — `2*flip - 2` on the
-                    // half-dot grid once `read_pos_hd`'s +8 hd read debt is
-                    // added. `gdma_cycles_*_scx{2,3}_1/_2` bracket it to the
-                    // dot: `_1` reads dot 248 (want 3), `_2` dot 252 (want 0),
-                    // and at SCX 2/3 only `- 2` puts the edge between them.
-                    // DMG polled reads sit one dot later, at `2*flip`
-                    // (`ppu_sprite0_scx{2,6}_b` read exactly there and want
-                    // mode 0). A post-STOP shifted frame (`lcd_shift_dots`)
-                    // keeps `+2`: its flip sits a half-dot past the whole-dot
-                    // sample, which the shifted-frame arms in `read_laws.rs`
-                    // already compensate (`lcd_offset/offset{1,2}_lyc99int_
-                    // m0stat_count_scx{1,2}_1`). Carried reads are untouched —
-                    // `- carry` owns their frame.
-                    let over = if self.read_carried {
-                        2
-                    } else if !self.model.is_cgb() {
-                        0
-                    } else if self.lcd_shift_dots != 0 {
+                    // is `flip - 5`, and `gdma_cycles_*_scx{2,3}_1/_2` bracket
+                    // it to the dot — `_1` reads dot 248 (want 3), `_2` dot 252
+                    // (want 0), and at SCX 2/3 only `- 2` puts the edge between
+                    // them. DMG agrees: it also takes the 4 wilbertpol
+                    // `hblank_ly_scx_timing_variant_nops` legs and gbmicrotest
+                    // `ppu_sprite0_scx{3,7}_b`, with `ppu_sprite0_scx{2,6}_b`
+                    // (which read exactly at `2*flip`) passing either way —
+                    // they bound `over` from ABOVE, not to `0`.
+                    //
+                    // A post-STOP shifted frame (`lcd_shift_dots`) keeps `+2`:
+                    // its flip sits a half-dot past the whole-dot sample, which
+                    // the shifted-frame arms in `read_laws.rs` already
+                    // compensate (`lcd_offset/offset{1,2}_lyc99int_m0stat_count_
+                    // scx{1,2}_1`). Carried reads are untouched — `- carry`
+                    // owns their frame.
+                    let over = if self.read_carried || self.lcd_shift_dots != 0 {
                         2
                     } else {
                         -2

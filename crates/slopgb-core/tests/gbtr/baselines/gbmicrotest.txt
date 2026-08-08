@@ -38,10 +38,14 @@ gbmicrotest/dma_basic.gb [Dmg]
 gbmicrotest/halt_op_dupe_delay.gb [Dmg]
 gbmicrotest/line_144_oam_int_b.gb [Dmg]
 gbmicrotest/line_144_oam_int_d.gb [Dmg]
-gbmicrotest/ppu_sprite0_scx3_b.gb [Dmg]
-gbmicrotest/ppu_sprite0_scx7_b.gb [Dmg]
 gbmicrotest/stat_write_glitch_l154_d.gb [Dmg]
 
 # win0-7_b (and win0_scx3_b): the same one-dot stalled-window-lead
 # conflict as the win8-15_b block above (these legs additionally carry
 # the WX<=7 6-dot-stall anchor pinned by mealybug m3_window_timing).
+# --- polled bare-line mode-0 read edge, DMG (2026-08-06) ---
+# ppu_sprite0_scx{3,7}_b lifted with the DMG side of the `flip - 5` polled read
+# edge (+6/-0 with the four wilbertpol hblank_ly_scx_timing_variant_nops legs).
+# scx{2,6}_b read exactly at `2*flip` and pass either way — they bound the
+# constant from above, not to 0. See docs/hardware-state/ppu-timing.md
+# "The FF41 read frame".

@@ -4,13 +4,13 @@ slopgb — next task: keep differencing the PPU read frame against SameBoy
 
 `main` @ HEAD (see the table below), clean tree, no open branch.
 
-gbtr **221/221** with **327** baselined floor cases (was 349 at the start of this
+gbtr **221/221** with **321** baselined floor cases (was 349 at the start of this
 run); mooneye **93/93** suite tests (439/439 rom×model); core lib **913**;
 frontend **676**;
 clippy + fmt clean; `golden_fingerprint` recaptured (13 cases drifted, all in
 the CGB STAT-read cluster, no verdict changes).
 
-`docs/hardware-state/floor-census.tsv` is current: 326 rows, **295** with a
+`docs/hardware-state/floor-census.tsv` is current: 320 rows, **291** with a
 SameBoy verdict (the CGB classifier was writing where nobody read — fixed in
 `bb755f63`, which is what raised coverage from 78). Chaseable = SameBoy PASS +
 we fail:
@@ -69,7 +69,11 @@ block is 24 rows of `intr_2_mode0_timing_sprites_scx{1,2,3,4}_nops` across six
 models plus 18 age rows (`oam-read/write`, `stat-mode*`, `vram-read`,
 `spsw-mode0`).
 
-Read the two caveats before acting on them: the wilbertpol `intr_2_mode0`
+That gate has already paid once: it showed the DMG-family
+`hblank_ly_scx_timing_variant_nops` legs were chaseable, which led to measuring
+the polled read edge on DMG and collapsing the model split (+6).
+
+Read the two caveats before acting on the rest: the wilbertpol `intr_2_mode0`
 family is the documented cross-oracle swap (siding with gambatte forfeits
 gbmicrotest rows — see the baseline header), and `census.py` now WARNS that
 these rows are bucketed JUNK yet SameBoy passes them, which means they must
@@ -159,3 +163,5 @@ checked.
 | `4a3f540b` | three `lcd_offset`/`enable_display` families differenced: two measured floors, one localized render bug | 0 |
 | `27b63ab9` | the CGB line-start dispatch-ack widening applies except on line 0 (CGB decouples its line-0 emission to dot 4) | +4 |
 | `d3daeaff` | a mid-mode-3 LCDC write reaches the fetcher's MAP-select bits one dot after its data-select bit, CGB single speed | +8 |
+| `f71dace0` | the mooneye-protocol rows are gateable at last; 54 of 62 unknowns are SameBoy-PASS | census |
+| (this commit) | the polled bare-line `flip - 5` read edge holds on DMG too — the model split was a misread | +6 |

@@ -54,10 +54,10 @@ STAT IRQs are **per-source events with predicates** (`Ppu::stat_update_tick` in 
 
 ### The FF41 read frame — the polled bare-line mode-0 edge
 
-A polled CGB read on a bare (no sprite, no window, no glitch) line reads mode 0
+A polled read on a bare (no sprite, no window, no glitch) line reads mode 0
 from **five dots before** the render's flip (`254 + SCX&7`), i.e. the bare arm's
 half-dot exit is `2*flip - 2`, not `2*flip + 2` (`read_laws_exit.rs`, `over`).
-The arm covers every visible line at both speeds, LCD on.
+The arm covers every visible line at both speeds and **both models**, LCD on.
 
 Measured, not swept — SameBoy's own trace of the same ROMs
 (`SB_TRACE=1 sameboy_tester`, `SBMODE` visible mode-0 edge vs the `SBREAD ff41`
@@ -80,13 +80,22 @@ wilbertpol `hblank_ly_scx_timing_variant_nops` [Cgb]/[Agb]); golden drift is 13
 cases confined to the CGB STAT-read cluster, no verdict changes. Unit test
 `polled_bare_cgb_mode0_edge_is_five_dots_before_the_flip`.
 
-Two scopes are load-bearing: **DMG** polled reads keep `2*flip`
-(`gbmicrotest/ppu_sprite0_scx{2,6}_b` read exactly there and want mode 0), and a
-**post-STOP shifted frame** (`lcd_shift_dots != 0`) keeps `+2` — its flip sits a
-half-dot past the whole-dot sample and the shifted-frame arms in `read_laws.rs`
-already compensate; dropping that scope costs
-`lcd_offset/offset{1,2}_lyc99int_m0stat_count_scx{1,2}_1` (+10/−2 instead of
-+10/−0). Carried (ISR) reads are untouched — `isr_read_carry_hd` owns them.
+One scope is load-bearing: a **post-STOP shifted frame** (`lcd_shift_dots != 0`)
+keeps `+2` — its flip sits a half-dot past the whole-dot sample and the
+shifted-frame arms in `read_laws.rs` already compensate; dropping that scope
+costs `lcd_offset/offset{1,2}_lyc99int_m0stat_count_scx{1,2}_1` (+10/−2 instead
+of +10/−0). Carried (ISR) reads are untouched — `isr_read_carry_hd` owns them.
+
+**DMG takes the same constant (2026-08-06, +6/−0).** It was first landed
+CGB-only, on the reading that `gbmicrotest/ppu_sprite0_scx{2,6}_b` [Dmg] pinned
+DMG at `2*flip`; they do not — they read exactly at `2*flip` and pass at `-2`
+as well, so they bound `over` from ABOVE, not to `0`. Measured once the
+mooneye-protocol gate (`classify_fib.py`) showed the DMG-family
+`hblank_ly_scx_timing_variant_nops` legs were SameBoy-passing and therefore
+chaseable: `-2` takes all four of them plus `ppu_sprite0_scx{3,7}_b` [Dmg], and
+`+2` is what actually breaks `scx{2,6}_b`. The model split is gone — `over` is
+now `2` for carried or shifted-frame reads and `-2` otherwise. Pin:
+`polled_bare_mode0_edge_is_five_dots_before_the_flip_on_both_models`.
 
 One caveat on the derivation. The `{g,h}dma_cycles_*` reads sit **9** dots
 before SameBoy's equivalent instant, not the +4 read debt every other family

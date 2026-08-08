@@ -7957,7 +7957,7 @@ gbmicrotest/ppu_sprite0_scx2_b.gb [Dmg] | 56a2a6ab3ddf5325 | b6b0632d997517d6
 gbmicrotest/ppu_sprite0_scx3_a.gb [Cgb] | 26d20d86b8725325 | b6b0632d997517d6
 gbmicrotest/ppu_sprite0_scx3_a.gb [Dmg] | 26d20d86b8725325 | b6b0632d997517d6
 gbmicrotest/ppu_sprite0_scx3_b.gb [Cgb] | 26d20d86b8725325 | b6b0632d997517d6
-gbmicrotest/ppu_sprite0_scx3_b.gb [Dmg] | 9ab4e008dd5a4325 | b6b0632d997517d6
+gbmicrotest/ppu_sprite0_scx3_b.gb [Dmg] | 26d20d86b8725325 | b6b0632d997517d6
 gbmicrotest/ppu_sprite0_scx4_a.gb [Cgb] | edbfbb58d0a29325 | b6b0632d997517d6
 gbmicrotest/ppu_sprite0_scx4_a.gb [Dmg] | edbfbb58d0a29325 | b6b0632d997517d6
 gbmicrotest/ppu_sprite0_scx4_b.gb [Cgb] | edbfbb58d0a29325 | b6b0632d997517d6
@@ -7973,7 +7973,7 @@ gbmicrotest/ppu_sprite0_scx6_b.gb [Dmg] | 6c89e05167b3f325 | b6b0632d997517d6
 gbmicrotest/ppu_sprite0_scx7_a.gb [Cgb] | 3924ae579a90f325 | b6b0632d997517d6
 gbmicrotest/ppu_sprite0_scx7_a.gb [Dmg] | 3924ae579a90f325 | b6b0632d997517d6
 gbmicrotest/ppu_sprite0_scx7_b.gb [Cgb] | 3924ae579a90f325 | b6b0632d997517d6
-gbmicrotest/ppu_sprite0_scx7_b.gb [Dmg] | 9ab4e008dd5a4325 | b6b0632d997517d6
+gbmicrotest/ppu_sprite0_scx7_b.gb [Dmg] | 3924ae579a90f325 | b6b0632d997517d6
 gbmicrotest/ppu_sprite_testbench.gb [Cgb] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gbmicrotest/ppu_sprite_testbench.gb [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gbmicrotest/ppu_spritex_vs_scx.gb [Cgb] | a95f46fb19bda525 | b6b0632d997517d6
