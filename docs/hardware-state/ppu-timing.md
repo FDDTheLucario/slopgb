@@ -130,6 +130,22 @@ hardware-captured `age/ly-dmgC-cgbBC` + `ly-ncmBC` and the whole DMG
 forbids dropping. Unchanged; lift needs the sub-M-cycle vblank-LY-load skew
 model the wilbertpol baseline header already names.
 
+### The DMG line-wrap OAM entry — REFUTED, do not retry
+
+`halt/late_m0{int,irq}_halt_m0stat_scx3_2b` [Dmg] read line 1 dot **452** and
+want mode 2; their `_2a` siblings read dot **448** and want 0. SameBoy separates
+the pair by exactly one M-cycle at the line boundary (`SBREAD ff41 ly=2 cfl=0`
+at fp 11772800 → mode 0 vs fp 11772808 → mode 2), and with the +4-dot read debt
+our dot 452 lands in line 2's OAM scan, so the naive reading is that the DMG
+line-start back-date needs a mirror arm for a read in a line's last 4 dots.
+
+It is not: `m == 0 && dot + 4 >= LINE_DOTS` on visible DMG lines scores
+**+2/−61**. Most DMG mode-0 reads at a line end legitimately read 0 — the whole
+`halt/m0{int,irq}_m0stat_scx*`, `lycint_*`, `m2int_m0stat` and `lcdon_timing-GS`
+population reads exactly there and wants 0, and rows at the *same* dot 452 want
+both answers. The split is the halt-wake sub-M-cycle phase this frame does not
+carry (floor class H — see the AXIS-1 note in `baselines/gambatte.txt`).
+
 ### FF41 reads — the line-144 VBlank-entry hold
 
 The line-144 dots-0..3 mode-0 hold in `vis_mode` is raw FSM state no read ever

@@ -2,14 +2,14 @@ slopgb — next task: keep differencing the PPU read frame against SameBoy
 
 ## Repo state (verified 2026-08-06)
 
-`main` @ `c007bdd5`, clean tree, no open branch.
+`main` @ `27b63ab9`, clean tree, no open branch.
 
-gbtr **221/221** with **339** baselined floor cases (was 349); mooneye
-**93/93** suite tests (439/439 rom×model); core lib **911**; frontend **676**;
+gbtr **221/221** with **335** baselined floor cases (was 349 two sessions ago);
+mooneye **93/93** suite tests (439/439 rom×model); core lib **912**; frontend **676**;
 clippy + fmt clean; `golden_fingerprint` recaptured (13 cases drifted, all in
 the CGB STAT-read cluster, no verdict changes).
 
-`docs/hardware-state/floor-census.tsv` is current: 338 rows, **245** with a
+`docs/hardware-state/floor-census.tsv` is current: 334 rows, **241** with a
 SameBoy verdict (the CGB classifier was writing where nobody read — fixed in
 `bb755f63`, which is what raised coverage from 78). Chaseable = SameBoy PASS +
 we fail:
@@ -63,7 +63,8 @@ read lead cancelling it.
 |---|---|---|
 | `lcd_offset/*_m0stat_count_*` | **floor** — the per-offset brackets contradict at whole-dot resolution (`K > 12` vs `K <= 10`); swept `over` 4/6/8 = +0/−1, +2/−1, +2/−3 | ppu-timing.md "The shifted (post-STOP) frame's mode-0 edge" |
 | `lcd_offset/*_ly_count_*` | **floor** — fails on LY, not STAT: we drop LY=153 at 153:4, SameBoy holds it 8 dots in. Widening: +6/−18 (drops hardware age rows) | ppu-timing.md "Line 153's LY hold in a shifted frame" |
-| `enable_display/ly0_late_scx7_m3stat_scx1_2` | **open, localized** — a render-length row: our fine-scroll hunt latches a late SCX write one M-cycle earlier than SameBoy's on the LCD-enable line | ppu-render.md "the fine-scroll hunt latches one M-cycle early" |
+| `halt/late_m0*_halt_m0stat_scx3_2b` [Dmg] | **floor** — the mirror line-wrap OAM back-date is +2/−61; rows at the same dot 452 want both answers (class H halt-wake phase) | ppu-timing.md "The DMG line-wrap OAM entry" |
+| `enable_display/ly0_late_scx7_m3stat_scx1_2` | **open, localized** — a render-length row: our fine-scroll hunt latches a late SCX write one M-cycle earlier than SameBoy's on the LCD-enable line. A one-dot hunt-start delay is refuted (+0/−1) | ppu-render.md "the fine-scroll hunt latches one M-cycle early" |
 
 ## TASK
 
@@ -99,4 +100,5 @@ also fails is class G and is not chaseable.
 |---|---|---|
 | `c007bdd5` | a polled CGB FF41 read sees mode 0 from `flip - 5`, not `flip - 3` | +10 |
 | `bb755f63` | the CGB classifier now writes where `census.py` reads | +167 measured |
-| (this commit) | three `lcd_offset`/`enable_display` families differenced: two measured floors, one localized render bug | 0 |
+| `4a3f540b` | three `lcd_offset`/`enable_display` families differenced: two measured floors, one localized render bug | 0 |
+| `27b63ab9` | the CGB line-start dispatch-ack widening applies except on line 0 (CGB decouples its line-0 emission to dot 4) | +4 |
