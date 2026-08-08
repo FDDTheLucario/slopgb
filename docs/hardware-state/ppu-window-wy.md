@@ -1118,3 +1118,25 @@ not a regression from this work.
   line-0 compare dot for a whole round.
 * **`env::var("X").is_ok()` is true for `X=""`.** A `for v in "" 1` sweep ran the
   lever on in both arms and reported a confident "no effect". Use `env -u X`.
+
+## The LCDC-write WY compare delay — MEASURED TRADE (2026-08-06)
+
+`window/late_enable_afterVblank_lcdoffset1_1` [Cgb] (ours `0`, want `3`) turns
+on the same knob the LCDC path already carries: `schedule_wy_check_at(2)` in
+`regs.rs`, whose comment was calibrated on this family's unshifted `_2` sibling.
+
+The pair's late `ldh ($40),a` window-enable writes (LCDC `$B1`, WY = 0) land:
+
+| row | write lands | needs |
+|---|---|---|
+| `…_lcdoffset1_1` | line 0 dot **455** | HIT (LY 0 == WY 0) → mode 3 at the read |
+| `…_lcdoffset1_2` | line 1 dot 3 | miss (already past the line) |
+| `…_afterVblank_2` (unshifted) | line 0 dot **452** | MISS |
+
+So two writes three dots apart inside line 0 need opposite answers, and our
+compare snaps to the next 4-dot boundary — both land at 456 (line 1) and miss.
+Swept: delay **0** hd fixes `lcdoffset1_1` and breaks `late_enable_afterVblank_2`
+plus `arg/late_enable_afterVblank_4` (**+1/−2**); delay **1** hd changes nothing
+(the snap absorbs it). The separation needed is one dot inside the shifted
+frame, which this grid cannot represent — the same precondition as the other
+`lcdoffset` rows. Left at 2.
