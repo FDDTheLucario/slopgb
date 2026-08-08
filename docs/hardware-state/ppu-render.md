@@ -199,6 +199,24 @@ two; the other 16 are genuine geometry misses. It also re-prioritises them —
 geometry core, while `scx_0360c0/scx_during_m3_ds_2` is the reverse (160 raw,
 11516 rank), i.e. our shade STRUCTURE differs there, not just a few pixels.
 
+### `m3_bgp_change_sprites` [Cgb] is a BGP snapshot, not a palette (2026-08-06)
+
+678 px over ALL 144 rows, ~5 per row, ours black where the reference wants
+`(120,248,48)`. That colour is the 15-bit word `$1BEF` — which is **BG palette 0
+colour 1 in our own compat palette** (`7FFF 1BEF 6180 0000`, dumped with
+`SLOPGB_DUMP_PAL=1`). So the palette CONTENT is right and the row is not a
+boot-colorization gap: we map those pixels to index 3 (black) where hardware
+maps them to index 1, i.e. the pixel takes the wrong BGP snapshot while the ROM
+rewrites BGP mid-line.
+
+Its sprite-free sibling `m3_bgp_change` [Cgb] passes, so sprites on the line are
+the difference — but the commit LEAD is not the lever: giving BGP the DMG
+even-dot anchor on sprite-laden compat lines scores **0/0**. The pixel value
+path is already staged (`eff.bgp` in both the sprite and BG branches of
+`output_pixel`), so what is left is WHEN the pixel is emitted on a
+sprite-stalled line relative to the commit — the same mixed-fetch shape the
+`m3_scy_change` note describes.
+
 ### The obj-size-change rows are NOT the fetch-time size view (2026-08-06)
 
 `mealybug/m3_lcdc_obj_size_change` [Cgb] (55 px) and
