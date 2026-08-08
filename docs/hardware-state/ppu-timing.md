@@ -240,6 +240,23 @@ refuted:
 So the two surviving guards are load-bearing and two-sided; only the line-144 arm
 was vacuous. Separating these needs sub-dot read positions, not another arm.
 
+### Line 0's dots 0-3 are VBLANK for a DMG STAT write (2026-08-06, +1/−0)
+
+`stat_write_trigger_dmg` classified a write in any line's dots 0-3 as the
+PREVIOUS line's hblank. That is right for lines 1-143 but wrong for line 0,
+whose predecessor is line **153** — vblank. `miscmstatirq/
+lycstatwirq_trigger_ly00_10_50_1` [Dmg] is the pin: STAT `$50` over `$10` (so
+the VBlank source was already enabled and only LYC is newly enabled) at line 0
+dot 0 with LYC = LY = 0. Under the hblank branch the glitch fired (`E2`); under
+the vblank branch the already-enabled VBlank source suppresses it (`E0`, what
+hardware gives). Its `_2` sibling writes four dots later, in mode 2, and still
+fires. Pin `dmg_stat_write_at_line0_start_is_classified_as_vblank`.
+
+The row's [Cgb] leg still fails: on CGB that write instant is owned by the
+engine's two-phase FF41 view (`eng_boundary` in `stat_write_trigger_cgb`), a
+different path from the calibrated write-instant arms, so it needs its own
+measurement.
+
 ### FF41 writes — DMG vs CGB
 
 | Model | FF41-write behavior |

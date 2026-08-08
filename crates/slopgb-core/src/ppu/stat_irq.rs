@@ -436,7 +436,10 @@ impl Ppu {
         // Visible-line region (gambatte ly < 144: our dots 0-3 still
         // belong to the previous line on their grid, so line 144's first
         // M-cycle is still "line 143, hblank").
-        if self.line <= 143 || (self.line == 144 && self.dot < 4) {
+        // Line 0's dots 0-3 belong to the PREVIOUS line on this grid, and that
+        // line is 153 — vblank, not an hblank.
+        let prev_is_vblank = self.line == 0 && self.dot < 4;
+        if !prev_is_vblank && (self.line <= 143 || (self.line == 144 && self.dot < 4)) {
             // This line's mode-0 time passed = a real hblank (the
             // LCD-enable glitch prefix is not one).
             let hblank = (self.m0_src || self.dot < 4)

@@ -755,3 +755,33 @@ fn cgb_single_speed_map_select_lands_one_dot_after_the_data_bit() {
         );
     }
 }
+
+/// A DMG STAT write at line 0 dots 0-3 is classified against line **153**, not
+/// against an hblank: on this grid those dots still belong to the previous
+/// line, and line 0's predecessor is VBlank. So a write whose old value already
+/// had the VBlank source enabled raises nothing there, where the hblank
+/// classification would have fired the glitch
+/// (`miscmstatirq/lycstatwirq_trigger_ly00_10_50_1` [Dmg], want `E0`: STAT
+/// `$50` over `$10` at line 0 dot 0 with LYC = LY = 0). Its `_2` sibling writes
+/// four dots later, in mode 2, and does fire.
+#[test]
+fn dmg_stat_write_at_line0_start_is_classified_as_vblank() {
+    let write_at = |dot: u16| {
+        let mut p = dmg();
+        p.write(0xFF40, 0x91);
+        p.write(0xFF45, 0); // LYC = 0, matches line 0
+        p.write(0xFF41, 0x10); // VBlank source already enabled
+        run_to(&mut p, 0, dot);
+        p.write(0xFF41, 0x50) // + LYC source
+    };
+    assert_eq!(
+        write_at(0) & IF_STAT,
+        0,
+        "line 0 dot 0: vblank region, no fire"
+    );
+    assert_eq!(
+        write_at(4) & IF_STAT,
+        IF_STAT,
+        "line 0 dot 4: mode 2, the fresh LYC match fires"
+    );
+}

@@ -293,7 +293,6 @@ gambatte/lycint_ly/lycint_ly_ds_1_cgb04c_out5.gbc [Cgb]
 gambatte/m0enable/disable_scx5_ds_2_cgb04c_out3.gbc [Cgb]
 gambatte/m1/ly143_late_m2enable_ds_1_cgb04c_out3.gbc [Cgb]
 gambatte/m2enable/lyc1_late_m2enable_lycdisable_ds_2_cgb04c_out0.gbc [Cgb]
-gambatte/miscmstatirq/lycstatwirq_trigger_ly00_10_50_1_dmg08_cgb04c_outE0.gbc [Dmg]
 gambatte/miscmstatirq/m1statwirq_trigger_ly94_lyc94_40_50_ds_1_cgb04c_outE0.gbc [Cgb]
 # oamdma/ residuals after the gambatte-core bus-conflict model landed
 # (write-side conflicts, CGB WRAM redirect, CGB invalid >=E0 sources,

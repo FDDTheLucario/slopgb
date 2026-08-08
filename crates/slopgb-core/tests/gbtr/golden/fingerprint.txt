@@ -2979,7 +2979,7 @@ gambatte/miscmstatirq/lycstatwirq_trigger_ff_bf_dmg08_cgb04c_out0.gbc [Dmg] | 28
 gambatte/miscmstatirq/lycstatwirq_trigger_ff_ff_dmg08_cgb04c_out0.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/miscmstatirq/lycstatwirq_trigger_ff_ff_dmg08_cgb04c_out0.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/miscmstatirq/lycstatwirq_trigger_ly00_10_50_1_dmg08_cgb04c_outE0.gbc [Cgb] | 7d514ca13c5df925 | b6b0632d997517d6
-gambatte/miscmstatirq/lycstatwirq_trigger_ly00_10_50_1_dmg08_cgb04c_outE0.gbc [Dmg] | 7d514ca13c5df925 | b6b0632d997517d6
+gambatte/miscmstatirq/lycstatwirq_trigger_ly00_10_50_1_dmg08_cgb04c_outE0.gbc [Dmg] | 4b1df26d6982f77c | b6b0632d997517d6
 gambatte/miscmstatirq/lycstatwirq_trigger_ly00_10_50_2_dmg08_cgb04c_outE2.gbc [Cgb] | 7d514ca13c5df925 | b6b0632d997517d6
 gambatte/miscmstatirq/lycstatwirq_trigger_ly00_10_50_2_dmg08_cgb04c_outE2.gbc [Dmg] | 7d514ca13c5df925 | b6b0632d997517d6
 gambatte/miscmstatirq/lycstatwirq_trigger_ly00_10_50_ds_1_cgb04c_outE0.gbc [Cgb] | 4b1df26d6982f77c | b6b0632d997517d6
