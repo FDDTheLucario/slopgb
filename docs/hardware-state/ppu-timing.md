@@ -323,6 +323,34 @@ Both port `lycRegChangeTriggersStatIrq` (held-compare target tables, m0/m1 block
 - **Parked:** wilbertpol `ly_lyc_0-C` / `ly_new_frame-C` — cross-suite LY=153-window contradiction with age (see the wilbertpol baseline note).
 - **Parked:** `hblank_ly_scx_timing-C` — needs the CGB mode-0 flip +1 dot in `render/mode0.rs`.
 
+## The age OAM access cluster — one sample position per period
+
+All six age `oam/` rows are chaseable (SameBoy passes every one, at CGB-C and
+CGB-E both) and all fail the same way: the ladder wants `FF` — the access
+BLOCKED — and we return live OAM. Decoded with `age_decode.py`:
+
+| rom | rungs | bad | bad indices |
+|---|---|---|---|
+| `oam-write-cgbBCE` | 128 | 29 | 2, 10, 18, 26, 34, 42, 50 … (≡2 mod 8) + 43 |
+| `oam-write-ncmBCE` | 64 | 10 | same |
+| `oam-write-dmgC` | 64 | 10 | same |
+| `oam-read-dmgC-cgbBC` | 128 | 16 | 10, 26, 43, 59 … (≡10 mod 16) |
+| `oam-read-ncmBC` | 64 | 4 | 10, 26, 43, 59 |
+
+Exactly ONE sample position per period is wrong, on every repeat, so this is a
+single boundary dot, not a scattered defect — and it reproduces on DMG as well
+as CGB, which rules out the CGB-only levers (`cgb_linestart_oam_open`,
+`ds_lineend_open`). We are OPEN where hardware BLOCKS, so our blocked window is
+one step too narrow; since it already locks from dot 0, the suspect end is the
+mode-3→mode-0 release, i.e. `blocking.rs::oam_read_blocked`'s
+`!line_render_done` / `eager_access_released` terms or the interconnect's
+`stamp_blocks(m0_access_edge, ACCESS_PHASE)` MID-phase view.
+
+Do NOT sweep those blind: each is pinned by the `oam_access/pre*`/`post*`
+gambatte rows it was added for. Map ladder index → (line, dot) first — that
+needs an LY/dot accessor the examples do not have today, so the next step is a
+read-only probe exposing the scan position, then a targeted boundary A/B.
+
 ## Frame-0 m2 pulse count — one edge where hardware has 144
 
 Six `*_count_*` rows that SameBoy **at CGB-C** passes miss their expected value
