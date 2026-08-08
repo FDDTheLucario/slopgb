@@ -151,10 +151,11 @@ also fails is class G and is not chaseable.
 fixed). The two rungs stage in the engine's two-phase view at line 0 dot **5**
 (must not fire) and dot **9** (must fire), identical in every other field
 (`pre_high=false`, `mfi=NONE`, `lyc_interrupt_line=true`). So a fresh LYC-source
-enable is silent for ~4 dots after the line-0 LYC event and fires beyond it —
-the window lives in the `k >= 4` continuity arm of `stat_update_tick`, not in
-the write-instant table. Score any fix against `lcdoffset3_2` and
-`ds_lcdoffset1_2`, which fail with it.
+enable is silent for ~4 dots after the line-0 LYC event and fires beyond it.
+The raise path is still unidentified — the `k >= 4` continuity arm is REFUTED
+(suppressing there, windows `dot < 12` and `< 16`, changes nothing). And the
+family pulls both ways: `_1` over-fires while `lcdoffset3_2` /
+`ds_lcdoffset1_2` under-fire, so no single window serves all three.
 
 ## Scored this run, floors confirmed (don't re-sweep)
 

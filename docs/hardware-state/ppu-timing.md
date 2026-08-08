@@ -259,10 +259,17 @@ in `stat_write_trigger_cgb`), and the two rungs stage at line 0 dot **5**
 `pre_high=false`, `mfi=NONE` and `lyc_interrupt_line=true`, i.e. identical
 except the dot. So on CGB a fresh LYC-source enable is silent for a few dots
 after the line-0 LYC event at dot 4 and fires beyond it; the engine currently
-fires at both. The window is ~4 dots wide and lives in the `k >= 4` continuity
-arm of `stat_update_tick`, not in the write-instant table. The family's
-`lcdoffset3_2` and `ds_lcdoffset1_2` rows fail alongside it, so whatever fixes
-this should be scored against all three.
+fires at both.
+
+Where that fire actually comes from is NOT yet known. The obvious candidate —
+the `k >= 4` continuity arm of `stat_update_tick` — is refuted: suppressing a
+line-0 fresh-LYC rise there (windows `dot < 12` and `dot < 16`, unshifted CGB
+SS) changes nothing at all, so the level is being raised on some other path.
+Find the raise before proposing a window.
+
+Note also that the family pulls BOTH ways, so no single window can serve it:
+`_1` [Cgb] over-fires (we give `E2`, want `E0`) while `lcdoffset3_2` and
+`ds_lcdoffset1_2` under-fire (we give `E0`, want `E2`).
 
 ### FF41 writes — DMG vs CGB
 
