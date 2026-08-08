@@ -401,11 +401,20 @@ instruction of the ROM bank, so the CPU's next opcode fetch comes from
 **`$8000` — the VRAM the transfer is writing**. Their `late_gdma_pc_7ffe_2`
 sibling passes, so the pair brackets what the post-trigger fetch sees.
 
-First measurement: the write is `A = $00`, i.e. **bit 7 clear — it CANCELS an
-active HBlank transfer rather than starting one**, and our CPU crosses the
-boundary with no stall at all (`$7FFE` at cc 4916, `$8000` at cc 4928: twelve
-cycles, exactly the `ldh` itself). The two rungs sit 4 cycles apart (4916 vs
-4920), our runs are otherwise identical, yet hardware answers `02` and `00`. So
-the discriminator lives in the CANCEL seam — whether the in-flight block still
-retires, and what `$8000` therefore holds when the CPU fetches from it — not in
-a transfer length. Trace the cancel against SameBoy's `SBWHDMA` events next.
+Measured, and the divergence is EARLIER than the trigger. SameBoy performs two
+FF55 writes: `val=$12` at ly 144 (a 19-block GDMA that runs to completion) and
+then the `$7FFE` one, `val=$00`, which starts a fresh 1-block GDMA (`run
+steps=1`, `end src/dst=$0010`). Our run performs **only the second** — traced at
+the write, `mode=Disabled hdma5=FF src=0000 dst=0000`, so we take the
+general-purpose branch and request the block correctly; the ROM's FIRST FF55
+write never happens for us at all.
+
+So this is not a cancel-seam question and not a fetch-at-`$8000` question yet:
+something upstream diverts the kernel before it arms the 19-block transfer.
+Find that divergence first — the `$7FFE` boundary is downstream of it.
+
+(Two dead ends recorded so the next pass skips them: the trigger does NOT cancel
+an active HBlank transfer — nothing is armed at that point — and the CPU's
+apparent 12-cycle crossing from `$7FFE` to `$8000` is an artefact of the probe
+printing PC before the step, so the GDMA stall lands after the print, not
+nowhere.)
