@@ -97,6 +97,13 @@ chaseable: `-2` takes all four of them plus `ppu_sprite0_scx{3,7}_b` [Dmg], and
 now `2` for carried or shifted-frame reads and `-2` otherwise. Pin:
 `polled_bare_mode0_edge_is_five_dots_before_the_flip_on_both_models`.
 
+The other two arms were then re-measured rather than assumed, since the DMG one
+had been a misread: dropping the **carried** arm (letting ISR reads take `-2`
+too) costs **47** rows — the whole `m0int_m3stat` / `m2int_m3stat` / `late_scx4`
+/ `scx_m3_extend` `_1` population on both models — and dropping the
+**shifted-frame** arm costs the two `lcd_offset` count rows. Both are real; only
+the model split was not.
+
 One caveat on the derivation. The `{g,h}dma_cycles_*` reads sit **9** dots
 before SameBoy's equivalent instant, not the +4 read debt every other family
 shows (the `lcd_offset` polls measure exactly +4): our GDMA of 128 blocks
