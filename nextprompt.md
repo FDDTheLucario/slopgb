@@ -145,6 +145,25 @@ different mechanism from anything here.
 Gate every row through both references before investing in it — a row SameBoy
 also fails is class G and is not chaseable.
 
+## Scored this run, floors confirmed (don't re-sweep)
+
+| row/family | lever tried | score |
+|---|---|---|
+| `halt/m1int_ly_2` [Cgb] | the CGB `getLyReg` +1 window (6 dots / 4 dots / line-144-only) | +6/−49, +6/−47, +1/−9 |
+| the age ladders | `eager_access_released` 6 → 8/10 | 0/−9 |
+| the age ladders | DMG VRAM read lock dot 80 → 76 | 0/−11 |
+
+`m1int_ly_2`'s ladder pins the dot exactly (reads at 448/452/456 wanting
+90/91/91), so the law is not in doubt — rows at the SAME dot simply want both
+answers, which is the class-H sub-dot signature.
+
+## Best next target with its kernel already decoded
+
+`dma/hdma_pc_7ffe` + `dma/late_gdma_pc_7ffe_1` put the `ldh (FF55),a` trigger at
+`$7FFE`, so the CPU's next opcode fetch comes from `$8000` — the VRAM the
+transfer is writing — and their `_2` sibling passes, bracketing what that fetch
+sees. Trace the fetch, not the DMA length (`docs/hardware-state/dma.md`).
+
 ## Also differenced, no lift (measured, don't re-sweep)
 
 `dma/hdma_late_m3halt_m2unhalt_ly_*` — the six-rung ladder misses only at rung 4

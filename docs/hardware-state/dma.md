@@ -392,3 +392,14 @@ The error is not a sub-dot phase — it is where the halt-deferred HBlank block
 lands inside the line (floor class B, the speed-switch/HDMA seam). Fixing it
 means moving that retire dot, which the `dma` cycle/seam rows bracket from the
 other side; do not sweep it without re-running the whole `dma` cluster.
+
+## Next target, kernel decoded: `*_pc_7ffe` (2026-08-06)
+
+`dma/hdma_pc_7ffe` (ours `80`, want `02`) and `dma/late_gdma_pc_7ffe_1` (ours
+`00`, want `02`) put the `ldh (FF55),a` DMA trigger at **`$7FFE`**, the last
+instruction of the ROM bank, so the CPU's next opcode fetch comes from
+**`$8000` — the VRAM the transfer is writing**. Their `late_gdma_pc_7ffe_2`
+sibling passes, so the pair brackets what the post-trigger fetch sees: the
+pre-transfer byte, the written byte, or the blocked `$FF`. Not yet measured;
+the observable is what the CPU executes after the trigger, so trace the fetch
+at `$8000` rather than the DMA length.
