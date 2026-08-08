@@ -235,6 +235,39 @@ impl Ppu {
             };
             fold(&mut exit, 2 * i32::from(flip) + 1);
         }
+        // Arm 8-spr-SS — the single-speed twin of the DS window+sprite arm
+        // above. A WX >= 0xA0 window with sprites falls through every other
+        // arm: arm 1 excludes it (`wx < 0xA0 || n_sprites == 0`), the bare arm
+        // needs `bare_sprite_free`, and arm 8-spr is DS-only — so the read took
+        // the raw native mode and read 0 four dots before the flip
+        // (`m2int_wxA6_spxA7_m3stat_4` [Cgb]: carried ISR read at line 1 dot
+        // 264, projected flip 266, want mode 3).
+        //
+        // The render's own flip carries the window+sprite cost, so the exit is
+        // emergent like its DS twin. The corpus pins the offset only to a
+        // RANGE: `m3stat_4` needs `> 4` (its read is rp 536 against 2*266) and
+        // its `_5` sibling, one M-cycle later, needs `< 14` — 6/8/10/12 all
+        // score +1/−0 and 14 flips `_5`. Taking the middle of that bracket; a
+        // ROM that reads inside it would fix the value properly.
+        if self.model.is_cgb()
+            && !self.ds
+            && exit.is_none()
+            && m == 3
+            && self.render.n_sprites > 0
+            && self.render.win_active
+            && !self.render.win_aborted
+            && !self.glitch_line
+            && self.line >= 1
+            && self.line < 144
+            && (self.line_render_done || self.render.active)
+        {
+            let flip = if self.line_render_done && self.flip_dot != 0 {
+                self.flip_dot
+            } else {
+                self.projected_flip_dot()
+            };
+            fold(&mut exit, 2 * i32::from(flip) + 8);
+        }
         // Arm 8 — the unified half-dot BARE-line mode-3 exit.
         // The read position is `read_pos_hd + isr_read_carry_hd + lcd_phase`
         // (folded into the returned exit); the exit is a per-speed half-dot

@@ -707,7 +707,6 @@ gambatte/window/late_wx_ds_2_cgb04c_out3.gbc [Cgb]
 # `Ppu::irq_done` feeding `mode_for_interrupt`'s `prev_done`. Recovered the four
 # m0irq rows plus m0enable/enable_wxA6_2x_spxA7_ds_{1..4}. `spxA7_m3stat_4`
 # below does NOT follow — it reads a STAT mode, not the flag.
-gambatte/window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3.gbc [Cgb]
 # `late_scx03_wx0f_2` [Cgb]. Its family's SS legs were recovered by re-anchoring
 # an abort landing before the window's first tile-number read, and the DS legs by
 # reclaiming the refetch an abort abandons mid-fetch; this one follows from
@@ -1040,3 +1039,9 @@ gambatte/scy/scy_during_m3_ds_5.gbc [Cgb]
 # four mealybug m3_lcdc_{bg,win}_map_change{,2} [Cgb] photos (+8/-0). A uniform
 # delay of 4 costs the bgtiledata_spx* rows (+8/-34) and an unscoped per-bit
 # split costs the DMG + _ds map rows (+8/-8); both are measured.
+# --- SS window+sprite exit arm (2026-08-06) ---
+# m2int_wxA6_spxA7_m3stat_4 [Cgb] lifted by arm 8-spr-SS, the single-speed twin
+# of the DS window+sprite exit: a WX>=$A0 window WITH sprites matched no arm at
+# all and fell back to the raw native mode. The offset is bracketed, not pinned
+# — `_4` needs >4 and `_5` needs <14 (6/8/10/12 all score +1/-0). See
+# docs/hardware-state/ppu-timing.md "The single-speed window+sprite exit".

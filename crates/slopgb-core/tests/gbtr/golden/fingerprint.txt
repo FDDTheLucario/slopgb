@@ -7202,7 +7202,7 @@ gambatte/window/m2int_wxA6_spxA7_m3stat_1_dmg08_cgb04c_out3.gbc [Cgb] | 436064c8
 gambatte/window/m2int_wxA6_spxA7_m3stat_1_dmg08_cgb04c_out3.gbc [Dmg] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3.gbc [Cgb] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/window/m2int_wxA6_spxA7_m3stat_2_dmg08_out0_cgb04c_out3.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
-gambatte/window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
+gambatte/window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3.gbc [Cgb] | 436064c86b6618d5 | b6b0632d997517d6
 gambatte/window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/window/m2int_wxA6_spxA7_m3stat_5_dmg08_cgb04c_out0.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/window/m2int_wxA6_spxA7_m3stat_5_dmg08_cgb04c_out0.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6

@@ -162,6 +162,23 @@ population reads exactly there and wants 0, and rows at the *same* dot 452 want
 both answers. The split is the halt-wake sub-M-cycle phase this frame does not
 carry (floor class H — see the AXIS-1 note in `baselines/gambatte.txt`).
 
+### The single-speed window+sprite exit (2026-08-06, +1/−0)
+
+A WX >= `$A0` window with sprites on a CGB single-speed line matched NO exit
+arm: arm 1 excludes sprite-laden off-screen windows (`wx < 0xA0 || n_sprites ==
+0`), the bare arm requires `bare_sprite_free`, and the window+sprite arm was
+double-speed only. The read therefore fell back to the raw native mode and read
+0 four dots before the flip. `window/m2int_wxA6_spxA7_m3stat_4` [Cgb] is the
+row: a carried ISR read at line 1 dot 264 with the projected flip at 266,
+wanting mode 3.
+
+Arm 8-spr-SS mirrors its DS twin — the render's flip already carries the
+window+sprite cost, so the exit is emergent (`2*flip + K`). **The corpus pins K
+only to a range:** `m3stat_4` needs `K > 4` (its read is rp 536 against
+2·266 = 532) and its `_5` sibling one M-cycle later needs `K < 14`; 6, 8, 10 and
+12 all score +1/−0 and 14 flips `_5`. The landed value is the middle of that
+bracket, not a measurement — a ROM reading inside it would fix it properly.
+
 ### The CGB `getLyReg` +1 window — MEASURED FLOOR
 
 `halt/m1int_ly_2` [Cgb] (ours `90`, want `91`) is the clean statement of the
