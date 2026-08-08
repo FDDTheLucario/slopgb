@@ -210,10 +210,15 @@ so reading the size from the deferred fetch-grid view — as the map/data bits d
 — looks like the obvious fix.
 
 It is not: taking `tall` from `render_lcdc`, either unconditionally or
-CGB-only, scores **0/0**. The size view at fetch time does not decide these
-rows. Look instead at the OAM-scan-time height (selection uses the value at
-dot 80) or at the tile-index bit-0 masking, both of which the ROM also
-perturbs.
+CGB-only, scores **0/0**. Nor is it the OAM-scan height: carrying the value
+each entry was SELECTED with (`scan_obj_size`, stored per sprite) into the
+fetch scores **0/−3** — the three `acid2` rows pin the fetch-time re-read that
+`fetch_sprite` already documents (a mid-mode-3 16 → 8 clear leaving `row >= h`).
+
+So both halves of the obvious "which LCDC.2 does the fetch see" question are
+eliminated, and these rows need a different angle: the misses sit in two bands
+(y 2-7 and y 136-141), which is worth explaining before another lever is
+tried.
 
 ### DMG-compat OBJ palettes take the DMG commit anchor (2026-08-06, +1/−0)
 
