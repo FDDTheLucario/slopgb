@@ -256,7 +256,12 @@ impl Ppu {
                 // reenable/enable) + the FF41 read laws keep the cc+0 `eff.lcdc` set
                 // above. Non-render / glitch lines set the view in lockstep.
                 if self.render.active && !self.glitch_line {
-                    self.render_lcdc_pending = Some((value, RENDER_LCDC_DELAY));
+                    let delay = if self.model.is_cgb() && !self.ds {
+                        RENDER_LCDC_MAP_DELAY
+                    } else {
+                        RENDER_LCDC_DELAY
+                    };
+                    self.render_lcdc_pending = Some((value, delay));
                 } else {
                     self.eff.render_lcdc = value;
                     self.render_lcdc_pending = None;

@@ -705,3 +705,41 @@ fn polled_bare_cgb_mode0_edge_is_five_dots_before_the_flip() {
         assert_eq!(read_mode(scx, edge), 0, "SCX {scx}: on the edge");
     }
 }
+
+/// A mid-mode-3 LCDC write reaches the BG fetcher's MAP-select bits one dot
+/// after the rest on CGB single speed (`RENDER_LCDC_MAP_DELAY` vs
+/// `RENDER_LCDC_DELAY`): the fetch grid reads the map byte a step ahead of the
+/// tile data. DMG and double speed land both views on the same dot.
+#[test]
+fn cgb_single_speed_map_select_lands_one_dot_after_the_data_bit() {
+    let view_after = |model: Model, ds: bool, dots: u16| {
+        let mut p = Ppu::new(model);
+        p.ds = ds;
+        p.write(0xFF40, 0x91); // LCD on, BG on, tile data 8000, maps 9800
+        run_to(&mut p, 1, 120); // mid mode 3
+        p.write(0xFF40, 0x91 | LCDC_BG_MAP | LCDC_TILE_DATA);
+        for _ in 0..dots {
+            p.tick();
+        }
+        p.eff.render_lcdc
+    };
+    for (model, ds) in [(Model::Cgb, false), (Model::Cgb, true), (Model::Dmg, false)] {
+        let late = model.is_cgb() && !ds;
+        let at3 = view_after(model, ds, 3);
+        assert_eq!(
+            at3 & LCDC_TILE_DATA,
+            LCDC_TILE_DATA,
+            "{model:?} ds={ds}: the data bit lands at dot 3"
+        );
+        assert_eq!(
+            at3 & LCDC_BG_MAP != 0,
+            !late,
+            "{model:?} ds={ds}: the map bit waits one more dot only on CGB SS"
+        );
+        assert_eq!(
+            view_after(model, ds, 4) & LCDC_BG_MAP,
+            LCDC_BG_MAP,
+            "{model:?} ds={ds}: the map bit has landed by dot 4"
+        );
+    }
+}

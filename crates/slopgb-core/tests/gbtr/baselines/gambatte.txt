@@ -837,10 +837,6 @@ gambatte/window/on_screen/late_wx_ds_2.gbc [Cgb]
 #    documented ds swaps.
 #  - window/late_* + enable_display/bgtilemap edge rows: one-dot
 #    placement of the un-flip refire and the lcd-enable line-1 grid.
-gambatte/bgtilemap/bgtilemap_spx09_1.gbc [Cgb]
-gambatte/bgtilemap/bgtilemap_spx09_2.gbc [Cgb]
-gambatte/bgtilemap/bgtilemap_spx09_3.gbc [Cgb]
-gambatte/bgtilemap/bgtilemap_spx09_4.gbc [Cgb]
 gambatte/enable_display/ly0_late_scx7_m3stat_scx1_2_dmg08_cgb04c_out84.gbc [Cgb]
 gambatte/enable_display/ly0_late_scx7_m3stat_scx1_2_dmg08_cgb04c_out84.gbc [Dmg]
 gambatte/lcd_offset/offset1_lyc99int_m0stat_count_scx3_1_cgb04c_out90.gbc [Cgb]
@@ -1036,3 +1032,11 @@ gambatte/scy/scy_during_m3_ds_5.gbc [Cgb]
 # m1/lycint{143_m1irq,_vblankirq}_late_retrigger_2 (+4/-0); an unscoped CGB
 # widening costs lyc153int_m2irq_late_retrigger_1 [Cgb] instead. See
 # docs/hardware-state/cpu-interrupts.md "Dispatch-ack source sync-ahead".
+# --- CGB single-speed map-select fetch view (2026-08-06) ---
+# A mid-mode-3 LCDC write reaches the BG fetcher's MAP-select bits (bit3/bit6)
+# one dot after its data-select bit on CGB single speed — the map byte is read
+# a fetch step ahead of the tile data (`RENDER_LCDC_MAP_DELAY` 4 vs
+# `RENDER_LCDC_DELAY` 3). Lifted bgtilemap_spx09_{1..4} [Cgb] here plus the
+# four mealybug m3_lcdc_{bg,win}_map_change{,2} [Cgb] photos (+8/-0). A uniform
+# delay of 4 costs the bgtiledata_spx* rows (+8/-34) and an unscoped per-bit
+# split costs the DMG + _ds map rows (+8/-8); both are measured.

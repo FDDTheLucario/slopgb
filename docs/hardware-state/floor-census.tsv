@@ -35,10 +35,6 @@ gambatte/bgtiledata/bgtiledata_spx09_ds_3.gbc [Cgb]	gambatte	gambatte/bgtiledata
 gambatte/bgtiledata/bgtiledata_spx09_ds_4.gbc [Cgb]	gambatte	gambatte/bgtiledata	Cgb	16px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/bgtilemap/bgtilemap_spx08_ds_1.gbc [Cgb]	gambatte	gambatte/bgtilemap	Cgb	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/bgtilemap/bgtilemap_spx08_ds_4.gbc [Cgb]	gambatte	gambatte/bgtilemap	Cgb	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/bgtilemap/bgtilemap_spx09_1.gbc [Cgb]	gambatte	gambatte/bgtilemap	Cgb	128px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/bgtilemap/bgtilemap_spx09_2.gbc [Cgb]	gambatte	gambatte/bgtilemap	Cgb	128px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/bgtilemap/bgtilemap_spx09_3.gbc [Cgb]	gambatte	gambatte/bgtilemap	Cgb	128px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
-gambatte/bgtilemap/bgtilemap_spx09_4.gbc [Cgb]	gambatte	gambatte/bgtilemap	Cgb	128px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/bgtilemap/bgtilemap_spx09_ds_1.gbc [Cgb]	gambatte	gambatte/bgtilemap	Cgb	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/bgtilemap/bgtilemap_spx09_ds_4.gbc [Cgb]	gambatte	gambatte/bgtilemap	Cgb	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/cgbpal_m3/cgbpal_read_m3start_ds_1_cgb04c_out00.gbc [Cgb]	gambatte	gambatte/cgbpal_m3	Cgb	FF	00	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
@@ -276,8 +272,6 @@ gbmicrotest/stat_write_glitch_l154_d.gb [Dmg]	gbmicrotest	gbmicrotest	Dmg	0xe1	0
 mealybug-tearoom-tests/dma/hdma_timing-C.gb [Cgb]	mealybug	mealybug/dma	Cgb	B=42,C=42,D=42,E=42,H=42,L=42	fib:03/05/08/0D/15/22	unknown	hw-photo:mealybug-png	BUG	hardware-captured want; SameBoy verdict unmeasured
 mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb [Cgb]	mealybug	mealybug/ppu	Cgb	678px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb [Dmg]	mealybug	mealybug/ppu	Dmg	4px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
-mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	192px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
-mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change2.gb [Cgb]	mealybug	mealybug/ppu	Cgb	109px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb [Dmg]	mealybug	mealybug/ppu	Dmg	146px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb [Cgb]	mealybug	mealybug/ppu	Cgb	224px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb [Dmg]	mealybug	mealybug/ppu	Dmg	202px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
@@ -290,8 +284,6 @@ mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change2.gb [Cgb]	mealybug	mealybug/p
 mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	652px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
 mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change2.gb [Cgb]	mealybug	mealybug/ppu	Cgb	272px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
 mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Dmg]	mealybug	mealybug/ppu	Dmg	175px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
-mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	60px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
-mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change2.gb [Cgb]	mealybug	mealybug/ppu	Cgb	70px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	32px-diff	reference-png	PASS	hw-photo:mealybug-png	BUG	SameBoy reproduces the captured value; we do not
 mealybug-tearoom-tests/ppu/m3_scy_change.gb [Cgb]	mealybug	mealybug/ppu	Cgb	493px-diff	reference-png	FAIL	hw-photo:mealybug-png	EXCEED	hardware-captured want that SameBoy also misses
 mooneye-test-suite/madness/mgb_oam_dma_halt_sprites.gb [Mgb]	mooneye2022	mooneye2022/madness	Mgb	11523px-diff	reference-png	unknown	hw-mooneye	BUG	hardware-captured want; SameBoy verdict unmeasured

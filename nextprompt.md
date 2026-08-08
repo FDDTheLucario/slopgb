@@ -2,14 +2,15 @@ slopgb — next task: keep differencing the PPU read frame against SameBoy
 
 ## Repo state (verified 2026-08-06)
 
-`main` @ `27b63ab9`, clean tree, no open branch.
+`main` @ HEAD (see the table below), clean tree, no open branch.
 
-gbtr **221/221** with **335** baselined floor cases (was 349 two sessions ago);
-mooneye **93/93** suite tests (439/439 rom×model); core lib **912**; frontend **676**;
+gbtr **221/221** with **327** baselined floor cases (was 349 at the start of this
+run); mooneye **93/93** suite tests (439/439 rom×model); core lib **913**;
+frontend **676**;
 clippy + fmt clean; `golden_fingerprint` recaptured (13 cases drifted, all in
 the CGB STAT-read cluster, no verdict changes).
 
-`docs/hardware-state/floor-census.tsv` is current: 334 rows, **241** with a
+`docs/hardware-state/floor-census.tsv` is current: 326 rows, **233** with a
 SameBoy verdict (the CGB classifier was writing where nobody read — fixed in
 `bb755f63`, which is what raised coverage from 78). Chaseable = SameBoy PASS +
 we fail:
@@ -74,10 +75,15 @@ pinned to the M-cycle by a rung pair that reads at the same absolute instant.
 It drives every line's mode-3 length, so it needs a full-corpus A/B — that is
 the work, not the diagnosis.
 
-Otherwise: `bgtilemap`/`bgtiledata`/`scx_during_m3` (19 chaseable together) are
-pixel-reference rows, so difference SameBoy's framebuffer against ours rather
-than a register read; `dma`'s remaining 15 are the HDMA-seam / speed-switch
-families (class B), a different mechanism from anything here.
+The pixel-reference vein just paid and is not exhausted: diff the frame per
+row (`cargo run -p slopgb-core --example dump_gambatte_frame`, then compare
+against the sibling `_cgb04c.png`) and read WHERE the pixels differ — the
+`bgtilemap_spx09` rows put their whole error in one tile column, which named the
+mechanism immediately. Still open in that family: `bgtiledata_spx*_ds`,
+`bgtilemap_spx0{8,9}_ds`, `scx_during_m3` (7).
+
+`dma`'s remaining 15 are the HDMA-seam / speed-switch families (class B), a
+different mechanism from anything here.
 
 Gate every row through both references before investing in it — a row SameBoy
 also fails is class G and is not chaseable.
@@ -102,3 +108,4 @@ also fails is class G and is not chaseable.
 | `bb755f63` | the CGB classifier now writes where `census.py` reads | +167 measured |
 | `4a3f540b` | three `lcd_offset`/`enable_display` families differenced: two measured floors, one localized render bug | 0 |
 | `27b63ab9` | the CGB line-start dispatch-ack widening applies except on line 0 (CGB decouples its line-0 emission to dot 4) | +4 |
+| (this commit) | a mid-mode-3 LCDC write reaches the fetcher's MAP-select bits one dot after its data-select bit, CGB single speed | +8 |

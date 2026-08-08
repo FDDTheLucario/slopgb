@@ -58,8 +58,6 @@ mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Cgb]
 # [Dmg] bg_en/obj_en single-pixel legs are boundary-dot residue of the
 # LCDC.0/.1 mix gates.
 mealybug-tearoom-tests/ppu/m3_lcdc_bg_en_change.gb [Dmg]
-mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change.gb [Cgb]
-mealybug-tearoom-tests/ppu/m3_lcdc_bg_map_change2.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change.gb [Dmg]
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_obj_en_change_variant.gb [Dmg]
@@ -72,8 +70,6 @@ mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_change2.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_tile_sel_win_change2.gb [Cgb]
 mealybug-tearoom-tests/ppu/m3_lcdc_win_en_change_multiple_wx.gb [Dmg]
-mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Cgb]
-mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change2.gb [Cgb]
 
 # ppu/ mode-3 mid-scanline scroll writes (SCX/SCY). m3_scx_low_3_bits and
 # m3_scx_high_5_bits [Dmg] pass; the [Cgb] scroll legs are down to

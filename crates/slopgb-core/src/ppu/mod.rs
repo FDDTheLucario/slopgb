@@ -914,6 +914,16 @@ pub struct Ppu {
 /// +4 late, so the addressing view re-commits this many `Ppu::tick`s later.
 const RENDER_LCDC_DELAY: u8 = 3;
 
+/// The same deferral for the MAP-select bits (BG bit3 / window bit6) on CGB
+/// single speed, where they land one dot later than the data-select bit: the
+/// fetch grid reads the map byte one step ahead of the tile data, so the same
+/// mid-mode-3 write reaches the two views on different dots. Pinned by the
+/// gambatte `bgtilemap_spx09_{1..4}` [Cgb] rows and the hardware-captured
+/// mealybug `m3_lcdc_{bg,win}_map_change{,2}` [Cgb] photos, against the
+/// `bgtiledata_spx*` rows that fix the data bit at
+/// [`RENDER_LCDC_DELAY`]; DMG and double speed keep the common dot.
+const RENDER_LCDC_MAP_DELAY: u8 = 4;
+
 /// How far each side of a sprite's fetch trigger dot the OBJ-enable bit still
 /// decides that fetch, in PPU dots: LCDC.1 must be set for the whole run of
 /// this many dots ending on the trigger ([`Ppu::obj_fetch_enabled`]), and a

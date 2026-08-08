@@ -138,12 +138,27 @@ impl Ppu {
         // `stat_ev` staged copies): applied before this dot's `render_step` so
         // a bit3/bit4 write staged K dots ago drives the fetch grid from dot
         // W+K.
-        let apply_render_lcdc = if let Some((_, dots)) = &mut self.render_lcdc_pending {
+        // The MAP-select bits (BG bit3 / window bit6) land one dot after the
+        // rest on CGB single speed: the fetch grid reads the map byte a step
+        // ahead of the data bytes, so the same write reaches the two views on
+        // different dots (`RENDER_LCDC_MAP_DELAY`).
+        let map_late = self.model.is_cgb() && !self.ds;
+        let stage = if let Some((_, dots)) = &mut self.render_lcdc_pending {
             *dots -= 1;
-            *dots == 0
+            Some(*dots)
         } else {
-            false
+            None
         };
+        if map_late && stage == Some(RENDER_LCDC_MAP_DELAY - RENDER_LCDC_DELAY) {
+            let value = self.render_lcdc_pending.map_or(0, |(v, _)| v);
+            let old = self.eff.render_lcdc;
+            let map = LCDC_BG_MAP | LCDC_WIN_MAP;
+            self.eff.render_lcdc = (value & !map) | (old & map);
+            if old & LCDC_WIN_ENABLE != 0 && value & LCDC_WIN_ENABLE == 0 && self.render.active {
+                self.window_abort_render();
+            }
+        }
+        let apply_render_lcdc = stage == Some(0);
         if apply_render_lcdc {
             let value = self.render_lcdc_pending.take().map_or(0, |(v, _)| v);
             let old = self.eff.render_lcdc;

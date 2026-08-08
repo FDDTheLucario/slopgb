@@ -154,6 +154,31 @@ against the replay to find the missing term) — not a sixth guess at the setup.
   `obj_alignment_follows_a_left_edge_window_grid`.
 - The BG fetcher free-runs through every sprite stall (prefill included), with the line's first push waiting for the pause-aware startup walk (`push_allowed`), keeping pixel 0 on its stall-shifted dot.
 
+### The mid-mode-3 LCDC fetch view splits map from data (CGB single speed)
+
+A mid-mode-3 LCDC write reaches the BG fetcher's **map**-select bits (BG bit3 /
+window bit6) one dot after its **data**-select bit on CGB single speed —
+`RENDER_LCDC_MAP_DELAY` 4 against `RENDER_LCDC_DELAY` 3 — because the fetch grid
+reads the map byte a step ahead of the tile data, so one write lands on the two
+views at different dots. DMG and double speed keep the common dot.
+
+Derived by pixel-differencing, not swept: `bgtilemap_spx09_{1..4}` [Cgb] put
+their whole error in ONE tile column (x 16-23 on lines 1-15, x 144-151 on line
+0 — 8 px per line), and it is a one-tile-early switch to the new map, i.e. our
+fetch picked the write up one tile sooner than the reference. The three
+candidate scopes score:
+
+| lever | score |
+|---|---|
+| `RENDER_LCDC_DELAY` 3 → 4 (uniform) | +8 / −34 (kills the `bgtiledata_spx*` data-bit rows) |
+| map bits +1 dot, all models/speeds | +8 / −8 (kills the DMG + `_ds` map rows) |
+| **map bits +1 dot, CGB single speed** | **+8 / −0** |
+
+The +8 is `bgtilemap_spx09_{1..4}` [Cgb] plus the four hardware-captured
+mealybug photos `m3_lcdc_{bg,win}_map_change{,2}` [Cgb] — the photo agreement is
+what makes this a law rather than a fit. Unit test
+`cgb_single_speed_map_select_lands_one_dot_after_the_data_bit`.
+
 Parked: the rising-late CGB LCDC fetch view — tried and rejected. See the mealybug note below: it fits most `_cgb_c` photo columns but contradicts hardware-captured gambatte bgtiledata spx0B rows. Current law samples `eff` clean at the read dot on both families instead.
 
 ### Measured, NOT landed: the fine-scroll hunt latches one M-cycle early on the LCD-enable line (2026-08-06)
