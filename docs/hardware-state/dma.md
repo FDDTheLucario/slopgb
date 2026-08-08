@@ -367,3 +367,28 @@ eleven lost are currently green: `irq_precedence/late_hdma_vs_{ei,ie,tima}_scx{1
 - **Disproven: SameBoy's whole placement (service only after an opcode fetch).** It recovers the `late_hdma_vs_*` family and `hdma_{start_ly0,pc_7ffe}` but breaks the M-cycle-granular races the head placement models (`hdma_late_{destl,length,wrambank}_2`, `hdma_start[_scx*]_2`, `hdma_transition_{oamdma,halt_hdmadst_unhalt}`) — ~15 recovered for ~11 lost. Only the dispatch-hold half of it is kept above.
 - **Parked: SameBoy-derived VRAM wrap** — the old wrap behavior; superseded by terminating at the 0x10000 crossing (no VRAM wrap), per gambatte `dma_dst_wrap_2`.
 - **Parked: chasing the residual `_2`/`a-phase` parity rows with whole-dot timing** — these are documented swaps in `baselines/gambatte.txt`; they need sub-M-cycle phase, so whole-dot timing won't close them.
+
+## Measured: the late-HDMA block fires ~36 dots early in the line (2026-08-06)
+
+`dma/hdma_late_m3halt_m2unhalt_ly_scx{1,2}_*` is a six-rung ladder whose
+reference alternates LY `02/03/02/03/02/03`; we produce `02/03/02/**02**/02/03`
+— only rung 4 misses (same for the three-rung `_inc_scx{1,2}` ladder at rung 2).
+The rungs move the FF44 read by one M-cycle each.
+
+Differenced against SameBoy (`SB_TRACE`, absolute `fp`; note `--length 4`, the
+length `classify_pixel.py` uses — at `--length 3` the tester reports "Boot ROM
+did not finish" and never runs the kernel, which reads as a false floor):
+
+| | SameBoy | slopgb |
+|---|---|---|
+| HBlank block end (rungs 3+4) | fp 26319612 | — |
+| rung 3 read | fp 26319616 (+2 dots) → LY **2** | line 2 dot 416 → LY 2 |
+| rung 4 read | fp 26319624 (+6 dots) → LY **3** | line 2 dot 420 → LY 2 |
+
+So SameBoy's two reads sit 4 dots apart and STRADDLE the line 2→3 boundary: its
+deferred block retires within ~6 dots of the line end. Ours retires ~36 dots
+earlier, so both rungs land short of the boundary and rung 4 reads the old LY.
+The error is not a sub-dot phase — it is where the halt-deferred HBlank block
+lands inside the line (floor class B, the speed-switch/HDMA seam). Fixing it
+means moving that retire dot, which the `dma` cycle/seam rows bracket from the
+other side; do not sweep it without re-running the whole `dma` cluster.

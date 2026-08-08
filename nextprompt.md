@@ -107,6 +107,18 @@ different mechanism from anything here.
 Gate every row through both references before investing in it — a row SameBoy
 also fails is class G and is not chaseable.
 
+## Also differenced, no lift (measured, don't re-sweep)
+
+`dma/hdma_late_m3halt_m2unhalt_ly_*` — the six-rung ladder misses only at rung 4
+because our halt-deferred HBlank block retires ~36 dots earlier in the line than
+SameBoy's, whose two adjacent reads straddle the line 2→3 boundary. Floor class
+B; the numbers are in `docs/hardware-state/dma.md`.
+
+**Rig note:** run `sameboy_tester` at `--length 4`. Shorter runs can cut its boot
+ROM (`Boot ROM did not finish`), which looks exactly like a SameBoy failure and
+manufactures false floors — it cost a wrong verdict here before the `.log` was
+checked.
+
 ## Constraints
 
 - **Zero regressions.** Growing a baseline is a regression.
@@ -127,4 +139,4 @@ also fails is class G and is not chaseable.
 | `bb755f63` | the CGB classifier now writes where `census.py` reads | +167 measured |
 | `4a3f540b` | three `lcd_offset`/`enable_display` families differenced: two measured floors, one localized render bug | 0 |
 | `27b63ab9` | the CGB line-start dispatch-ack widening applies except on line 0 (CGB decouples its line-0 emission to dot 4) | +4 |
-| (this commit) | a mid-mode-3 LCDC write reaches the fetcher's MAP-select bits one dot after its data-select bit, CGB single speed | +8 |
+| `d3daeaff` | a mid-mode-3 LCDC write reaches the fetcher's MAP-select bits one dot after its data-select bit, CGB single speed | +8 |

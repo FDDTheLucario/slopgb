@@ -32,6 +32,11 @@ refuse to run without a
 `sameboy_tester` (`SBT=` overrides the path) — classifying with a missing tester
 is a vacuous result, not a bar.
 
+**Always run the tester at `--length 4`,** the length the classifiers use. At
+`--length 3` or less it can cut its own boot ROM (`Boot ROM did not finish` in
+the `.log`, no kernel events in the trace), which reads as "SameBoy fails this
+row too" when SameBoy in fact passes it.
+
 ## `hramdump.c` — gbmicrotest HRAM verdict reader
 
 The stock SameBoy `sameboy_tester` is built for *games*: it mashes Start/A to
