@@ -11,6 +11,7 @@ verdict, on-screen glyphs, or a pixel reference — so there is one tool per sha
 | `classify_cgb_regr.py` | gambatte glyph rows, CGB: OCRs the tester's BMP and compares against the `cgb04c_out<hex>` want in the filename |
 | `classify_dmg.py` | the same for DMG (`dmg08_out<hex>` / the shared `dmg08_cgb04c_out<hex>` form), with the +1px DMG glyph x-shift trial |
 | `classify_pixel.py` | pixel-reference legs (gambatte/mealybug): palette-quantized diff of the tester's BMP against the sibling reference PNG. Needs `numpy` + `Pillow`. |
+| `mooneyerun.c` + `classify_fib.py` | the MOONEYE-protocol rows (`fib:` wants — the wilbertpol and age legs). Those ROMs report in REGISTERS at `LD B,B`, so no screen reader can reach them; the runner reports B,C,D,E,H,L and the classifier turns that into the usual verdict files. |
 | `pixel_gate.py` | splits OUR failing pixel rows into GEOMETRY misses (chaseable) and COLOUR-only ones (an unwritten palette entry — class F). Same rank metric, applied to our own frame; needs `DUMP=` pointing at the `dump_gambatte_frame` example. |
 
 **A pixel row's `sameboy` verdict is weaker than a glyph row's.** `classify_pixel.py`
@@ -36,6 +37,36 @@ is a vacuous result, not a bar.
 `--length 3` or less it can cut its own boot ROM (`Boot ROM did not finish` in
 the `.log`, no kernel events in the trace), which reads as "SameBoy fails this
 row too" when SameBoy in fact passes it.
+
+## `mooneyerun.c` — mooneye-protocol register reader
+
+Same shape as `hramdump.c`, for the 62 census rows that report a Fibonacci
+register signature instead of a screen. Two traps it had to work around, both
+worth knowing for any new SameBoy harness:
+
+* the debugger's software breakpoint must stay DISABLED (a trapped `LD B,B`
+  freezes the run), and `GB_safe_read_memory` — the obvious way to spot the
+  opcode at PC instead — **segfaults on the CGB models**. The runner polls the
+  register signature per step instead, so it answers "does SameBoy pass" rather
+  than "what did SameBoy print", which is exactly what a gate needs;
+* `GB_set_rgb_encode_callback` is REQUIRED. Leaving it unset segfaults every CGB
+  run (the stock tester installs one, `Tester/main.c`); `hramdump.c` gets away
+  without it only because it is used on DMG.
+
+### Build + run
+
+```sh
+docs/sameboy-port/tools/build_sameboy_tracers.sh   # once, from the repo root
+cd ~/.cache/sbbuild/SameBoy-1.0.2
+cp <repo>/docs/sameboy-port/tools/mooneyerun.c .
+clang -I. -std=gnu11 -D_GNU_SOURCE -DGB_VERSION='"1.0.2"' -DGB_COPYRIGHT_YEAR='"2025"' \
+      -D_USE_MATH_DEFINES -fPIC -O2 -Wno-deprecated-declarations \
+      mooneyerun.c build/obj/Core/*.c.o -lm -o /tmp/s7/mooneyerun
+/tmp/s7/mooneyerun --cgb <rom.gb>     # boot ROMs resolve relative to the CWD
+```
+
+Output: `<rom> B=03 C=05 D=08 E=0D H=15 L=22 PASS`. `census.py` drives it through
+`classify_fib.py`; run the census with `MOONEYERUN=` set if it lives elsewhere.
 
 ## `hramdump.c` — gbmicrotest HRAM verdict reader
 

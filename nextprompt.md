@@ -10,7 +10,7 @@ frontend **676**;
 clippy + fmt clean; `golden_fingerprint` recaptured (13 cases drifted, all in
 the CGB STAT-read cluster, no verdict changes).
 
-`docs/hardware-state/floor-census.tsv` is current: 326 rows, **233** with a
+`docs/hardware-state/floor-census.tsv` is current: 326 rows, **295** with a
 SameBoy verdict (the CGB classifier was writing where nobody read — fixed in
 `bb755f63`, which is what raised coverage from 78). Chaseable = SameBoy PASS +
 we fail:
@@ -57,6 +57,25 @@ gambatte builds the same way and is worth instrumenting for a second opinion
 (`LCD::getStat`, `m0TimeOfCurrentLine`) but it is NOT the oracle: it passed
 these rows with an m0 time 2 dots off SameBoy's edge and its own `cc + 2`
 read lead cancelling it.
+
+## NEW: 54 rows just became chaseable
+
+The mooneye-protocol rows (`fib:` wants — wilbertpol + age) report in REGISTERS,
+so no screen classifier could reach them and all 62 sat `unknown`.
+`mooneyerun.c` + `classify_fib.py` now gate them (wired into `census.py`):
+**54 of the 62 are SameBoy-PASS**, so the census went 233 → 295 verdicts and
+the chaseable population 118 → 154. Untouched ground, and the biggest single
+block is 24 rows of `intr_2_mode0_timing_sprites_scx{1,2,3,4}_nops` across six
+models plus 18 age rows (`oam-read/write`, `stat-mode*`, `vram-read`,
+`spsw-mode0`).
+
+Read the two caveats before acting on them: the wilbertpol `intr_2_mode0`
+family is the documented cross-oracle swap (siding with gambatte forfeits
+gbmicrotest rows — see the baseline header), and `census.py` now WARNS that
+these rows are bucketed JUNK yet SameBoy passes them, which means they must
+never be exempted. But "SameBoy passes it" is new information for all 54, and
+the age rows in particular are hardware-captured expectations with no such
+trade attached.
 
 ## Already differenced this session — do NOT re-sweep these
 

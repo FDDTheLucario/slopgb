@@ -187,8 +187,13 @@ _PIXEL_SUFFIXES = (('_pass.txt', 'PASS'), ('_fail.txt', 'FAIL'),
 
 def sameboy_verdicts(rows, workdir):
     """{(rel, model): verdict} for every row a classifier can measure."""
-    cgb, dmg, pixel = [], [], []
+    cgb, dmg, pixel, fib = [], [], [], []
     for rel, model, detail in rows:
+        # Mooneye-protocol rows report in REGISTERS, not on screen, so neither
+        # OCR classifier can reach them (`classify_fib.py` runs them instead).
+        if 'fib:' in detail or 'Fibonacci' in detail:
+            fib.append(f"{rel} [{model}]")
+            continue
         # The pixel classifier resolves reference PNGs for the gambatte and
         # mealybug trees; acid ships its references the same way.
         is_png = '.png' in detail or 'pixel(s) differ' in detail
@@ -198,8 +203,8 @@ def sameboy_verdicts(rows, workdir):
             cgb.append(rel)
         elif model == 'Dmg' and 'dmg08' in rel:
             dmg.append(rel)
-    print(f"  SameBoy: {len(cgb)} cgb, {len(dmg)} dmg, {len(pixel)} pixel rows",
-          file=sys.stderr)
+    print(f"  SameBoy: {len(cgb)} cgb, {len(dmg)} dmg, {len(pixel)} pixel, "
+          f"{len(fib)} fib rows", file=sys.stderr)
     by_model = {
         'Cgb': _run_classifier('classify_cgb_regr.py', cgb, workdir, 'cgb',
                                _OCR_SUFFIXES),
@@ -208,9 +213,12 @@ def sameboy_verdicts(rows, workdir):
     }
     pix = _run_classifier('classify_pixel.py', pixel, workdir, 'pixel',
                           _PIXEL_SUFFIXES)
+    fibv = _run_classifier('classify_fib.py', fib, workdir, 'fib', _OCR_SUFFIXES)
     out = {}
     for rel, model, _ in rows:
-        v = by_model.get(model, {}).get(rel) or pix.get((rel, model))
+        key = f"{rel} [{model}]"
+        v = (by_model.get(model, {}).get(rel) or pix.get((rel, model))
+             or fibv.get(key))
         out[(rel, model)] = v or 'unknown'
     return out
 
