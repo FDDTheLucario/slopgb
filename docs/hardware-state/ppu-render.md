@@ -199,6 +199,21 @@ two; the other 16 are genuine geometry misses. It also re-prioritises them —
 geometry core, while `scx_0360c0/scx_during_m3_ds_2` is the reverse (160 raw,
 11516 rank), i.e. our shade STRUCTURE differs there, not just a few pixels.
 
+### The obj-en-change rows miss in the X<8 prefill region (2026-08-06)
+
+`m3_lcdc_obj_en_change_variant` [Dmg] misses 202 px spread over 116 rows —
+almost all just ONE or TWO pixels per row, at **x 0-2**, ours white where the
+reference draws black. So the ROM's mid-line LCDC.1 toggling costs us sprite
+pixels only in the prefill region (OAM X < 8), where a sprite's fetch happens
+during the thrown-away first tile rather than on the normal fetch grid. Its
+sibling `m3_lcdc_obj_en_change` [Dmg] (146 px) has a rank mismatch far larger
+than its raw one, i.e. our frame there differs in distinct-colour STRUCTURE, so
+check it separately rather than assuming the same cause.
+
+The OBJ-enable window itself (`OBJ_ENABLE_LAG` = 4 dots, both edges) is pinned
+two-sided by the gambatte `sprite_late_{enable,disable}_spx18..1B` ladders, so
+the lever here is the prefill path's interaction with it, not the window width.
+
 ### `m3_bgp_change_sprites` [Cgb] is a BGP snapshot, not a palette (2026-08-06)
 
 678 px over ALL 144 rows, ~5 per row, ours black where the reference wants
