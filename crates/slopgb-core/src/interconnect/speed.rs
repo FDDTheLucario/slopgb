@@ -100,10 +100,10 @@ impl Interconnect {
                 // the enabled STAT source (`stat_src_hblank`) only there.
                 self.ack_squash_dots = if self.double_speed {
                     if self.ppu.stat_src_hblank() { 2 } else { 1 }
-                } else if !self.model.is_cgb()
-                    && (matches!(self.ppu.line_dot().0, 0 | 153) || self.ppu.line_dot().1 == 0)
+                } else if (matches!(self.ppu.line_dot().0, 0 | 153) || self.ppu.line_dot().1 == 0)
+                    && (!self.model.is_cgb() || self.ppu.line_dot().0 != 0)
                 {
-                    // DMG line-start emissions: on lines 0 and 153, and on any
+                    // Line-start emissions: on lines 0 and 153, and on any
                     // line's first dot, the LYC/OAM IF lands one M-cycle past
                     // this acknowledge (the dot-4 LYC=153 emission decouple and
                     // the line-start OAM pulse both sit there), so the window
@@ -112,6 +112,18 @@ impl Interconnect {
                     // `lyc153int_m2irq_late_retrigger_2`,
                     // `m1/lycint{143_m1irq,_vblankirq}_late_retrigger_2`, want
                     // E0) while their `_1` siblings still DELIVER.
+                    //
+                    // CGB excludes LINE 0, where its own emissions are already
+                    // decoupled to dot 4 — a full M-cycle past a dot-0
+                    // acknowledge, so the dispatch cannot fold them in and the
+                    // rise is delivered. The line-0 ack is
+                    // `lyc153int_m2irq_late_retrigger_1` [Cgb] (ack 0:0, want
+                    // 2 = delivered); the four rows the CGB widening lifts all
+                    // ack on line 153 or 144 (`lycint152_lyc0irq_2` at 153:8,
+                    // `lycint152_lyc153irq_2` at 153:0, `lycint143_m1irq_2` and
+                    // `lycint_vblankirq_2` at 144:0), where the emission is
+                    // co-instant with the ack. DMG keeps line 0: its line-0
+                    // pulse is not decoupled.
                     6
                 } else {
                     2

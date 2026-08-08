@@ -133,9 +133,7 @@ gambatte/ly0/lycint152_ly0stat_2_dmg08_cgb04c_outC0.gbc [Cgb]	gambatte	gambatte/
 gambatte/ly0/lycint152_ly153_ds_1_cgb04c_out98.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	99	98	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/ly0/lycint152_ly153_ds_4_cgb04c_out99.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	00	99	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/ly0/lycint152_lyc0flag_4_dmg08_cgb04c_outC0.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	C4	C0	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/ly0/lycint152_lyc0irq_late_retrigger_2_dmg08_cgb04c_outE0.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	E2	E0	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/ly0/lycint152_lyc153flag_3_dmg08_cgb04c_outC1.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	C5	C1	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/ly0/lycint152_lyc153irq_late_retrigger_2_dmg08_cgb04c_outE0.gbc [Cgb]	gambatte	gambatte/ly0	Cgb	E2	E0	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/lyc153int_m2irq/lyc153int_m2irq_ifw_1_dmg08_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/lyc153int_m2irq	Cgb	0	2	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/lycEnable/ff45_enable_weirdpoint_ds_2_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/lycEnable	Cgb	3	1	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/lycEnable/ff45_enable_weirdpoint_ds_3_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/lycEnable	Cgb	3	1	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
@@ -167,8 +165,6 @@ gambatte/m1/ly143_late_m0enable_2_dmg08_out3_cgb04c_out1.gbc [Cgb]	gambatte	gamb
 gambatte/m1/ly143_late_m2enable_ds_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/m1	Cgb	1	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/m1/ly143_late_m2enable_ds_lcdoffset1_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/m1	Cgb	1	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/m1/lyc143_late_m2enable_lycdisable_ds_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/m1	Cgb	1	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/m1/lycint143_m1irq_late_retrigger_2_dmg08_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/m1	Cgb	3	1	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/m1/lycint_vblankirq_late_retrigger_2_dmg08_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/m1	Cgb	1	0	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/m1/m1irq_late_enable_2_dmg08_out2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/m1	Cgb	2	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/m1/m1irq_late_enable_ds_lcdoffset1_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/m1	Cgb	2	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/m1/m1irq_m0disable_2_dmg08_out3_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/m1	Cgb	3	1	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses

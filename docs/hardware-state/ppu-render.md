@@ -176,9 +176,17 @@ the `_1` rung passes only because its read lands short of our flip anyway. Our
 threshold sits one M-cycle early: `scx0_1` (write dot 80) latches 7 while
 `scx1_1` (write dot 84) latches 1. The latch dot is base-SCX dependent (the hunt
 is a live position comparator — `scx3_1`, also written at dot 84, does take 7),
-so this is a comparator-position fix in `render.rs`, not a constant. Not
-attempted: the hunt drives every line's mode-3 length, so it needs its own
-A/B pass over the whole corpus.
+so this is a comparator-position fix in `render.rs`, not a constant.
+
+**Refuted, measured — do not retry:** delaying the glitch line's hunt start by
+one dot (`mode3_dot >= 6` when `glitch_line`). It leaves `scx1_2` at `87` on
+both models and costs `scx3_2` [Dmg] (84 → 87), because the row needs *two*
+coupled changes, not one: the write at dot 84 must take the new SCX (lengthening
+`scx1_1`'s mode 3, which our model shares with `scx1_2`) **and** the old-value
+enable-line flip must land at or before 252 so the read at dot 248 sees mode 0
+under the glitch line's 4-dot `early_lead`. Both need SameBoy's enable-line
+mode-3 entry and flip measured per (base SCX, write dot) first — that
+measurement, not another knob, is the next step here.
 
 ## Mealybug ppu state
 

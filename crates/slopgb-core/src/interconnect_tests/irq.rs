@@ -211,14 +211,16 @@ fn dispatch_ack_squash_is_per_source() {
     assert_eq!(b.read_no_tick(0xFF0F) & 0x08, 0x08);
 }
 
-/// STAT/VBlank rises are consumed only within the two dots left of the
-/// acknowledge's own M-cycle at single speed. The vblank rise is a
-/// line-anchored event emitted in the *second half* of its M-cycle, so an
-/// acknowledge two whole cycles earlier never reaches it (gambatte
-/// m2int_m2irq_late_retrigger_1 and
-/// irq_precedence/late_m0irq_retrigger_scx1_1 pin the keeps; the consumed
-/// cases live on the `*_late_retrigger_ds_2` rows, where the window spans the
-/// whole double-speed tick, and on the mode-0 rise's early-dot grid).
+/// A single-speed STAT/VBlank rise is consumed only within the acknowledge's
+/// own window: the base two dots, or the six a line-start acknowledge takes
+/// (see `ack_impl`). The vblank rise is line-anchored and emitted in the
+/// *second half* of its M-cycle, so an acknowledge two whole cycles earlier
+/// never reaches it on either model (gambatte m2int_m2irq_late_retrigger_1 and
+/// irq_precedence/late_m0irq_retrigger_scx1_1 pin those keeps). One cycle out,
+/// the two models split only in *why* they consume it: DMG lands inside the
+/// base window, CGB inside the line-144 widening
+/// (`m1/lycint_vblankirq_late_retrigger_2` [Cgb] acks at 144:0 with the rise at
+/// 144:4 and wants it consumed — the widening's own pin).
 #[test]
 fn dispatch_ack_does_not_reach_single_speed_line_anchored_rises() {
     for model in [Model::Dmg, Model::Cgb] {
@@ -240,11 +242,10 @@ fn dispatch_ack_does_not_reach_single_speed_line_anchored_rises() {
             ticks(&mut b, rise - gap);
             b.ack(0);
             ticks(&mut b, gap);
-            // The DMG vblank rise lands in the first 2 dots of the tick after
-            // a gap-1 acknowledge, inside the window; the CGB line timeline
-            // puts its rise a dot further in, past the window. Gap 2 is a
-            // whole cycle further out on both and the IF is kept.
-            let expect = if gap == 1 && !model.is_cgb() { 0 } else { 0x01 };
+            // A gap-1 acknowledge reaches the rise on both models (DMG through
+            // the base 2-dot window, CGB through the line-144 widening); gap 2
+            // is a whole cycle further out and the IF is kept.
+            let expect = if gap == 1 { 0 } else { 0x01 };
             assert_eq!(b.read_no_tick(0xFF0F) & 0x01, expect, "{model:?} gap {gap}");
         }
     }
@@ -297,4 +298,29 @@ fn serial_transfer_requests_if_bit3() {
     ticks(&mut b, 8 * 128 + 2);
     assert_eq!(b.read(0xFF0F) & 0x08, 0x08);
     assert_eq!(b.read(0xFF01), 0xFF);
+}
+
+/// The line-start acknowledge widening skips CGB line 0. On CGB the line-0
+/// LYC/OAM emission is decoupled to dot 4, a whole M-cycle past a dot-0
+/// acknowledge, so the dispatch cannot fold that rise in and it is DELIVERED
+/// (`lyc153int_m2irq_late_retrigger_1` [Cgb], ack at 0:0, want 2); the same
+/// acknowledge on line 153 or 144 sits co-instant with its emission and the
+/// widened window consumes it (`ly0/lycint152_lyc{0,153}irq_late_retrigger_2`,
+/// `m1/lycint{143_m1irq,_vblankirq}_late_retrigger_2`). DMG keeps line 0 — its
+/// pulse is not decoupled.
+#[test]
+fn cgb_line0_acknowledge_takes_no_line_start_widening() {
+    let widen = |model: Model, line: u8| {
+        let mut b = ic(model);
+        b.write_no_tick(0xFF40, 0x91);
+        while b.ppu.line_dot() != (line, 0) {
+            b.tick();
+        }
+        b.ack(1);
+        b.ack_squash_dots
+    };
+    assert_eq!(widen(Model::Cgb, 0), 2, "CGB line 0: no widening");
+    assert_eq!(widen(Model::Cgb, 153), 6, "CGB line 153: widened");
+    assert_eq!(widen(Model::Cgb, 144), 6, "CGB line 144: widened");
+    assert_eq!(widen(Model::Dmg, 0), 6, "DMG line 0 keeps the widening");
 }
