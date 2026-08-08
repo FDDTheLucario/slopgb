@@ -169,18 +169,23 @@ differing columns like the `bgtilemap_spx09` fix.
 Everything else single-speed is one or two rows in a cluster whose siblings are
 `_ds`, i.e. likely the same class-A floor seen from the single-speed side.
 
-## The prefill sprite path — half a mechanism, ready to finish
+## The prefill sprite path — diagnosed, needs a port not a patch
 
 Three rows implicate it (`scx_during_m3_spx2`, `m3_lcdc_obj_en_change{,_variant}`
 [Dmg]). For the obj_en rows the cause is now traced: the sprite IS fetched
 during the prefill walk and lands in the FIFO with colour 1, then OUR MIXER
 drops it because the draw-time OBJ-enable gate reads low at the pop — the drop
-dots match the missing pixels exactly. Exempting prefill-fetched pixels from
-that gate (DMG only — CGB needs the gate, 0/−1 without the scope) takes the
-variant 202 → 182 px and `obj_en_change` 146 → 126, collapsing the latter's
-rank anomaly. Not landed: zero row flips so far, and the flag costs a
-save-state format change. Find the residual ~20 px per row, then land both
-halves together.
+dots match the missing pixels exactly.
+
+Read out of SameBoy's source (`display.c:704-730`): it gates at the pop against
+the LIVE LCDC, exactly as we do, but pops the OAM FIFO on EVERY pixel —
+discarded and off-screen included — with `position_in_line` advancing through
+the prefill. We hold `lx` and index the sprite FIFO by `slot = screen - lx`.
+Both patches were measured and rejected: the shift in the discard branch is
+0/0 (`discard == 0` on these lines), the shift through the prefill walk is
+**0/−11**. Taking SameBoy's gate means taking its position accounting too —
+a port of the prefill walk, scored against the whole sprite corpus, not a
+local fix. Do not attempt it as a patch.
 
 ## Localized, one measurement from a fix
 

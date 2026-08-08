@@ -235,10 +235,27 @@ different INSTANT than the pop. Gating them on the enable state at FETCH time
 is not that instant either: it is trivially true (the fetch is already gated by
 `obj_fetch_enabled`), and scores the same 182/126.
 
-What is needed is the pop-instant semantics for a pixel shifted out during the
-prefill walk, where `lx` has not started advancing — i.e. which dot's LCDC.1 a
-prefill pixel is judged against. Do not try more variants of the exemption
-without that.
+The pop-instant question is now answered from SameBoy's source, and the answer
+is STRUCTURAL rather than a constant. SameBoy gates OBJ pixels at the pop
+against the LIVE `LCDC` (`display.c:706`) — the same instant we use — but it
+pops the OAM FIFO on **every** pixel, discarded and off-screen ones included:
+the pop at `:704` runs before the fine-scroll block at `:712-730` and before
+the off-screen `return`, with `position_in_line` advancing through the whole
+prefill. Our prefill instead holds `lx` and indexes the sprite FIFO by
+`slot = screen - lx`, so nothing pops until the first real pixel.
+
+Both halves of the obvious port are measured and rejected: shifting the sprite
+FIFO in the DISCARD branch is **0/0** (these lines have `discard == 0`; the
+fine-scroll path is not what runs here), and shifting it through the PREFILL
+walk is **0/−11** — it breaks `m3_lcdc_{bg_map,win_map,tile_sel}_change`,
+`m3_obp0_change` and `m3_bgp_change_sprites` across both models, because our
+slot indexing already accounts for the pixels SameBoy pops.
+
+So the two models are each internally consistent and differ in their position
+accounting; taking SameBoy's gate semantics means taking its
+`position_in_line`-advancing prefill as well. That is a port of the prefill
+walk, not a patch, and it should be scored against the whole sprite corpus at
+once.
 
 ### `m3_bgp_change_sprites` [Cgb] is a BGP snapshot, not a palette (2026-08-06)
 
