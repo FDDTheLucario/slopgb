@@ -12,6 +12,17 @@ verdict, on-screen glyphs, or a pixel reference — so there is one tool per sha
 | `classify_dmg.py` | the same for DMG (`dmg08_out<hex>` / the shared `dmg08_cgb04c_out<hex>` form), with the +1px DMG glyph x-shift trial |
 | `classify_pixel.py` | pixel-reference legs (gambatte/mealybug): palette-quantized diff of the tester's BMP against the sibling reference PNG. Needs `numpy` + `Pillow`. |
 
+**A pixel row's `sameboy` verdict is weaker than a glyph row's.** `classify_pixel.py`
+maps each SameBoy pixel to the *nearest* reference-palette entry, which is what
+lets it compare emulators whose shades differ — but it therefore checks
+GEOMETRY, not colour identity. A row whose only fault is a wrong colour at the
+right position reads `PASS` even when SameBoy's frame plainly differs from the
+reference. Measured case: `gambatte/scx_during_m3/scx_during_m3_spx2` [Cgb],
+where SameBoy renders `(0,0,0)` against the reference's `(33,146,108)` and still
+classifies PASS (see the class-F note in
+[`../../hardware-state/ppu-render.md`](../../hardware-state/ppu-render.md)).
+Before investing in a pixel row, diff the actual colours.
+
 All three take `rowlist.txt outprefix` and write `<outprefix>_bug/_floor/_unk.txt`
 (`classify_cgb_regr.py` defaults the prefix to `/tmp/s7/cls` when it is run by
 hand) — that is the contract `census.py` reads them through, so a classifier that

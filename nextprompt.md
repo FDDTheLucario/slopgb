@@ -75,11 +75,13 @@ pinned to the M-cycle by a rung pair that reads at the same absolute instant.
 It drives every line's mode-3 length, so it needs a full-corpus A/B — that is
 the work, not the diagnosis.
 
-Next up in the pixel vein, already localized: `scx_during_m3_spx2` [Cgb] is one
-pixel (x=0, lines 0-7) and the mixer is innocent — the sprite wins there and
-both palette lookups return white, so the line's FIRST tile carries the wrong
-palette ATTRIBUTE under the X<8 sprite prefill freeze. See ppu-render.md "Open,
-localized: the first tile's BG attribute under an X<8 sprite".
+**Trust the census's `sameboy` column less on PIXEL rows than on glyph rows.**
+`classify_pixel.py` quantizes to the nearest reference-palette entry, so it
+verifies geometry, not colour: `scx_during_m3_spx2` [Cgb] classifies PASS while
+SameBoy actually renders `(0,0,0)` against the reference's `(33,146,108)`. That
+row turned out to be class F — its deciding pixel is an unwritten CGB palette
+entry holding the captured console's power-on garbage. Diff the actual colours
+(`SLOPGB_DUMP_PAL=1 … dump_gambatte_frame`) before investing in a pixel row.
 
 The pixel-reference vein just paid and is not exhausted: diff the frame per
 row (`cargo run -p slopgb-core --example dump_gambatte_frame`, then compare
