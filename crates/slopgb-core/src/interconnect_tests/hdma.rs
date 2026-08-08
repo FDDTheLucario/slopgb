@@ -354,13 +354,19 @@ fn halt_wake_inside_hblank_window_fires_block_once() {
     assert_eq!(b.peek_no_io(0x8010), 0x40);
 }
 
-/// Disabling the display kills an armed HBlank transfer: FF55 keeps
-/// reading "active" but no further block ever copies, even after the
-/// display returns (gambatte video.cpp lcdcChange: the disable branch
-/// parks every memevent, and only an armed-while-off transfer is
-/// re-anchored by the enable branch).
+/// Disabling the display retires ONE block of an armed HBlank transfer and
+/// then kills the arming: the LCD-off state is an HBlank as far as the DMA is
+/// concerned (the same reason arming while already off copies immediately —
+/// `hdma5_write`), so the pending block lands, but nothing further copies even
+/// after the display returns, and FF55 keeps reading "active".
+///
+/// The block is hardware-pinned by `gambatte/dma/hdma_disable_display_1`
+/// [Cgb], which arms `$80`, disables the LCD and reads the destination back
+/// wanting the copied value; its `_2` sibling, one M-cycle later, wants the
+/// pre-copy value and still passes. This test previously asserted no block at
+/// all, read off gambatte's lcdcChange source rather than the ROM.
 #[test]
-fn lcd_disable_kills_hblank_arming_but_not_ff55() {
+fn lcd_disable_retires_one_block_then_kills_the_arming() {
     let mut b = ic_cgb_mode();
     fill_wram(&mut b, 0xC000, 0x40, 0x20);
     setup_gdma_regs(&mut b, 0xC000, 0x0000);
@@ -368,11 +374,25 @@ fn lcd_disable_kills_hblank_arming_but_not_ff55() {
     b.write(0xFF55, 0x81); // armed with the LCD on, before any hblank
     b.write(0xFF40, 0x11); // display off
     ticks(&mut b, 300);
-    assert_eq!(b.peek_no_io(0x8000), 0x00, "arming died with the display");
-    assert_eq!(b.read(0xFF55), 0x01, "FF55 reads active (stale)");
+    assert_eq!(
+        b.peek_no_io(0x8000),
+        0x40,
+        "the pending block retires into the LCD-off hblank"
+    );
+    // One of the two armed blocks copied, so the stale-active count is one
+    // lower than it was armed with ($81 -> one block left, bit 7 clear).
+    assert_eq!(
+        b.read(0xFF55),
+        0x00,
+        "FF55 reads active (stale), one block spent"
+    );
     b.write(0xFF40, 0x91); // re-enabling does not revive it
     ticks(&mut b, 500);
-    assert_eq!(b.peek_no_io(0x8000), 0x00);
+    assert_eq!(
+        b.peek_no_io(0x8010),
+        0x00,
+        "no FURTHER block copies once the display returns"
+    );
 }
 
 /// The pending-block × speed-switch matrix (gambatte Memory::stop):

@@ -423,3 +423,26 @@ an active HBlank transfer — nothing is armed at that point — and the CPU's
 apparent 12-cycle crossing from `$7FFE` to `$8000` is an artefact of the probe
 printing PC before the step, so the GDMA stall lands after the print, not
 nowhere.)
+
+## Disabling the LCD retires one armed HBlank block (2026-08-06, +1/−0)
+
+Turning the display off while an HBlank transfer is armed used to kill the
+arming outright (`hdma_mode = Disabled`, no copy) on a reading of gambatte's
+`lcdcChange` disable branch. Hardware copies a block first:
+`dma/hdma_disable_display_1` [Cgb] arms `$80`, writes LCDC `$00` and reads the
+destination back wanting the COPIED value; its `_2` sibling, one M-cycle later,
+wants the pre-copy value and passes either way.
+
+The block is the same rule the arming path already had — with the LCD off the
+PPU is permanently "in hblank", which is why `hdma5_write` copies immediately
+when a transfer is armed while the display is already off. The disable
+transition now matches: request one block, then disable. The arming still does
+NOT survive (a re-enable copies nothing further) — no ROM pins revival, so the
+minimal change was taken.
+
+The unit test that asserted no block at all
+(`lcd_disable_kills_hblank_arming_but_not_ff55`) was written from the gambatte
+source rather than the ROM; it is now
+`lcd_disable_retires_one_block_then_kills_the_arming`, and its stale-FF55
+expectation drops from `$01` to `$00` because one of the two armed blocks has
+been spent.

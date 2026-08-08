@@ -457,6 +457,7 @@ impl Interconnect {
                     // the disable branch sets every memevent, including
                     // memevent_hdma, to disabled_time).
                     self.hdma_mode = HdmaMode::Disabled;
+                    self.vram_dma_req = Some(VramDmaReq::Hblank);
                 } else if !was_on && now_on && self.hdma_mode == HdmaMode::ArmedLcdOff {
                     // HBlank DMA armed while the LCD was off resumes at
                     // the new frame's mode-0 entries (gambatte

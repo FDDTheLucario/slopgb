@@ -556,7 +556,7 @@ gambatte/dma/hdma_cycles_scx5_ds_1_cgb04c_out3.gbc [Cgb] | 436064c86b6618d5 | b6
 gambatte/dma/hdma_cycles_scx5_ds_1_cgb04c_out3.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
 gambatte/dma/hdma_cycles_scx5_ds_2_cgb04c_out0.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/dma/hdma_cycles_scx5_ds_2_cgb04c_out0.gbc [Dmg] | 00e9c7f1d1b2b325 | b6b0632d997517d6
-gambatte/dma/hdma_disable_display_1_cgb04c_out1.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
+gambatte/dma/hdma_disable_display_1_cgb04c_out1.gbc [Cgb] | 08fd37feabdd933c | b6b0632d997517d6
 gambatte/dma/hdma_disable_display_1_cgb04c_out1.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/dma/hdma_disable_display_2_cgb04c_out0.gbc [Cgb] | 28ceffd1b2178f25 | b6b0632d997517d6
 gambatte/dma/hdma_disable_display_2_cgb04c_out0.gbc [Dmg] | 28ceffd1b2178f25 | b6b0632d997517d6
