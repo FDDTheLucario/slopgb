@@ -95,12 +95,8 @@ Reading it:
 
 * **one defect covers three rows** — `vram-read-dmgC` [Dmg],
   `vram-read-ncmBCE` [Cgb] and `oam-read-dmgC-cgbBC` [Dmg] share the exact
-  fingerprint (rungs 10/26/43/59 want `$FF`, get `01`/`09`), so our VRAM/OAM
-  read-block window is a dot narrow in one specific configuration, not a
-  per-suite mess;
-* the expected pattern is `FF` while blocked and the real byte when readable,
-  so every `wantFF/got<data>` is us UNBLOCKING TOO EARLY (or sampling a dot
-  late) — the failures are one-sided, which a whole-window shift would not be;
+  fingerprint (rungs 10/26/43/59 want `$FF`, get `01`/`09`), so those three are
+  one bug, not three;
 * `oam-write-dmgC`/`-ncmBCE` fail every 8th rung (#2, #10, #18 …) — periodic,
   so it is one edge repeated per block rather than a scatter;
 * `stat-int` wants `$82` and gets `$80` on five rungs: the mode-2 flag missing
@@ -109,7 +105,19 @@ Reading it:
   reach the checker ZERO times — their ladder bails before it, so they need
   the earlier phase traced, not a rung fixed.
 
-Do NOT move an accessibility edge for one ladder: mooneye `lcdon_timing-GS` and
-the gambatte `vram_m3` / `oam_access` rows pin the same edges from the other
-side. The value here is that a fix can now be aimed at a named rung and scored
-against this table.
+**What a rung value MEANS is still unknown, and the obvious reading is wrong.**
+`$FF` looks like "VRAM read blocked" and `01`/`09` like leaked tile data, which
+would make every failure a too-early unblock. It is not that: traced over the
+whole run, our VRAM reads return only `$FF` or `$00` and never `01`/`09`, so the
+buffer holds something the ladder computes (a count or delta), not raw read
+results. Decoding the measurement phase — where the buffer at `$C600` is filled,
+which is a batched flush well after the reads — is the next step, and it is a
+prerequisite for aiming any fix.
+
+Two levers were swept on the wrong reading and came back negative, which is
+worth knowing regardless: raising the `eager_access_released` constant (6 → 8,
+6 → 10) scores 0/−9 (the `oam_access`/`vram_m3`/`vramw_m3end` `postread`/
+`postwrite` rows pin it), and moving the DMG VRAM read lock from dot 80 to 76
+scores 0/−11 (mooneye `lcdon_timing-GS`, gbmicrotest `poweron_vram_*` /
+`vram_read_l1_a`, gambatte `preread`). Both edges are pinned two-sided; neither
+is where these ladders fail.

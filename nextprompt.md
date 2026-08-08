@@ -76,10 +76,13 @@ one (the table and how to read it: `docs/hardware-state/test-status.md`, "The
 age ladders — decoded"). The headline: `vram-read-dmgC` [Dmg],
 `vram-read-ncmBCE` [Cgb] and `oam-read-dmgC-cgbBC` [Dmg] share ONE fingerprint
 (rungs 10/26/43/59 want `$FF`, get real data), several rows are down to 2-3 bad
-rungs, and every failure is one-sided — we unblock a dot early rather than
-scatter. Aim a fix at a named rung and score it against that table; do not move
-an accessibility edge wholesale, since mooneye `lcdon_timing-GS` and the
-gambatte `vram_m3` / `oam_access` rows pin the same edges from the other side.
+rungs. What a rung VALUE means is still open, and the obvious reading (`$FF` =
+blocked, so we unblock early) is refuted — our VRAM reads never return the
+`01`/`09` the buffer holds, so it stores something computed. Decode the
+measurement phase (the `$C600` fill is batched well after the reads) before
+aiming a fix. Two edges are already eliminated by sweep: `eager_access_released`
+6 → 8/10 is 0/−9 and the DMG VRAM lock 80 → 76 is 0/−11, both pinned two-sided
+by mooneye `lcdon_timing-GS`, gbmicrotest and the gambatte access rows.
 
 That gate has already paid once: it showed the DMG-family
 `hblank_ly_scx_timing_variant_nops` legs were chaseable, which led to measuring
