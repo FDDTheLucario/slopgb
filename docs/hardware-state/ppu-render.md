@@ -154,6 +154,29 @@ against the replay to find the missing term) — not a sixth guess at the setup.
   `obj_alignment_follows_a_left_edge_window_grid`.
 - The BG fetcher free-runs through every sprite stall (prefill included), with the line's first push waiting for the pause-aware startup walk (`push_allowed`), keeping pixel 0 on its stall-shifted dot.
 
+### Open, localized: the first tile's BG attribute under an X<8 sprite (CGB)
+
+`scx_during_m3/scx_during_m3_spx2` [Cgb] misses by exactly **one pixel** — x=0
+on lines 0-7 — while its `spx0`/`spx1` siblings and its own [Dmg] leg pass. The
+reference wants `(33,146,108)` there, a *coloured* CGB palette entry; we emit
+white. Traced through the mixer, the pipeline is right and the palette is not:
+
+- the X=2 sprite IS fetched (line 0 dot 91, `lx` 0, data `lo=00 hi=7E`), so its
+  px 6 lands in `sp_fifo[0]` with colour 2 and px 7 (colour 0) in slot 1 — only
+  x=0 can show it;
+- at the pop (line 0 dot 105) the mixer has `sp0=2`, `sp_bgprio=false`,
+  `bg_attr=00`, LCDC `93`, so the sprite legitimately wins;
+- but BOTH lookups return white: `objcol` (OBJ palette 0, colour 2) and `bgcol`
+  (BG palette 0, colour 3) are `FFFFFF` in our palette RAM at that dot.
+
+So the wrong thing is the palette *selector*, not the mix: the reference's
+coloured pixel needs a BG attribute (or OBJ palette) other than 0 for the
+line's FIRST tile, which is exactly the column/attribute latch the mid-mode-3
+SCX write moves — and `scx_attrib_during_m3_spx2_ds` failing the same way says
+attributes, not colours. The fine-scroll discard is NOT involved: `discard` is 0
+on those lines (traced). Next step is the first tile's attribute fetch under the
+X<8 sprite prefill freeze, not the mixer.
+
 ### The mid-mode-3 LCDC fetch view splits map from data (CGB single speed)
 
 A mid-mode-3 LCDC write reaches the BG fetcher's **map**-select bits (BG bit3 /

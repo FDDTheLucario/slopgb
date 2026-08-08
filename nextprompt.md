@@ -75,6 +75,12 @@ pinned to the M-cycle by a rung pair that reads at the same absolute instant.
 It drives every line's mode-3 length, so it needs a full-corpus A/B — that is
 the work, not the diagnosis.
 
+Next up in the pixel vein, already localized: `scx_during_m3_spx2` [Cgb] is one
+pixel (x=0, lines 0-7) and the mixer is innocent — the sprite wins there and
+both palette lookups return white, so the line's FIRST tile carries the wrong
+palette ATTRIBUTE under the X<8 sprite prefill freeze. See ppu-render.md "Open,
+localized: the first tile's BG attribute under an X<8 sprite".
+
 The pixel-reference vein just paid and is not exhausted: diff the frame per
 row (`cargo run -p slopgb-core --example dump_gambatte_frame`, then compare
 against the sibling `_cgb04c.png`) and read WHERE the pixels differ — the
