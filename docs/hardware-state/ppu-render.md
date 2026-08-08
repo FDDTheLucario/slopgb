@@ -227,8 +227,18 @@ flag through `SpritePixel` changes the save-state format, which is not worth a
 `STATE_VERSION` bump for zero flips. The exemption must be CGB-excluded either
 way — applying it there costs `m3_lcdc_obj_en_change` [Cgb] (0/−1).
 
-The residual ~20 px per row is a second cause; find it before landing the
-first half.
+The residual ~20 px per row is the SAME gate over-applied in the other
+direction: with the blanket DMG exemption, rows 10-22 now draw sprite pixels
+at x 0-1 that hardware leaves white, while rows 24+ are fixed. So the rule is
+not "prefill pixels are exempt" — the gate still decides them, but at a
+different INSTANT than the pop. Gating them on the enable state at FETCH time
+is not that instant either: it is trivially true (the fetch is already gated by
+`obj_fetch_enabled`), and scores the same 182/126.
+
+What is needed is the pop-instant semantics for a pixel shifted out during the
+prefill walk, where `lx` has not started advancing — i.e. which dot's LCDC.1 a
+prefill pixel is judged against. Do not try more variants of the exemption
+without that.
 
 ### `m3_bgp_change_sprites` [Cgb] is a BGP snapshot, not a palette (2026-08-06)
 
