@@ -7,11 +7,18 @@ the complementary question about OUR frame: is the miss a shape difference, or
 only a colour one?
 
 A row whose raw mismatch is non-zero while its rank mismatch is zero differs
-from the reference only in colour. In practice that means the deciding pixel
-reads an UNWRITTEN CGB palette entry — power-on contents the reference asset
-captured from one particular console and no emulator reproduces (see
-`docs/hardware-state/ppu-render.md`, the class-F note). Those rows are not
-chaseable; the geometry ones are.
+from the reference only in COLOUR, at the right positions. What that means
+depends on the ROM:
+
+* for a row that does not touch palettes, it is usually an UNWRITTEN CGB
+  palette entry — power-on contents the reference captured from one console
+  and no emulator reproduces (class F, see `docs/hardware-state/ppu-render.md`);
+* but for a PALETTE-CHANGE ROM (`m3_bgp_change*`, `m3_obp0_change`, …) the
+  colour IS the observable, and a colour-only miss means our palette-write
+  timing is wrong — squarely chaseable.
+
+So the tool reports the shape of the miss; the class follows from what the ROM
+tests.
 
 Usage:
     cargo build -p slopgb-core --example dump_gambatte_frame
@@ -77,8 +84,13 @@ def rank(img):
 
 
 def reference(stem, model):
-    tagged = f"{stem}_{'cgb04c' if model == 'Cgb' else 'dmg08'}.png"
-    return tagged if os.path.exists(tagged) else f"{stem}.png"
+    # gambatte tags its references `_cgb04c` / `_dmg08`; mealybug ships
+    # `_cgb_c` / `_dmg_blob` (ARCHITECTURE.md's reference-selection table).
+    for tag in (('cgb04c', 'cgb_c') if model == 'Cgb' else ('dmg08', 'dmg_blob')):
+        cand = f"{stem}_{tag}.png"
+        if os.path.exists(cand):
+            return cand
+    return f"{stem}.png"
 
 
 def main():
@@ -94,13 +106,17 @@ def main():
             print(f"{rel:58s} [{model}] MISSING ASSET")
             continue
         ours = our_frame(rom, 'cgb' if model == 'Cgb' else 'dmg')
-        if model == 'Cgb':
+        # gambatte's assets are in its own CGB-to-RGB lut; mealybug's are the
+        # core's own output (CgbColorMap::Identity in the harness), so applying
+        # the lut there would report a whole-frame colour mismatch.
+        if model == 'Cgb' and 'mealybug' not in rel:
             ours = gambatte_rgb(ours)
         ref = np.array(Image.open(png).convert('RGB'))
         raw = int((((ours.astype(int) ^ ref.astype(int)) & 0xF8) != 0).any(axis=2).sum())
         geo = int((np.abs(rank(ours) - rank(ref)) > 0.5).sum())
-        verdict = 'COLOUR-ONLY (unwritten palette entry — class F)' if raw and not geo \
-            else ('match' if not raw else 'GEOMETRY (chaseable)')
+        verdict = 'COLOUR-ONLY (palette value/timing — class F only if the ROM ' \
+                  'writes no palettes)' if raw and not geo \
+            else ('match' if not raw else 'GEOMETRY')
         print(f"{rel:58s} [{model}] raw={raw:6d} geo={geo:6d}  {verdict}")
 
 
