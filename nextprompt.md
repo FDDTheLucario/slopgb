@@ -2,33 +2,33 @@ slopgb — next task: keep differencing the PPU read frame against SameBoy
 
 ## Repo state (verified 2026-08-06)
 
-`main` @ HEAD (see the table below), clean tree, no open branch.
+`main` @ `e58d2df7`, clean tree, no open branch.
 
-gbtr **221/221** with **321** baselined floor cases (was 349 at the start of this
+gbtr **221/221** with **321** baselined floor cases (349 at the start of this
 run); mooneye **93/93** suite tests (439/439 rom×model); core lib **913**;
-frontend **676**;
-clippy + fmt clean; `golden_fingerprint` recaptured (13 cases drifted, all in
-the CGB STAT-read cluster, no verdict changes).
+frontend **676**; clippy + fmt clean; `golden_fingerprint` recaptured after each
+lift, every drift confined to the rows that moved.
 
 `docs/hardware-state/floor-census.tsv` is current: 320 rows, **291** with a
-SameBoy verdict (the CGB classifier was writing where nobody read — fixed in
-`bb755f63`, which is what raised coverage from 78). Chaseable = SameBoy PASS +
-we fail:
+SameBoy verdict — up from 78 at the start of the run (the CGB classifier was
+writing where nobody read, `bb755f63`; the mooneye-protocol rows had no gate at
+all, `f71dace0`). Chaseable = SameBoy PASS + we fail, **150 rows**:
 
 | cluster | chaseable | | cluster | chaseable |
 |---|---|---|---|---|
-| `dma` | 15 | | `window` | 6 |
-| `mealybug/ppu` | 12 | | `lycEnable` | 6 |
-| `lcd_offset` | 8 | | `m1` | 5 |
-| `enable_display` | 8 | | `sprites`, `m2enable` | 4, 4 |
-| `bgtilemap` | 8 | | `bgtiledata`, `ly0` | 4, 4 |
-| `scx_during_m3` | 7 | | `speedchange` | 3 |
-| `halt` | 7 | | | |
+| `wilbertpol/acceptance` | 30 | | `window`, `lycEnable` | 6, 6 |
+| `dma` | 15 | | `sprites`, `m2enable` | 4, 4 |
+| `mealybug/ppu` | 8 | | `bgtilemap`, `bgtiledata` | 4, 4 |
+| `lcd_offset` | 8 | | `age/stat-mode-window` | 4 |
+| `enable_display` | 8 | | `age/oam`, `age/vram` | 4, 3 |
+| `scx_during_m3` | 7 | | `speedchange`, `m1` | 3, 3 |
+| `halt` | 7 | | rest | the tail |
 
 ## READ FIRST
 
-- `docs/hardware-state/ppu-timing.md` § **"The FF41 read frame"** — the law just
-  landed, its two load-bearing scopes, and the measurement that produced it.
+- `docs/hardware-state/ppu-timing.md` § **"The FF41 read frame"** — the law this
+  run landed (`flip - 5`, both models), its two surviving scopes (carried reads
+  and post-STOP shifted frames, both re-measured) and how it was derived.
 - The floor-class index header in `tests/gbtr/baselines/gambatte.txt`.
 - `docs/sameboy-port/tools/README.md` — the SameBoy ground-truth rig.
 
@@ -63,11 +63,20 @@ read lead cancelling it.
 The mooneye-protocol rows (`fib:` wants — wilbertpol + age) report in REGISTERS,
 so no screen classifier could reach them and all 62 sat `unknown`.
 `mooneyerun.c` + `classify_fib.py` now gate them (wired into `census.py`):
-**54 of the 62 are SameBoy-PASS**, so the census went 233 → 295 verdicts and
-the chaseable population 118 → 154. Untouched ground, and the biggest single
-block is 24 rows of `intr_2_mode0_timing_sprites_scx{1,2,3,4}_nops` across six
-models plus 18 age rows (`oam-read/write`, `stat-mode*`, `vram-read`,
-`spsw-mode0`).
+**54 of the 62 are SameBoy-PASS**, which is what took the census to 291
+verdicts and the chaseable population to 150. Untouched ground, and the biggest
+single block is 24 rows of `intr_2_mode0_timing_sprites_scx{1,2,3,4}_nops`
+across six models plus 18 age rows (`oam-read/write`, `stat-mode*`,
+`vram-read`, `spsw-mode0`).
+
+The age ladders are the better half of that block: hardware-captured, no
+cross-oracle trade, and SameBoy passes them. What is NOT yet known is which
+rung of each ladder fails — all 18 report the same generic signature
+(`B=00 C=6B D=14 E=06 H=98 L=10`, HL looking like the VRAM address `$9810`),
+so the next step there is decoding one ladder (disassembly, or an
+instruction-level diff against SameBoy) rather than sweeping an edge. Our
+OAM/VRAM accessibility edges are pinned two-sided by mooneye `lcdon_timing`
+and the gambatte access rows, so do not move one for a single ladder.
 
 That gate has already paid once: it showed the DMG-family
 `hblank_ly_scx_timing_variant_nops` legs were chaseable, which led to measuring
