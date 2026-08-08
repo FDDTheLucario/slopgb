@@ -154,7 +154,7 @@ against the replay to find the missing term) — not a sixth guess at the setup.
   `obj_alignment_follows_a_left_edge_window_grid`.
 - The BG fetcher free-runs through every sprite stall (prefill included), with the line's first push waiting for the pause-aware startup walk (`push_allowed`), keeping pixel 0 on its stall-shifted dot.
 
-### CLOSED as class F: `scx_during_m3_spx2` [Cgb] is an unwritten palette entry
+### CLOSED as class F: two pixel rows decide on an unwritten palette entry
 
 `scx_during_m3/scx_during_m3_spx2` [Cgb] misses by exactly **one pixel** — x=0
 on lines 0-7 — while its `spx0`/`spx1` siblings and its own [Dmg] leg pass. The
@@ -184,6 +184,20 @@ bakes in one console's uninitialised palette RAM), not a chaseable timing bug,
 and the fine-scroll discard / mixer / attribute paths are all ruled out
 (`discard` is 0 on those lines; the mixer has the sprite winning with
 `sp0=2`, `sp_bgprio=false`, `bg_attr=00`, LCDC `93`).
+
+`bgtiledata_spx09_ds_4` [Cgb] is the same shape and the same verdict: 16 px,
+ours white against the reference's `$986098`, with every palette the ROM writes
+holding greys. Both rows stay baselined (nothing to fix, nothing to exempt on
+this evidence).
+
+`docs/sameboy-port/tools/pixel_gate.py` separates this class mechanically —
+it re-ranks OUR frame against the reference the way `classify_pixel.py` ranks
+SameBoy's, so a row with a raw mismatch and a ZERO rank mismatch is
+colour-only. Over the 18 chaseable gambatte pixel rows it flags exactly these
+two; the other 16 are genuine geometry misses. It also re-prioritises them —
+`window/on_screen/late_wx_ds_2` looks like 22880 px raw but is a **160 px**
+geometry core, while `scx_0360c0/scx_during_m3_ds_2` is the reverse (160 raw,
+11516 rank), i.e. our shade STRUCTURE differs there, not just a few pixels.
 
 ### The mid-mode-3 LCDC fetch view splits map from data (CGB single speed)
 

@@ -75,13 +75,24 @@ pinned to the M-cycle by a rung pair that reads at the same absolute instant.
 It drives every line's mode-3 length, so it needs a full-corpus A/B — that is
 the work, not the diagnosis.
 
-**Trust the census's `sameboy` column less on PIXEL rows than on glyph rows.**
-`classify_pixel.py` quantizes to the nearest reference-palette entry, so it
-verifies geometry, not colour: `scx_during_m3_spx2` [Cgb] classifies PASS while
-SameBoy actually renders `(0,0,0)` against the reference's `(33,146,108)`. That
-row turned out to be class F — its deciding pixel is an unwritten CGB palette
-entry holding the captured console's power-on garbage. Diff the actual colours
-(`SLOPGB_DUMP_PAL=1 … dump_gambatte_frame`) before investing in a pixel row.
+**The pixel rows are re-gated — start from this list, not from the census's
+`sameboy` column.** `classify_pixel.py` compares luminance RANKS, so it verifies
+geometry, not colour, and reports PASS on rows SameBoy plainly misses.
+`docs/sameboy-port/tools/pixel_gate.py` applies the same metric to OUR frame and
+splits the 18 chaseable gambatte pixel rows:
+
+- **class F, not chaseable (2)**: `scx_during_m3_spx2`, `bgtiledata_spx09_ds_4`
+  — colour-only misses on an unwritten CGB palette entry (power-on garbage the
+  reference asset captured; SameBoy misses them too).
+- **genuine geometry (16)**, smallest first: the `bgtilemap_spx0{8,9}_ds_{1,4}`
+  and `bgtiledata_spx09_ds_{1,3}` 8-px rows, `scx_attrib_during_m3_spx2_ds`
+  (raw 16 / geo **2**), `scx_during_m3_spx2_ds` (geo 6), then the big ones.
+  Two worth knowing: `window/on_screen/late_wx_ds_2` looks like 22880 px raw but
+  is a **160 px** geometry core, and `scx_0360c0/scx_during_m3_ds_2` is the
+  reverse — 160 raw but 11516 rank, so its shade STRUCTURE differs.
+
+Note every remaining one is `_ds` except the two class-F rows, so the pixel vein
+now runs into the same double-speed floor as everything else.
 
 The pixel-reference vein just paid and is not exhausted: diff the frame per
 row (`cargo run -p slopgb-core --example dump_gambatte_frame`, then compare

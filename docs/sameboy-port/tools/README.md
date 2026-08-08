@@ -11,6 +11,7 @@ verdict, on-screen glyphs, or a pixel reference — so there is one tool per sha
 | `classify_cgb_regr.py` | gambatte glyph rows, CGB: OCRs the tester's BMP and compares against the `cgb04c_out<hex>` want in the filename |
 | `classify_dmg.py` | the same for DMG (`dmg08_out<hex>` / the shared `dmg08_cgb04c_out<hex>` form), with the +1px DMG glyph x-shift trial |
 | `classify_pixel.py` | pixel-reference legs (gambatte/mealybug): palette-quantized diff of the tester's BMP against the sibling reference PNG. Needs `numpy` + `Pillow`. |
+| `pixel_gate.py` | splits OUR failing pixel rows into GEOMETRY misses (chaseable) and COLOUR-only ones (an unwritten palette entry — class F). Same rank metric, applied to our own frame; needs `DUMP=` pointing at the `dump_gambatte_frame` example. |
 
 **A pixel row's `sameboy` verdict is weaker than a glyph row's.** `classify_pixel.py`
 maps each SameBoy pixel to the *nearest* reference-palette entry, which is what
