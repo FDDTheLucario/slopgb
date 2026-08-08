@@ -43,8 +43,24 @@ fn main() {
     // for the longer protocols (an age ladder needs ~85).
     let frames: u64 = args.next().and_then(|f| f.parse().ok()).unwrap_or(16);
     let target = frames * u64::from(CYCLES_PER_FRAME);
+    // `SLOPGB_PCWINDOW=lo-hi` also traces every instruction executed inside
+    // that PC range — for kernels whose observable is the instruction stream
+    // (a DMA trigger at a bank boundary, say) rather than a register read.
+    let window = std::env::var("SLOPGB_PCWINDOW").ok().and_then(|w| {
+        let (a, b) = w.split_once('-')?;
+        Some((
+            u16::from_str_radix(a.trim_start_matches("0x"), 16).ok()?,
+            u16::from_str_radix(b.trim_start_matches("0x"), 16).ok()?,
+        ))
+    });
     while gb.cycles() < target {
         let pc = gb.cpu_regs().pc;
+        if let Some((lo, hi)) = window {
+            if (lo..=hi).contains(&pc) {
+                let r = gb.cpu_regs();
+                eprintln!("PC {pc:04X} a={:02X} cc={}", r.a, gb.cycles());
+            }
+        }
         gb.step();
         if pc == read_pc {
             let r = gb.cpu_regs();

@@ -399,7 +399,13 @@ other side; do not sweep it without re-running the whole `dma` cluster.
 `00`, want `02`) put the `ldh (FF55),a` DMA trigger at **`$7FFE`**, the last
 instruction of the ROM bank, so the CPU's next opcode fetch comes from
 **`$8000` — the VRAM the transfer is writing**. Their `late_gdma_pc_7ffe_2`
-sibling passes, so the pair brackets what the post-trigger fetch sees: the
-pre-transfer byte, the written byte, or the blocked `$FF`. Not yet measured;
-the observable is what the CPU executes after the trigger, so trace the fetch
-at `$8000` rather than the DMA length.
+sibling passes, so the pair brackets what the post-trigger fetch sees.
+
+First measurement: the write is `A = $00`, i.e. **bit 7 clear — it CANCELS an
+active HBlank transfer rather than starting one**, and our CPU crosses the
+boundary with no stall at all (`$7FFE` at cc 4916, `$8000` at cc 4928: twelve
+cycles, exactly the `ldh` itself). The two rungs sit 4 cycles apart (4916 vs
+4920), our runs are otherwise identical, yet hardware answers `02` and `00`. So
+the discriminator lives in the CANCEL seam — whether the in-flight block still
+retires, and what `$8000` therefore holds when the CPU fetches from it — not in
+a transfer length. Trace the cancel against SameBoy's `SBWHDMA` events next.
