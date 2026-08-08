@@ -757,6 +757,14 @@ impl GameBoy {
         self.cpu.regs()
     }
 
+    /// The PPU's current `(line, dot)` scan position, for test harnesses that
+    /// need to place an observed access on the dot grid. Read-only `&self`
+    /// accessor; advances nothing.
+    #[must_use]
+    pub fn ppu_scan_pos(&self) -> (u8, u16) {
+        self.bus.ppu().scan_pos()
+    }
+
     /// Whether the opt-in boot ROM is currently mapped (false unless built via
     /// [`Self::new_with_boot`] and before the boot ROM writes FF50). Test/UI hook.
     #[must_use]

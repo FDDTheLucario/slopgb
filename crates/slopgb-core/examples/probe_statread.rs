@@ -53,15 +53,55 @@ fn main() {
             u16::from_str_radix(b.trim_start_matches("0x"), 16).ok()?,
         ))
     });
+    // `SLOPGB_OAMHL=1` traces every instruction executed while HL points into
+    // OAM — the age oam ladders reach OAM through `(hl)`, so there is no
+    // absolute-address PC to window on.
+    let oam_hl = std::env::var("SLOPGB_OAMHL").is_ok();
+    let mut pending: Option<(u16, &str, u16, u8, u16, u64)> = None;
     while gb.cycles() < target {
         let pc = gb.cpu_regs().pc;
+        if oam_hl {
+            let r = gb.cpu_regs();
+            let hl = (u16::from(r.h) << 8) | u16::from(r.l);
+            let de = (u16::from(r.d) << 8) | u16::from(r.e);
+            let bc = (u16::from(r.b) << 8) | u16::from(r.c);
+            // Only the load/store through the pointer counts — a pointer left
+            // parked in OAM otherwise matches on every instruction.
+            let op = gb.debug_read(pc);
+            let ptr = match op {
+                0x0A | 0x02 => Some(("bc", bc)),
+                0x1A | 0x12 => Some(("de", de)),
+                0x7E | 0x77 | 0x2A | 0x22 | 0x3A | 0x32 => Some(("hl", hl)),
+                _ => None,
+            };
+            if let Some((tag, p)) = ptr {
+                if (0xFE00..=0xFE9F).contains(&p) {
+                    let (ly, dot) = gb.ppu_scan_pos();
+                    // The load has not run yet, so A still holds the previous
+                    // value; stash the position and report the loaded byte
+                    // once the instruction has retired.
+                    pending = Some((pc, tag, p, ly, dot, gb.cycles()));
+                }
+            }
+        }
         if let Some((lo, hi)) = window {
             if (lo..=hi).contains(&pc) {
                 let r = gb.cpu_regs();
-                eprintln!("PC {pc:04X} a={:02X} cc={}", r.a, gb.cycles());
+                let (ly, dot) = gb.ppu_scan_pos();
+                eprintln!(
+                    "PC {pc:04X} a={:02X} ly={ly} dot={dot} cc={}",
+                    r.a,
+                    gb.cycles()
+                );
             }
         }
         gb.step();
+        if let Some((ppc, tag, p, ly, dot, cc)) = pending.take() {
+            eprintln!(
+                "OAMHL PC {ppc:04X} {tag}={p:04X} got={:02X} ly={ly} dot={dot} cc={cc}",
+                gb.cpu_regs().a
+            );
+        }
         if pc == read_pc {
             let r = gb.cpu_regs();
             eprintln!(

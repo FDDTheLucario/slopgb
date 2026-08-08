@@ -347,9 +347,23 @@ mode-3→mode-0 release, i.e. `blocking.rs::oam_read_blocked`'s
 `stamp_blocks(m0_access_edge, ACCESS_PHASE)` MID-phase view.
 
 Do NOT sweep those blind: each is pinned by the `oam_access/pre*`/`post*`
-gambatte rows it was added for. Map ladder index → (line, dot) first — that
-needs an LY/dot accessor the examples do not have today, so the next step is a
-read-only probe exposing the scan position, then a targeted boundary A/B.
+gambatte rows it was added for.
+
+The ladder's accesses are now measurable: `GameBoy::ppu_scan_pos` (read-only
+`&self`) plus `SLOPGB_OAMHL=1` on the `probe_statread` example prints every
+OAM load/store through `(bc)`/`(de)`/`(hl)` with the byte it actually returned
+and the `(line, dot)` it landed on. The ladder walks each boundary one M-cycle
+at a time; our CGB grid comes out as:
+
+| boundary | measured |
+|---|---|
+| mode-3 end (lines 143, 0) | `240=FF 244=FF` then `248=00 252=00 256=00` — we open at dot **248** |
+| line end / next mode-2 (line 0) | `440=00 444=00` then `448=FF 452=FF`, `1:0=FF` — we lock at dot **448** |
+
+So the two candidate off-by-one-M-cycle boundaries are an unblock at 248 that
+hardware may hold to 252, and a lock at 448 that hardware may bring to 444.
+Which one is wrong is the next measurement: read the same instants out of
+SameBoy at CGB-C, then A/B only that boundary.
 
 ## Frame-0 m2 pulse count — one edge where hardware has 144
 
