@@ -214,6 +214,22 @@ The OBJ-enable window itself (`OBJ_ENABLE_LAG` = 4 dots, both edges) is pinned
 two-sided by the gambatte `sprite_late_{enable,disable}_spx18..1B` ladders, so
 the lever here is the prefill path's interaction with it, not the window width.
 
+**Half the mechanism is identified.** The sprite IS fetched (traced: OAM X 3-4,
+during the prefill walk, colour 1 in the FIFO) and our MIXER then drops it,
+because `obj_en_view & LCDC_OBJ_ENABLE == 0` by the time the pixel pops — the
+drop dots match the missing pixels exactly (line 29 lx 0 and 2, line 30 lx 1,
+line 31 lx 0, line 32 lx 0-1, line 33 lx 2). Hardware keeps them. Exempting
+prefill-fetched pixels from the draw-time gate on DMG takes the variant from
+**202 to 182 px** and `m3_lcdc_obj_en_change` [Dmg] from **146 to 126**,
+collapsing the latter's rank anomaly (22894 → 126) — so the exemption is
+directionally right. It is NOT landed: no row flips on it, and carrying the
+flag through `SpritePixel` changes the save-state format, which is not worth a
+`STATE_VERSION` bump for zero flips. The exemption must be CGB-excluded either
+way — applying it there costs `m3_lcdc_obj_en_change` [Cgb] (0/−1).
+
+The residual ~20 px per row is a second cause; find it before landing the
+first half.
+
 ### `m3_bgp_change_sprites` [Cgb] is a BGP snapshot, not a palette (2026-08-06)
 
 678 px over ALL 144 rows, ~5 per row, ours black where the reference wants

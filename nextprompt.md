@@ -169,6 +169,19 @@ differing columns like the `bgtilemap_spx09` fix.
 Everything else single-speed is one or two rows in a cluster whose siblings are
 `_ds`, i.e. likely the same class-A floor seen from the single-speed side.
 
+## The prefill sprite path — half a mechanism, ready to finish
+
+Three rows implicate it (`scx_during_m3_spx2`, `m3_lcdc_obj_en_change{,_variant}`
+[Dmg]). For the obj_en rows the cause is now traced: the sprite IS fetched
+during the prefill walk and lands in the FIFO with colour 1, then OUR MIXER
+drops it because the draw-time OBJ-enable gate reads low at the pop — the drop
+dots match the missing pixels exactly. Exempting prefill-fetched pixels from
+that gate (DMG only — CGB needs the gate, 0/−1 without the scope) takes the
+variant 202 → 182 px and `obj_en_change` 146 → 126, collapsing the latter's
+rank anomaly. Not landed: zero row flips so far, and the flag costs a
+save-state format change. Find the residual ~20 px per row, then land both
+halves together.
+
 ## Localized, one measurement from a fix
 
 `miscmstatirq/lycstatwirq_trigger_ly00_10_50_1` **[Cgb]** (its [Dmg] leg is
