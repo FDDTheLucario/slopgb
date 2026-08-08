@@ -409,9 +409,14 @@ the write, `mode=Disabled hdma5=FF src=0000 dst=0000`, so we take the
 general-purpose branch and request the block correctly; the ROM's FIRST FF55
 write never happens for us at all.
 
-So this is not a cancel-seam question and not a fetch-at-`$8000` question yet:
-something upstream diverts the kernel before it arms the 19-block transfer.
-Find that divergence first — the `$7FFE` boundary is downstream of it.
+Where that first write comes from is UNRESOLVED, and it decides whether there
+is a divergence at all: the ROM contains exactly one `ldh (FF55),a` site
+(`$7FFE`, verified by scanning the whole 32K), and we execute it exactly once
+over 120 frames. So SameBoy's `val=$12` write is issued by code we never run —
+most plausibly its own boot ROM, which this harness skips by design, in which
+case the two runs are equivalent and the discriminator is back at the `$8000`
+fetch. Settling it needs an instruction-level trace on the SameBoy side, which
+the current tracer cannot give; do that before assuming either story.
 
 (Two dead ends recorded so the next pass skips them: the trigger does NOT cancel
 an active HBlank transfer — nothing is armed at that point — and the CPU's
