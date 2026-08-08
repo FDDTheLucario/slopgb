@@ -145,6 +145,30 @@ different mechanism from anything here.
 Gate every row through both references before investing in it — a row SameBoy
 also fails is class G and is not chaseable.
 
+## The chaseable population, mapped (start here)
+
+150 rows are SameBoy-PASS. Categorising them against the verdicts this run
+recorded leaves only **19 single-speed rows in clusters with no verdict yet** —
+everything else is either already scored as a floor or is `_ds` (class A, the
+double-speed sub-dot floor, 50 rows):
+
+| cluster | SS | ds | note |
+|---|---|---|---|
+| `mealybug/ppu` | **8** | 0 | hardware photos — the strongest oracle, and the family already moved this run (+4 from the map-delay fix) |
+| `dma`, `enable_display`, `window`, `same-suite/apu` | 2 each | 1/6/3/0 | |
+| `acid`, `lycEnable`, `scx_during_m3` | 1 each | 0/5/6 | |
+| the rest | 0 | 27 | all `_ds` |
+
+So **mealybug is the biggest tractable block left**: `m3_bgp_change_sprites`
+[Cgb], `m3_lcdc_obj_en_change{,_variant}` [Dmg], `m3_lcdc_obj_size_change`
+[Cgb], `m3_lcdc_obj_size_change_scx` [Cgb]/[Dmg],
+`m3_lcdc_win_en_change_multiple_wx` [Dmg], `m3_obp0_change` [Cgb] — 32 to 678
+px each, so use `pixel_gate.py` first (geometry vs colour) and then diff the
+differing columns like the `bgtilemap_spx09` fix.
+
+Everything else single-speed is one or two rows in a cluster whose siblings are
+`_ds`, i.e. likely the same class-A floor seen from the single-speed side.
+
 ## Localized, one measurement from a fix
 
 `miscmstatirq/lycstatwirq_trigger_ly00_10_50_1` **[Cgb]** (its [Dmg] leg is

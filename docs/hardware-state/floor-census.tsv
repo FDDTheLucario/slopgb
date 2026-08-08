@@ -39,7 +39,6 @@ gambatte/bgtilemap/bgtilemap_spx09_ds_1.gbc [Cgb]	gambatte	gambatte/bgtilemap	Cg
 gambatte/bgtilemap/bgtilemap_spx09_ds_4.gbc [Cgb]	gambatte	gambatte/bgtilemap	Cgb	8px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/cgbpal_m3/cgbpal_read_m3start_ds_1_cgb04c_out00.gbc [Cgb]	gambatte	gambatte/cgbpal_m3	Cgb	FF	00	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/cgbpal_m3/cgbpal_write_m3start_ds_1_cgb04c_out01.gbc [Cgb]	gambatte	gambatte/cgbpal_m3	Cgb	00	01	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/dma/hdma_disable_display_1_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/dma	Cgb	0	1	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_late_ei_m3halt_m2unhalt_ly_scx1_4_cgb04c_out03.gbc [Cgb]	gambatte	gambatte/dma	Cgb	02	03	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_late_enable_ds_1_cgb04c_out1.gbc [Cgb]	gambatte	gambatte/dma	Cgb	0	1	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/dma/hdma_late_enable_lcdoffset3_2_cgb04c_out0.gbc [Cgb]	gambatte	gambatte/dma	Cgb	1	0	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
@@ -184,7 +183,6 @@ gambatte/m2enable/lyc1_late_m2enable_lycdisable_ds_3_cgb04c_out2.gbc [Cgb]	gamba
 gambatte/m2enable/lyc1_m2irq_late_lycdisable_ds_1_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/m2enable	Cgb	0	2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/m2enable/m2_late_m0disable_ds_1_cgb04c_out2.gbc [Cgb]	gambatte	gambatte/m2enable	Cgb	0	2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/miscmstatirq/lycstatwirq_trigger_ly00_10_50_1_dmg08_cgb04c_outE0.gbc [Cgb]	gambatte	gambatte/miscmstatirq	Cgb	E2	E0	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
-gambatte/miscmstatirq/lycstatwirq_trigger_ly00_10_50_1_dmg08_cgb04c_outE0.gbc [Dmg]	gambatte	gambatte/miscmstatirq	Dmg	E2	E0	PASS	hw-capture:dmg08+cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/miscmstatirq/lycstatwirq_trigger_ly00_10_50_ds_lcdoffset1_2_cgb04c_outE2.gbc [Cgb]	gambatte	gambatte/miscmstatirq	Cgb	E0	E2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/miscmstatirq/lycstatwirq_trigger_ly00_10_50_lcdoffset3_2_cgb04c_outE2.gbc [Cgb]	gambatte	gambatte/miscmstatirq	Cgb	E0	E2	FAIL	hw-capture:cgb04c	EXCEED	hardware-captured want that SameBoy also misses
 gambatte/miscmstatirq/lycstatwirq_trigger_m0_late_ly44_lyc44_08_40_4_dmg08_cgb04c_outE0.gbc [Dmg]	gambatte	gambatte/miscmstatirq	Dmg	E2	E0	FAIL	hw-capture:dmg08+cgb04c	EXCEED	hardware-captured want that SameBoy also misses
@@ -259,7 +257,6 @@ gambatte/window/late_disable_late_scx03_wx0f_2_dmg08_out3_cgb04c_out0.gbc [Cgb]	
 gambatte/window/late_enable_afterVblank_lcdoffset1_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/window/late_reenable_scx5_ds_1_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/window/late_wx_ds_2_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
-gambatte/window/m2int_wxA6_spxA7_m3stat_4_dmg08_out0_cgb04c_out3.gbc [Cgb]	gambatte	gambatte/window	Cgb	0	3	PASS	hw-capture:cgb04c	BUG	SameBoy reproduces the captured value; we do not
 gambatte/window/on_screen/late_wx_ds_2.gbc [Cgb]	gambatte	gambatte/window	Cgb	22880px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gambatte/window/on_screen/wx17_weoff_wxA5_weon.gbc [Cgb]	gambatte	gambatte/window	Cgb	960px-diff	reference-png	PASS	hw-capture:png	BUG	SameBoy reproduces the captured value; we do not
 gbmicrotest/dma_basic.gb [Dmg]	gbmicrotest	gbmicrotest	Dmg	0xe0	0x46	unknown	defect:self-overwriting-result	JUNK	defective asset (self-overwriting-result)
