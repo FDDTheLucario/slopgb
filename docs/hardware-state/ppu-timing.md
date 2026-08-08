@@ -323,6 +323,29 @@ Both port `lycRegChangeTriggersStatIrq` (held-compare target tables, m0/m1 block
 - **Parked:** wilbertpol `ly_lyc_0-C` / `ly_new_frame-C` — cross-suite LY=153-window contradiction with age (see the wilbertpol baseline note).
 - **Parked:** `hblank_ly_scx_timing-C` — needs the CGB mode-0 flip +1 dot in `render/mode0.rs`.
 
+## Frame-0 m2 pulse count — one edge where hardware has 144
+
+Six `*_count_*` rows that SameBoy **at CGB-C** passes miss their expected value
+by exactly `0x90` = 144, one per visible line: `ours 01 want 91`,
+`ours 00 want 90`. The screen shows our counter stuck at its first value, so we
+are not off by an edge — we emit a SINGLE m2 pulse for the whole frame where
+hardware emits one per line.
+
+Which round fails is keyed to the sub-dot phase the LCD is enabled at, and it
+inverts with speed: in single speed round 1 fails and round 2 passes
+(`enable_display/frame0_m2stat_count_{1,2}`), in double speed round 1 passes
+and round 2 fails (`..._ds_{1,2}`). The `[Dmg]` legs all pass, so it is CGB-only.
+
+Rows: `enable_display/frame0_m2stat_count_1`,
+`lcd_offset/offset1_lyc99int_{m0stat_count_scx2,m2stat_count}_ds_2`,
+`lcd_offset/offset3_lyc99int_{m0stat_count_scx1,m2stat_count,m3stat_count}_2`.
+
+Start at `stat_irq.rs::m2_pulse_fires`: the per-line pulse requires
+`en & STAT_SRC_HBLANK == 0`, so a run with both sources enabled routes every
+per-line event away and can leave only the one edge the level itself produces.
+Confirm against each ROM's own enable setup before touching it — the same
+predicate is what pins the `m2int_m0irq_*` and `lycm2int` rows.
+
 ## The CGB-C LYC invalid-gap read law (measured, NOT adopted)
 
 SameBoy's `GB_STAT_update` runs its LY=LYC branch when `ly_for_comparison` is
