@@ -113,9 +113,14 @@ fn suite_roms(root: &Path) -> Vec<(PathBuf, String)> {
 /// discovered by running the full matrix; shrinking it is progress,
 /// growing it a regression. Every entry reaches `LD B,B` with the all-$42
 /// fail registers (no timeouts). Floor classes per the index in
-/// `baselines/gambatte.txt`: freq_change_timing-cgb0BC is class C and
-/// channel_4_align/freq_change are class G. (ei_delay_halt is no longer
-/// baselined — it passes; see the interrupt note below.)
+/// `baselines/gambatte.txt`: freq_change_timing-cgb0BC is class C.
+/// (ei_delay_halt is no longer baselined — it passes; see the interrupt note
+/// below.)
+///
+/// `channel_4_align`/`channel_4_freq_change` were class G — "lift on upstream
+/// evidence". That evidence now exists and points the other way: SameBoy 1.0.2
+/// PASSES both (verified with `docs/sameboy-port/tools/mooneyerun.c`), so they
+/// are deterministic, chaseable rows rather than an upstream tie-break.
 const BASELINE: &[&str] = &[
     // apu/channel_1: 1 of 19 claimed cases. The trigger/duty/alignment/
     // envelope/zombie/freq-change families pass via the SameBoy-style
@@ -139,8 +144,11 @@ const BASELINE: &[&str] = &[
     // remains needs SameBoy's NR43-write LFSR-corruption tables, which
     // upstream documents as revision- and unit-specific with
     // non-deterministic variants (apu.c nr43_write) — only the
-    // deterministic paths are modelled (class G: keep asserted, lift on
-    // upstream evidence).
+    // deterministic paths are modelled here. NOT class G any more: SameBoy
+    // 1.0.2 passes both of these rows (and `channel_4_delay` /
+    // `channel_4_frequency_alignment`), so the behaviour they need is
+    // reproducible and these are ordinary chaseable floor rows — porting
+    // those tables is the work.
     "same-suite/apu/channel_4/channel_4_align.gb [Cgb]",
     "same-suite/apu/channel_4/channel_4_freq_change.gb [Cgb]",
     // apu top level: none — the plain DIV-event tests and the *_10

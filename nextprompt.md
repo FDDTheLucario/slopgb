@@ -145,6 +145,18 @@ different mechanism from anything here.
 Gate every row through both references before investing in it — a row SameBoy
 also fails is class G and is not chaseable.
 
+## Reclassified on new evidence: the channel_4 APU rows
+
+`same-suite/apu/channel_4/channel_4_align` and `channel_4_freq_change` [Cgb]
+were class G — "the NR43 LFSR-corruption tables upstream documents as
+revision/unit-specific and partly non-deterministic; keep asserted, lift on
+upstream evidence". The evidence arrived with the new mooneye-protocol gate and
+points the other way: **SameBoy 1.0.2 passes both** (verified directly, plus
+`channel_4_delay` and `channel_4_frequency_alignment`). A second accurate
+emulator reproducing them makes them deterministic, so they are ordinary
+chaseable rows now — porting SameBoy's `nr43_write` tables is the work. The
+class-G note in `baselines/gambatte.txt` and `same_suite.rs` is corrected.
+
 ## The chaseable population, mapped (start here)
 
 150 rows are SameBoy-PASS. Categorising them against the verdicts this run

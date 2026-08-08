@@ -96,10 +96,14 @@
 #    [Dmg] leg still runs. See each suite's own comments.
 # G. Upstream-tie-break-needed — dma/hdma_transition_speedchange_oamdma
 #    here (halted-block OAM-DMA +1; neither gambatte nor SameBoy
-#    models it — see its comment below) plus same-suite
-#    channel_4_align/channel_4_freq_change (NR43 LFSR-corruption
+#    models it — see its comment below). Keep asserted; lift on upstream
+#    evidence.
+#    REMOVED from this class 2026-08-06: same-suite channel_4_align and
+#    channel_4_freq_change. They were held here as "NR43 LFSR-corruption
 #    tables upstream documents as revision/unit-specific and partly
-#    non-deterministic). Keep asserted; lift on upstream evidence.
+#    non-deterministic", but SameBoy 1.0.2 PASSES both (verified with
+#    docs/sameboy-port/tools/mooneyerun.c), so a second accurate emulator
+#    reproduces them and they are deterministic, chaseable rows.
 # H. One-dot conflicts / sub-dot event phase under the whole-dot
 #    contract (CONDITIONAL floor — exactly the population a sub-dot
 #    IF-flop model would arbitrate; re-probe all of it then):
