@@ -8340,7 +8340,7 @@ mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Cgb] | 239d845b85c960c5 | 
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change.gb [Dmg] | 8bf4244a34610345 | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change2.gb [Cgb] | 85d333b09383128d | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_lcdc_win_map_change2.gb [Dmg] | fa667f320f2acced | b6b0632d997517d6
-mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Cgb] | 9a6e1e0b6e2d2681 | b6b0632d997517d6
+mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Cgb] | 3381361f619e2179 | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Dmg] | 97a4294f152636cd | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_scx_high_5_bits.gb [Cgb] | 899713c284566f7f | b6b0632d997517d6
 mealybug-tearoom-tests/ppu/m3_scx_high_5_bits.gb [Dmg] | eceaa9d0cecb3fa4 | b6b0632d997517d6

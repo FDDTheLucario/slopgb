@@ -199,6 +199,21 @@ two; the other 16 are genuine geometry misses. It also re-prioritises them —
 geometry core, while `scx_0360c0/scx_during_m3_ds_2` is the reverse (160 raw,
 11516 rank), i.e. our shade STRUCTURE differs there, not just a few pixels.
 
+### DMG-compat OBJ palettes take the DMG commit anchor (2026-08-06, +1/−0)
+
+A CGB running a DMG-flagged cart renders through FF47-49, which the palette
+commit table had excluded outright ("DMG only — CGB has no FF47-49 render
+path"). Its OBJ palettes do take the DMG even-dot anchor
+(`round_up_even(LE) + 2`): `mealybug/m3_obp0_change` [Cgb] missed 32 px without
+it, one per line at an advancing column — the signature of the commit landing a
+pixel off rather than a palette holding the wrong value (the row is
+colour-only under `pixel_gate.py`, geometry 0).
+
+Its BG palette does **not**. Extending the arm to FF47 as well scores +1/−4:
+`m3_bgp_change` [Cgb], `age/m3-bg-bgp` [Cgb] and both `m3_window_timing*` [Cgb]
+break. So the split is OBJ-vs-BG inside compat mode, pinned from both sides —
+recorded as measured, not derived.
+
 ### The mid-mode-3 LCDC fetch view splits map from data (CGB single speed)
 
 A mid-mode-3 LCDC write reaches the BG fetcher's **map**-select bits (BG bit3 /

@@ -33,7 +33,10 @@ impl Ppu {
             // (`map_scx_formed`); only the fine-scroll comparator path — the
             // hunt lock and `eff.scx` — moves.
             if self.line == 0 { 0 } else { 2 }
-        } else if !self.model.is_cgb() && matches!(addr, 0xFF47..=0xFF49) && !self.glitch_active() {
+        } else if (!self.model.is_cgb() || (self.dmg_compat && addr != 0xFF47))
+            && matches!(addr, 0xFF47..=0xFF49)
+            && !self.glitch_active()
+        {
             // The DMG palette (BGP/OBP FF47-49) commit anchors to the EVEN
             // (CPU-M-cycle) dot grid. SameBoy commits the palette at the write
             // M-cycle's exact half-dot; single speed is whole-dot aligned so
@@ -41,8 +44,16 @@ impl Ppu {
             // visible +2 dots — an ODD leading edge rounds up one dot so the
             // commit is visible +3 (round_up_even(LE)+2), an EVEN one +2. The
             // mealybug BGP/OBP legs land EVEN leading edges (want +2), the
-            // gambatte dmgpalette legs ODD (want +3). DMG only — CGB has no
-            // FF47-49 render path (its palettes are FF68-6B).
+            // gambatte dmgpalette legs ODD (want +3).
+            //
+            // A CGB running a DMG-flagged cart (`dmg_compat`) DOES render
+            // through FF47-49, and its OBJ palettes take this same anchor:
+            // `mealybug/m3_obp0_change` [Cgb] misses 32 px without it, one per
+            // line at an advancing column — the signature of a commit landing
+            // a pixel off. Its BG palette does NOT. Putting FF47 on this arm
+            // as well costs `m3_bgp_change` [Cgb], `age/m3-bg-bgp` [Cgb] and
+            // both `m3_window_timing*` [Cgb] (+1/−4), so the asymmetry is
+            // pinned from both sides.
             2 + (self.scan_pos().1 & 1) as u8
         } else if addr == 0xFF42 && !double_speed && !self.glitch_active() {
             // SCY (FF42) takes the same EVEN-dot parity anchor as the DMG

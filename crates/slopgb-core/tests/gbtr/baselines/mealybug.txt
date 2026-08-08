@@ -44,7 +44,6 @@ mealybug-tearoom-tests/dma/hdma_timing-C.gb [Cgb]
 # stalled lines sit one pixel right of the blob's — the _cgb_c photos
 # demand a CGB-specific palette-vs-stall law not yet derived).
 mealybug-tearoom-tests/ppu/m3_bgp_change_sprites.gb [Cgb]
-mealybug-tearoom-tests/ppu/m3_obp0_change.gb [Cgb]
 
 # ppu/ mode-3 mid-scanline LCDC writes. The remaining [Cgb] legs are the
 # CGB-C fetch-sampling residue: the rising-late LCDC view (eff AND the
@@ -81,3 +80,9 @@ mealybug-tearoom-tests/ppu/m3_scy_change.gb [Cgb]
 # ppu/ mode-3 mid-scanline WX writes: the sprites legs and the [Dmg]-only
 # plain wx_4/5/6 ROMs pass; the multiple_wx leg is a 148-px sub-dot
 # LCDC-write-vs-comparator race (4 isolated spots, see render.rs notes).
+# --- DMG-compat OBJ palette commit (2026-08-06) ---
+# m3_obp0_change [Cgb] lifted: a CGB running a DMG-flagged cart renders through
+# FF47-49, and its OBJ palettes take the DMG even-dot commit anchor. BGP does
+# not — putting FF47 on the same arm costs m3_bgp_change [Cgb], age/m3-bg-bgp
+# [Cgb] and both m3_window_timing* [Cgb]. See docs/hardware-state/ppu-render.md
+# "DMG-compat OBJ palettes take the DMG commit anchor".
