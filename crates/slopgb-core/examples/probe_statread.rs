@@ -20,7 +20,7 @@
 //! (`docs/hardware-state/ppu-timing.md` § "The FF41 read frame").
 //!
 //! ```sh
-//! cargo run -p slopgb-core --example probe_statread -- <rom> <read_pc_hex> [dmg]
+//! cargo run -p slopgb-core --example probe_statread -- <rom> <read_pc_hex> [dmg] [frames]
 //! ```
 
 use slopgb_core::{CYCLES_PER_FRAME, GameBoy, Model};
@@ -39,12 +39,26 @@ fn main() {
     let rom = std::fs::read(&rom_path).expect("read rom");
     let mut gb = GameBoy::new(model, rom).expect("load rom");
 
-    let target = 16 * u64::from(CYCLES_PER_FRAME);
+    // Default to the gambatte suite's 16 frames; a fourth argument extends it
+    // for the longer protocols (an age ladder needs ~85).
+    let frames: u64 = args.next().and_then(|f| f.parse().ok()).unwrap_or(16);
+    let target = frames * u64::from(CYCLES_PER_FRAME);
     while gb.cycles() < target {
         let pc = gb.cpu_regs().pc;
         gb.step();
         if pc == read_pc {
-            eprintln!("READ cc={} a={:02X}", gb.cycles(), gb.cpu_regs().a);
+            let r = gb.cpu_regs();
+            eprintln!(
+                "READ cc={} a={:02X} bc={:02X}{:02X} de={:02X}{:02X} hl={:02X}{:02X}",
+                gb.cycles(),
+                r.a,
+                r.b,
+                r.c,
+                r.d,
+                r.e,
+                r.h,
+                r.l,
+            );
         }
     }
 }

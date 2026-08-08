@@ -12,6 +12,7 @@ verdict, on-screen glyphs, or a pixel reference — so there is one tool per sha
 | `classify_dmg.py` | the same for DMG (`dmg08_out<hex>` / the shared `dmg08_cgb04c_out<hex>` form), with the +1px DMG glyph x-shift trial |
 | `classify_pixel.py` | pixel-reference legs (gambatte/mealybug): palette-quantized diff of the tester's BMP against the sibling reference PNG. Needs `numpy` + `Pillow`. |
 | `mooneyerun.c` + `classify_fib.py` | the MOONEYE-protocol rows (`fib:` wants — the wilbertpol and age legs). Those ROMs report in REGISTERS at `LD B,B`, so no screen reader can reach them; the runner reports B,C,D,E,H,L and the classifier turns that into the usual verdict files. |
+| `age_decode.py` | names the failing RUNG of an age ladder (their exit registers are all the same opaque signature). Probes the suite's shared checker at its `cp b`, where the measured and expected bytes are both live; `--all` sweeps every chaseable age row in the census. Needs the `probe_statread` example built. |
 | `pixel_gate.py` | splits OUR failing pixel rows into GEOMETRY misses (chaseable) and COLOUR-only ones (an unwritten palette entry — class F). Same rank metric, applied to our own frame; needs `DUMP=` pointing at the `dump_gambatte_frame` example. |
 
 **A pixel row's `sameboy` verdict is weaker than a glyph row's.** `classify_pixel.py`

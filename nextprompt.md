@@ -70,13 +70,16 @@ across six models plus 18 age rows (`oam-read/write`, `stat-mode*`,
 `vram-read`, `spsw-mode0`).
 
 The age ladders are the better half of that block: hardware-captured, no
-cross-oracle trade, and SameBoy passes them. What is NOT yet known is which
-rung of each ladder fails — all 18 report the same generic signature
-(`B=00 C=6B D=14 E=06 H=98 L=10`, HL looking like the VRAM address `$9810`),
-so the next step there is decoding one ladder (disassembly, or an
-instruction-level diff against SameBoy) rather than sweeping an edge. Our
-OAM/VRAM accessibility edges are pinned two-sided by mooneye `lcdon_timing`
-and the gambatte access rows, so do not move one for a single ladder.
+cross-oracle trade, and SameBoy passes them. **They are now decoded** —
+`docs/sameboy-port/tools/age_decode.py --all` names the failing rung of every
+one (the table and how to read it: `docs/hardware-state/test-status.md`, "The
+age ladders — decoded"). The headline: `vram-read-dmgC` [Dmg],
+`vram-read-ncmBCE` [Cgb] and `oam-read-dmgC-cgbBC` [Dmg] share ONE fingerprint
+(rungs 10/26/43/59 want `$FF`, get real data), several rows are down to 2-3 bad
+rungs, and every failure is one-sided — we unblock a dot early rather than
+scatter. Aim a fix at a named rung and score it against that table; do not move
+an accessibility edge wholesale, since mooneye `lcdon_timing-GS` and the
+gambatte `vram_m3` / `oam_access` rows pin the same edges from the other side.
 
 That gate has already paid once: it showed the DMG-family
 `hblank_ly_scx_timing_variant_nops` legs were chaseable, which led to measuring
