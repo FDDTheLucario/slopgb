@@ -199,6 +199,22 @@ two; the other 16 are genuine geometry misses. It also re-prioritises them —
 geometry core, while `scx_0360c0/scx_during_m3_ds_2` is the reverse (160 raw,
 11516 rank), i.e. our shade STRUCTURE differs there, not just a few pixels.
 
+### The obj-size-change rows are NOT the fetch-time size view (2026-08-06)
+
+`mealybug/m3_lcdc_obj_size_change` [Cgb] (55 px) and
+`m3_lcdc_obj_size_change_scx` [Cgb]/[Dmg] (140/70 px) miss in two bands —
+y 2-7 and y 136-141 for the plain row. The ROM toggles LCDC.2 mid-line and our
+three sprites (X = 8/24/40) fetch at dots 97/123/150, where the LIVE `eff.lcdc`
+and the deferred `eff.render_lcdc` genuinely disagree (`87` vs `83` at dot 150),
+so reading the size from the deferred fetch-grid view — as the map/data bits do
+— looks like the obvious fix.
+
+It is not: taking `tall` from `render_lcdc`, either unconditionally or
+CGB-only, scores **0/0**. The size view at fetch time does not decide these
+rows. Look instead at the OAM-scan-time height (selection uses the value at
+dot 80) or at the tile-index bit-0 masking, both of which the ROM also
+perturbs.
+
 ### DMG-compat OBJ palettes take the DMG commit anchor (2026-08-06, +1/−0)
 
 A CGB running a DMG-flagged cart renders through FF47-49, which the palette
