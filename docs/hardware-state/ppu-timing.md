@@ -367,21 +367,44 @@ then reads at the next line's `cfl=0`. Note CGB-C takes the EARLY release —
 `display.c:2124` is `oam_read_blocked = model >= GB_MODEL_CGB_D`, false at our
 revision — so CGB-C opens one cycle before CGB-E does.
 
-**Its `cfl` origin is our `dot` + 8**: its `cfl=256` release is our dot 248 and
-its next-line `cfl=0` lock is our dot 448, both measured above. Under that
-mapping our two boundaries already AGREE with SameBoy, so neither is the
-defect. Two A/Bs confirm the open windows are load-bearing and innocent here:
+That release is not a constant: on line 1 it spreads `cfl=256..263`, i.e.
+**`256 + (SCX & 7)`** — the ladder walks SCX to move the mode-3 end, which is
+what made our own dot-248 result look unstable (4 repeats open then 4 blocked;
+it is SCX rising, NOT state pollution).
+
+Our side is linear in SCX too. Instrumenting the gate shows every other input
+constant at that instant (`nspr=0`, no window, `wy=false`, `rphd=504`) with
+`projected_flip_dot` running `254 + SCX`, so `eager_access_released`'s
+`read_pos_hd >= 2*flip + 6` is a release at read position `257 + SCX`. Same
+slope as SameBoy's; only a CONSTANT offset separates the two, and that constant
+is exactly what the gambatte `_1`/`_2` pairs pin — forcing the release to
+`dot >= 248 + (SCX & 7)` (the naive reading of the `cfl` numbers) is 0 fixed,
+**56 broken** across `oam_access` and `vram_m3`.
+
+An earlier note here claimed the `cfl` origin is our `dot + 8` and that both
+boundaries therefore already agree. That was inferred from the SCX=0 case
+alone and is NOT independently established — the SCX sweep above shows the two
+sides share a slope, not a verified origin. Treat the offset as unknown until
+it is measured against a ROM that pins it.
+
+Two A/Bs confirm the open windows are load-bearing and innocent here:
 
 | probe | score |
 |---|---|
 | drop `eager_access_released` on CGB (hold to `line_render_done`) | 0 fixed, 1 broken (`oam_access/postread_scx3_2`) |
 | drop `cgb_linestart_oam_open` | 0 fixed, 3 broken (`oam_access/preread{,_ds,_ds_lcdoffset1,_lcdoffset1}_1`) |
 
-So the age ladder's failing instant is somewhere else — the remaining suspects
-are the mode-2 scan interior, line 0 / the post-enable FSM, and the OAM-DMA
-conflict path, none of which these two boundaries cover. Trace the ladder's own
-bad rungs (`SLOPGB_OAMHL=1`) against `SBOAM` line by line rather than probing
-boundaries by hand.
+Three further A/Bs came back empty: a CGB mode-2 write pre-lock at dot 448 is
+0/-2 (`oam_access/prewrite{,_ds}_1` want the write to land, so our write tail is
+right and SameBoy's `cfl=0` maps later for writes), and relaxing the eager
+gate's `n_sprites == 0` for OBJ-disabled lines is 0/0.
+
+So the mode-3-end release tracks SCX with the correct slope and its offset is
+pinned; the age ladder's failing instant is somewhere else. Remaining suspects:
+the mode-2 scan interior, line 0 / the post-enable FSM, and the OAM-DMA
+conflict path. The tools to settle it are in place — `SLOPGB_OAMHL=1` for our
+per-access grid, `SBOAM` + `--cgb-c` for SameBoy's — so the next step is to
+align the two traces rung by rung instead of probing boundaries by hand.
 
 ## Frame-0 m2 pulse count — one edge where hardware has 144
 
