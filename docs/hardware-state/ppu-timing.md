@@ -323,6 +323,29 @@ Both port `lycRegChangeTriggersStatIrq` (held-compare target tables, m0/m1 block
 - **Parked:** wilbertpol `ly_lyc_0-C` / `ly_new_frame-C` — cross-suite LY=153-window contradiction with age (see the wilbertpol baseline note).
 - **Parked:** `hblank_ly_scx_timing-C` — needs the CGB mode-0 flip +1 dot in `render/mode0.rs`.
 
+## The ly00 mode-2 STAT byte — early at offset 0, late at offset 3
+
+The `lycEnable/lycwirq_trigger_ly00_stat50*` and
+`miscmstatirq/lycstatwirq_trigger_ly00_10_50*` families read STAT right across
+the line-0 mode-2 rise: the `_1` rows want `E0` (still mode 0) and the `_2`
+rows want `E2` (mode 2). Almost all pass; four do not, and they fail in BOTH
+directions, which is the useful part:
+
+| row | want | ours |
+|---|---|---|
+| `miscmstatirq/…_10_50_1` [Cgb] (base, SS) | `E0` | `E2` — we rise one M-cycle EARLY |
+| `miscmstatirq/…_10_50_lcdoffset3_2` | `E2` | `E0` — LATE |
+| `miscmstatirq/…_10_50_ds_lcdoffset1_2` | `E2` | `E0` — LATE |
+| `lycEnable/…_stat50_ds_lcdoffset1_2` | `E2` | `E0` — LATE |
+
+So our rise sits ~1 step early at lcd offset 0 and ~1 step late at offset 3 — a
+two-step skew developing across the offset range, in single AND double speed,
+with every `[Dmg]` leg passing. A single constant cannot produce that: the
+defect is in how the LCD-enable offset scales the mode-2 rise relative to the
+read frame (`lcd_shift_dots` vs `read_pos_hd`), not in the rise position
+itself. Any fix has to move the two together — the offset-0 and offset-3 rows
+pin opposite ends and will trade against each other otherwise.
+
 ## The age OAM access cluster — one sample position per period
 
 All six age `oam/` rows are chaseable (SameBoy passes every one, at CGB-C and
