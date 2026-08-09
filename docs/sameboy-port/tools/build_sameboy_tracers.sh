@@ -48,7 +48,8 @@ if [ -x "$TESTER" ] && grep -q 'SBMODE ly=%d cfl=%d dc=%d vis=%d fp=' "$DIR/Core
    && grep -q SBWYCHK "$DIR/Core/display.c" 2>/dev/null \
    && grep -q SBWINACT "$DIR/Core/display.c" 2>/dev/null \
    && grep -q SBWWY "$DIR/Core/memory.c" 2>/dev/null \
-   && grep -q cgb_c "$DIR/Tester/main.c" 2>/dev/null; then
+   && grep -q cgb_c "$DIR/Tester/main.c" 2>/dev/null \
+   && grep -q SBOAM "$DIR/Core/display.c" 2>/dev/null; then
   echo "tester already built + patched: $TESTER"; exit 0
 fi
 
@@ -596,6 +597,30 @@ if "cgb_c" not in t:
     open(p,"w").write(t)
     print("patched Tester/main.c (--cgb-c)")
 PYC
+
+# SBOAM: the OAM read/write block flags at the mode-2 entry and mode-3 end,
+# with cycles_for_line -- the boundary pair the age oam ladders walk. Its `cfl`
+# origin is slopgb `dot` + 8 (see docs/hardware-state/ppu-timing.md).
+python3 - "$DIR" <<'PYO'
+import sys
+d=sys.argv[1]
+p=d+"/Core/display.c"
+t=open(p).read()
+if "SBOAM" not in t:
+    T=('{ static int trc=-1; if(trc<0) trc=getenv("SB_TRACE")?1:0; '
+       'if(trc) fprintf(stderr,"SBOAM %s ly=%d cfl=%d dc=%d rb=%d wb=%d\\n", '
+       '"TAG", gb->current_line, gb->cycles_for_line, gb->display_cycles, '
+       'gb->oam_read_blocked, gb->oam_write_blocked); }')
+    for tag, anchor in (
+        ("m2entry_wb", "            gb->accessed_oam_row = 0;"),
+        ("m2entry_rb", "            gb->ly_for_comparison = gb->current_line? -1 : 0;"),
+        ("m3end_ss",   "                gb->vram_read_blocked = false;"),
+    ):
+        assert anchor in t, "SBOAM anchor missing: " + tag
+        t=t.replace(anchor, T.replace("TAG", tag) + "\n" + anchor, 1)
+    open(p,"w").write(t)
+    print("patched display.c (SBOAM)")
+PYO
 
 cd "$DIR" && make tester -j"$(nproc)"
 echo "BUILT: $TESTER"

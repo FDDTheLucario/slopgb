@@ -360,10 +360,28 @@ at a time; our CGB grid comes out as:
 | mode-3 end (lines 143, 0) | `240=FF 244=FF` then `248=00 252=00 256=00` — we open at dot **248** |
 | line end / next mode-2 (line 0) | `440=00 444=00` then `448=FF 452=FF`, `1:0=FF` — we lock at dot **448** |
 
-So the two candidate off-by-one-M-cycle boundaries are an unblock at 248 that
-hardware may hold to 252, and a lock at 448 that hardware may bring to 444.
-Which one is wrong is the next measurement: read the same instants out of
-SameBoy at CGB-C, then A/B only that boundary.
+SameBoy at CGB-C was then traced at the same two boundaries (`SBOAM` in
+`display.c`, on the mode-2 entry and mode-3 end blocks): for every line >= 1 it
+releases OAM reads at `cfl=256` and writes at `cfl=257`, and re-blocks writes
+then reads at the next line's `cfl=0`. Note CGB-C takes the EARLY release —
+`display.c:2124` is `oam_read_blocked = model >= GB_MODEL_CGB_D`, false at our
+revision — so CGB-C opens one cycle before CGB-E does.
+
+**Its `cfl` origin is our `dot` + 8**: its `cfl=256` release is our dot 248 and
+its next-line `cfl=0` lock is our dot 448, both measured above. Under that
+mapping our two boundaries already AGREE with SameBoy, so neither is the
+defect. Two A/Bs confirm the open windows are load-bearing and innocent here:
+
+| probe | score |
+|---|---|
+| drop `eager_access_released` on CGB (hold to `line_render_done`) | 0 fixed, 1 broken (`oam_access/postread_scx3_2`) |
+| drop `cgb_linestart_oam_open` | 0 fixed, 3 broken (`oam_access/preread{,_ds,_ds_lcdoffset1,_lcdoffset1}_1`) |
+
+So the age ladder's failing instant is somewhere else — the remaining suspects
+are the mode-2 scan interior, line 0 / the post-enable FSM, and the OAM-DMA
+conflict path, none of which these two boundaries cover. Trace the ladder's own
+bad rungs (`SLOPGB_OAMHL=1`) against `SBOAM` line by line rather than probing
+boundaries by hand.
 
 ## Frame-0 m2 pulse count — one edge where hardware has 144
 
