@@ -69,6 +69,7 @@ This file is a lean index; implementation-state narratives live in dedicated dir
 | [`docs/ui-state/`](docs/ui-state/README.md) | **frontend / bgb-UI** per-area state (menus, debugger, options, viewers, save-states + link, startup + boot, layout) |
 | [`docs/bgb-reference/`](docs/bgb-reference/README.md) | real bgb screenshots + capture rig — **never invent bgb's UI, capture it** |
 | [`docs/msu1-plugin-plan.md`](docs/msu1-plugin-plan.md) | MSU-1 streaming-audio coprocessor plugin (`msu1.wasm` from the plugins dir), driven the real-hardware way — SNES `$2000-$2007` via the game's DATA_SND-uploaded resident 65C816 handler (the SGB bridge); `--msu1` selects the `.pcm` pack dir (defaults to the ROM dir), requires an SGB model + the resident-handler/polled-mailbox pattern |
+| [`docs/headless-plan.md`](docs/headless-plan.md) | **Plan, not built.** `--headless <script.slp>`: a non-interactive scripted run for verifying a game-side change in CI (boot, drive, assert on memory, exit code). The language is `slopscript` (`crates/slopscript`, dep-free, Lua-inspired but not Lua) |
 | [`docs/game-accuracy-targets.md`](docs/game-accuracy-targets.md) | per-game accuracy targets + ROM checksums/hashes for the commercial titles used as real-world checks |
 | `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt` header | floor-class index (A–C, E–H + lift conditions; class D was lifted) — read before touching baselined behavior |
 
