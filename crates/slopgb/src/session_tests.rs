@@ -302,6 +302,50 @@ fn wrong_size_sav_is_rejected_and_raises_a_load_warning() {
 }
 
 #[test]
+fn load_rom_then_restore_battery_equals_load() {
+    // `load` is `load_rom` + `restore_battery` composed: `load_rom` alone must
+    // NOT pull in the `.sav` (a headless control run would otherwise silently
+    // inherit a previous run's output), and the two composed must match `load`
+    // exactly.
+    let dir = scratch("load-rom-split");
+    let path = dir.join("game.gb");
+    fs::write(&path, battery_rom()).unwrap();
+    let sav = vec![0x42u8; 0x2000];
+    fs::write(path.with_extension("sav"), &sav).unwrap();
+
+    let mut bare =
+        Session::load_rom(&path, ModelChoice::Dmg, &BootSpec::NONE, None).expect("load_rom");
+    assert_ne!(
+        bare.gb.save_data().unwrap(),
+        sav,
+        "load_rom must not restore the .sav"
+    );
+    assert!(
+        bare.last_saved.is_none(),
+        "load_rom leaves last_saved unset"
+    );
+    assert!(
+        bare.load_warning.is_none(),
+        "load_rom leaves load_warning unset"
+    );
+
+    bare.restore_battery();
+    assert_eq!(
+        bare.gb.save_data().unwrap(),
+        sav,
+        "restore_battery pulls in the .sav"
+    );
+
+    let whole = Session::load(&path, ModelChoice::Dmg, &BootSpec::NONE, None).expect("load");
+    assert_eq!(
+        bare.gb.save_data(),
+        whole.gb.save_data(),
+        "load_rom + restore_battery must equal load"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn flush_save_writes_once_then_dedups_until_ram_changes() {
     let dir = scratch("flush-dedup");
     let path = dir.join("game.gb");

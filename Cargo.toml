@@ -16,6 +16,7 @@ members = [
     "crates/slopgb-spc700-plugin",
     "crates/slopgb-w65c816",
     "crates/slopgb-w65c816-plugin",
+    "crates/slopscript",
     "xtask",
 ]
 

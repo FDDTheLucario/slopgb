@@ -371,6 +371,8 @@ mod tests {
             plugins_dir: None,
             ram_init: None,
             plugin_flags: Vec::new(),
+            headless: None,
+            argv: Vec::new(),
         };
         let mut app = App::new(
             opts,

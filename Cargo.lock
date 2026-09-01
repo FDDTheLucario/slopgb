@@ -1524,6 +1524,7 @@ dependencies = [
  "slopgb-plugin-host",
  "slopgb-sf2",
  "slopgb-sgb-coprocessor",
+ "slopscript",
  "softbuffer",
  "winit",
 ]
@@ -1613,6 +1614,10 @@ dependencies = [
  "slopgb-plugin-api",
  "slopgb-w65c816",
 ]
+
+[[package]]
+name = "slopscript"
+version = "0.1.0"
 
 [[package]]
 name = "smallvec"

@@ -37,6 +37,7 @@ mod clipboard;
 mod dbg;
 mod file_picker;
 mod gamepad;
+mod headless;
 mod input;
 mod keymap;
 mod link;
@@ -164,6 +165,21 @@ fn main() {
         ),
     };
     session.set_sgb_bios(sgb_bios.clone());
+    // `--headless`: run the slopscript case non-interactively and exit — no
+    // window is ever created, no `App` is ever built. `winit` stays linked
+    // but never initialised on this path: the CLI is fully parsed (and the
+    // script run to completion) before any `EventLoop` exists.
+    if let Some(script) = &opts.headless {
+        let machine = headless::Machine {
+            session,
+            syms: symbols::SymbolTable::default(),
+            boot_rom: boot_rom.clone(),
+            sgb_bios: sgb_bios.clone(),
+            plugins_dir: plugins_dir.clone(),
+            ram_init,
+        };
+        process::exit(headless::run(machine, script, opts.argv.clone(), &registry));
+    }
     // The plugins dir + registry context (and the effective `sf2`/`msu1` plugin
     // flag values they gate) are applied in `App::new`, once `settings.plugins.dir`
     // reconciles the CLI/env/persisted dir — see `App::new`.

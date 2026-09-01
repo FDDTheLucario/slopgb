@@ -9,7 +9,8 @@ Rust→wasm plugins) + `crates/slopgb-plugin-host` (the wasmi runtime — the on
 `wasmi` is a dep, isolated so core stays zero-dep and the frontend keeps its lean
 dep set). Support crates: `slopfp` (dep-free file-picker state machine),
 `slopgb-sgb-coprocessor` (the SNES-side SGB machine the frontend drives),
-`slopgb-sf2` (dep-free SF2/BRR codec for the N-SPC sample bank), the
+`slopgb-sf2` (dep-free SF2/BRR codec for the N-SPC sample bank), `slopscript`
+(dep-free scripting language behind `--headless`), the
 clean-room chip cores `slopgb-snes-apu` (SPC700 + S-DSP) / `slopgb-w65c816` /
 `slopgb-snes-ppu` + their wasm wrappers
 `slopgb-{spc700,w65c816,snes-ppu,msu1,sf2}-plugin` (built by
@@ -69,7 +70,8 @@ This file is a lean index; implementation-state narratives live in dedicated dir
 | [`docs/ui-state/`](docs/ui-state/README.md) | **frontend / bgb-UI** per-area state (menus, debugger, options, viewers, save-states + link, startup + boot, layout) |
 | [`docs/bgb-reference/`](docs/bgb-reference/README.md) | real bgb screenshots + capture rig — **never invent bgb's UI, capture it** |
 | [`docs/msu1-plugin-plan.md`](docs/msu1-plugin-plan.md) | MSU-1 streaming-audio coprocessor plugin (`msu1.wasm` from the plugins dir), driven the real-hardware way — SNES `$2000-$2007` via the game's DATA_SND-uploaded resident 65C816 handler (the SGB bridge); `--msu1` selects the `.pcm` pack dir (defaults to the ROM dir), requires an SGB model + the resident-handler/polled-mailbox pattern |
-| [`docs/headless-plan.md`](docs/headless-plan.md) | **Plan, not built.** `--headless <script.slp>`: a non-interactive scripted run for verifying a game-side change in CI (boot, drive, assert on memory, exit code). The language is `slopscript` (`crates/slopscript`, dep-free, Lua-inspired but not Lua) |
+| [`docs/headless-plan.md`](docs/headless-plan.md) | **Decision record** for `--headless <script.slp>` + `slopscript` (built — see [`docs/ui-state/headless.md`](docs/ui-state/headless.md) for the built state): why a new dep-free language over wasm plugins / embedded Lua / a declarative timeline (`## Rejected`), and the language's deliberate ceiling (no maps/closures/modules) |
+| [`docs/ui-state/headless.md`](docs/ui-state/headless.md) | **frontend** `--headless` + `slopscript` built state: CLI surface, exit codes, the `gb:`/global builtin table, `within` budget semantics, golden-safe position, known limitations |
 | [`docs/game-accuracy-targets.md`](docs/game-accuracy-targets.md) | per-game accuracy targets + ROM checksums/hashes for the commercial titles used as real-world checks |
 | `crates/slopgb-core/tests/gbtr/baselines/gambatte.txt` header | floor-class index (A–C, E–H + lift conditions; class D was lifted) — read before touching baselined behavior |
 

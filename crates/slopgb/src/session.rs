@@ -158,11 +158,16 @@ impl Session {
         }
     }
 
-    /// Load a ROM, pick its model (CLI override beats header auto-detect),
-    /// and restore `<rom>.sav` if present. `boot` selects the boot ROM to
-    /// execute from power-on for the resolved model (Options paths over
-    /// `--boot`); none/none-matching starts post-boot.
-    pub(crate) fn load(
+    /// Load a ROM and pick its model (CLI override beats header auto-detect),
+    /// but do **not** restore `<rom>.sav` — `sav_path` is set (so a later
+    /// `flush_save`/`reset` still writes to the right file) with `last_saved`
+    /// and `load_warning` unset. Split out from [`load`](Self::load) so a
+    /// headless run can drive a ROM without inheriting a previous run's
+    /// battery RAM (a control run must start from the machine's own power-on
+    /// state, not a `.sav` left over from a prior run). `boot` selects the
+    /// boot ROM to execute from power-on for the resolved model (Options
+    /// paths over `--boot`); none/none-matching starts post-boot.
+    pub(crate) fn load_rom(
         path: &Path,
         choice: ModelChoice,
         boot: &BootSpec,
@@ -171,7 +176,7 @@ impl Session {
         let rom_bytes =
             fs::read(path).map_err(|e| format!("cannot read ROM '{}': {e}", path.display()))?;
         let (model, sgb_border) = choice.resolve(&rom_bytes);
-        let mut gb = build_gb(
+        let gb = build_gb(
             model,
             rom_bytes.clone(),
             boot.resolve(model).as_deref(),
@@ -180,31 +185,6 @@ impl Session {
         )
         .map_err(|e| format!("cannot load ROM '{}': {e}", path.display()))?;
         let sav_path = path.with_extension("sav");
-        let mut last_saved = None;
-        let mut load_warning = None;
-        match fs::read(&sav_path) {
-            Ok(data) => {
-                if gb.load_save_data(&data) {
-                    last_saved = Some(data);
-                } else {
-                    // Rejected save: the machine boots fresh and the next save
-                    // will overwrite this file — the user must be told, not just
-                    // the console, so back it up first if it matters.
-                    let msg = format!(
-                        "Ignored '{}' (wrong size or cart has no battery). It will be overwritten when the game next saves — back it up first if you need it.",
-                        sav_path.display()
-                    );
-                    eprintln!("slopgb: {msg}");
-                    load_warning = Some(msg);
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => {
-                let msg = format!("Cannot read save file '{}': {e}", sav_path.display());
-                eprintln!("slopgb: {msg}");
-                load_warning = Some(msg);
-            }
-        }
         let title = path
             .file_stem()
             .map_or_else(|| "rom".to_owned(), |s| s.to_string_lossy().into_owned());
@@ -214,7 +194,7 @@ impl Session {
             model,
             title,
             sav_path,
-            last_saved,
+            last_saved: None,
             rtc_vba_export: false,
             rtc_bgb_legacy: false,
             next_autosave: AUTOSAVE_CYCLES,
@@ -230,8 +210,50 @@ impl Session {
             plugin_flags_warned: false,
             sgb_border,
             ram_init,
-            load_warning,
+            load_warning: None,
         })
+    }
+
+    /// Restore `<rom>.sav` (as set by [`load_rom`](Self::load_rom)) into the
+    /// running machine, if present.
+    pub(crate) fn restore_battery(&mut self) {
+        match fs::read(&self.sav_path) {
+            Ok(data) => {
+                if self.gb.load_save_data(&data) {
+                    self.last_saved = Some(data);
+                } else {
+                    // Rejected save: the machine boots fresh and the next save
+                    // will overwrite this file — the user must be told, not just
+                    // the console, so back it up first if it matters.
+                    let msg = format!(
+                        "Ignored '{}' (wrong size or cart has no battery). It will be overwritten when the game next saves — back it up first if you need it.",
+                        self.sav_path.display()
+                    );
+                    eprintln!("slopgb: {msg}");
+                    self.load_warning = Some(msg);
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                let msg = format!("Cannot read save file '{}': {e}", self.sav_path.display());
+                eprintln!("slopgb: {msg}");
+                self.load_warning = Some(msg);
+            }
+        }
+    }
+
+    /// Load a ROM, pick its model, and restore `<rom>.sav` if present — see
+    /// [`load_rom`](Self::load_rom) and [`restore_battery`](Self::restore_battery),
+    /// which this composes.
+    pub(crate) fn load(
+        path: &Path,
+        choice: ModelChoice,
+        boot: &BootSpec,
+        ram_init: Option<RamInit>,
+    ) -> Result<Self, String> {
+        let mut s = Self::load_rom(path, choice, boot, ram_init)?;
+        s.restore_battery();
+        Ok(s)
     }
 
     /// Update the power-on RAM init used by the next `reset`/`set_model` rebuild

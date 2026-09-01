@@ -1,9 +1,13 @@
 # Headless mode + slopscript
 
-**Status: design settled, nothing built.** This is the plan document. When it
-lands, the per-area state moves to `ui-state/headless.md` (CLAUDE.md's rule:
-dedicated dirs hold *built* subsystems) and this file records what was decided
-and why.
+**Status: built.** Per-area built state (CLI surface, exit codes, the
+`gb:`/global builtin table as implemented, `within` semantics, golden-safe
+position, test inventory, known limitations) lives in
+[`docs/ui-state/headless.md`](ui-state/headless.md) (CLAUDE.md's rule:
+dedicated dirs hold *built* subsystems). **This file is now the decision
+record**: why `--headless` + `slopscript` over the rejected alternatives
+(`## Rejected`), the language's deliberate ceiling, and the glossary
+(`## Glossary`) — read it before revisiting any of those choices.
 
 A non-interactive `slopgb --headless <script.slp>` that boots a ROM, drives it
 from a script, asserts against memory, and exits with a meaningful code — so a
@@ -253,8 +257,12 @@ broken field, `argv`, and explicit battery I/O on both ends.
 
   Nothing else needs touching: `autosave`, `flush_save` and `capture_rewind` are
   all caller-driven from `app_handler.rs` / `main.rs` / `app_run.rs`, and
-  headless never constructs an `App`. `save_battery(path)` needs no split —
-  `save_image()` + `write_atomic()` already take an explicit path.
+  headless never constructs an `App`. `gb:save_battery(path)` does need its own
+  path, not `Session::save_image()`: that helper stamps a VBA-footer RTC block
+  with the host wall clock for the interactive path, which would make a
+  headless run's saved output non-reproducible — `gb:save_battery` writes
+  `GameBoy::save_data()`'s canonical timestamp-free image via `write_atomic`
+  instead.
 
 ## Golden-safe
 

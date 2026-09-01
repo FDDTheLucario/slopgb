@@ -1,0 +1,30 @@
+-- Usage: slopgb --headless case.slp <rom.gbc> <in.sav> <out.sav>
+
+gb:load_rom(argv[1], CGB)
+gb:load_battery(argv[2])
+gb:set_rtc(1767225600)   -- pin the clock: a host-clock-dependent run is flaky by design
+gb:load_symbols("game.sym")
+
+-- Drive the title screen until the game reports it has processed the save.
+within 6000 {
+  repeat {
+    gb:tap(BTN_START, 3); gb:wait_frames(17)
+    gb:tap(BTN_A, 3);     gb:wait_frames(17)
+  } until gb:read("sSaveVersion") == 2
+} else {
+  check(false, "save was never processed")
+}
+
+-- Through the confirmation prompt, then let the map load.
+for i = 1, 8 {
+  gb:tap(BTN_A, 3); gb:wait_frames(37)
+}
+gb:wait_frames(600)
+
+let table = gb:read("wResultTable", 4)
+print("table=" .. hex(table) .. " state=" .. gb:read("wGameState"))
+
+check(table == [27, 2, 10, 4], "result table")
+check(gb:read("wGameState") == 0, "game state after load")
+
+gb:save_battery(argv[3])

@@ -17,6 +17,8 @@ fn blank_app() -> App {
         plugins_dir: None,
         ram_init: None,
         plugin_flags: Vec::new(),
+        headless: None,
+        argv: Vec::new(),
     };
     App::new(
         opts,

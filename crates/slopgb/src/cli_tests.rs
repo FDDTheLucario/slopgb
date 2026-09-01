@@ -230,6 +230,79 @@ fn parse_rejects_bad_input() {
 }
 
 #[test]
+fn parse_headless_collects_trailing_args_and_clears_rom() {
+    let opts = parse_run(&["--headless", "case.slp", "game.gbc", "in.sav", "out.sav"]).unwrap();
+    assert_eq!(opts.headless, Some(PathBuf::from("case.slp")));
+    assert_eq!(
+        opts.argv,
+        vec![
+            "game.gbc".to_string(),
+            "in.sav".to_string(),
+            "out.sav".to_string()
+        ]
+    );
+    assert_eq!(opts.rom, None);
+}
+
+#[test]
+fn parse_headless_after_bare_args_matches_headless_before() {
+    // `--headless` may appear anywhere: the positional/argv decision is made
+    // once, at the end of the parse loop.
+    let opts = parse_run(&["game.gbc", "in.sav", "out.sav", "--headless", "case.slp"]).unwrap();
+    assert_eq!(opts.headless, Some(PathBuf::from("case.slp")));
+    assert_eq!(
+        opts.argv,
+        vec![
+            "game.gbc".to_string(),
+            "in.sav".to_string(),
+            "out.sav".to_string()
+        ]
+    );
+    assert_eq!(opts.rom, None);
+}
+
+#[test]
+fn parse_headless_dash_reads_script_from_stdin() {
+    let opts = parse_run(&["--headless", "-"]).unwrap();
+    assert_eq!(opts.headless, Some(PathBuf::from("-")));
+    assert!(opts.argv.is_empty());
+}
+
+#[test]
+fn parse_headless_missing_value_is_an_error() {
+    assert_eq!(
+        parse(&["--headless"]).unwrap_err(),
+        "--headless requires a script path"
+    );
+}
+
+#[test]
+fn parse_without_headless_keeps_today_s_rom_and_extra_argument_behaviour() {
+    // One bare arg is still the ROM.
+    assert_eq!(
+        parse_run(&["game.gb"]).unwrap().rom,
+        Some(PathBuf::from("game.gb"))
+    );
+    // A second bare arg is still the same error, byte-identical text.
+    assert_eq!(
+        parse(&["a.gb", "b.gb"]).unwrap_err(),
+        "unexpected extra argument 'b.gb'"
+    );
+}
+
+#[test]
+fn parse_argv_and_headless_default_empty_and_none() {
+    let opts = parse_run(&["game.gb"]).unwrap();
+    assert_eq!(opts.headless, None);
+    assert!(opts.argv.is_empty());
+}
+
+#[test]
+fn usage_documents_headless() {
+    assert!(usage(&[]).contains("--headless"));
+}
+
+#[test]
 fn parse_model_accepts_every_variant() {
     for (s, m) in [
         ("dmg", Model::Dmg),

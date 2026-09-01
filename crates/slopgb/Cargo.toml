@@ -13,6 +13,7 @@ slopfp = { path = "../slopfp" }
 slopgb-plugin-host = { path = "../slopgb-plugin-host" }
 slopgb-sgb-coprocessor = { path = "../slopgb-sgb-coprocessor" }
 slopgb-sf2 = { path = "../slopgb-sf2" }
+slopscript = { path = "../slopscript" }
 winit = "0.30"
 softbuffer = "0.4"
 cpal = "0.16"

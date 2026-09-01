@@ -21,7 +21,7 @@ const USAGE_HEAD: &str = "\
 slopgb — Game Boy / Game Boy Color emulator
 
 USAGE:
-    slopgb [rom.gb|.gbc] [OPTIONS]
+    slopgb [rom.gb|.gbc] [OPTIONS] | --headless <script.slp> [ARGS...]
 
 Launched without a ROM, slopgb opens to a blank LCD (like bgb); load a ROM
 later by dropping a file on the window or via the right-click Load ROM... menu.
@@ -47,6 +47,10 @@ OPTIONS:
                       manifests also contribute the flags listed below — each
                       exists only while its plugin is in the dir. See
                       docs/ui-state/plugin-api.md. Also via SLOPGB_PLUGINS_DIR
+    --headless <PATH> Run a slopscript (.slp) case non-interactively (no
+                      window); trailing arguments land in the script's argv.
+                      `-` reads the script from stdin. Exit 0 = every check
+                      held, 1 = a check/assert failed, 2 = a script or I/O error
 ";
 
 // No `"\` opening continuation here (unlike `USAGE_HEAD`): that continuation
@@ -178,6 +182,15 @@ pub(crate) struct Options {
     /// value (`Session::set_plugin_flags`); the frontend keeps no typed field.
     /// A flag with `arg == "none"` is recorded with an empty value.
     pub(crate) plugin_flags: Vec<(String, String)>,
+    /// The slopscript case to run non-interactively (`--headless <path>`).
+    /// `PathBuf::from("-")` means "read the script from stdin" — the runner
+    /// interprets that literal, `parse` just stores it. `None` = the normal
+    /// windowed run (default).
+    pub(crate) headless: Option<PathBuf>,
+    /// The bare trailing arguments handed to the script as `argv`, present
+    /// only when `--headless` was given (see the positional-handling note in
+    /// `parse`). Empty otherwise.
+    pub(crate) argv: Vec<String>,
 }
 
 /// What a successful argument parse asks the program to do. Printing the
@@ -198,7 +211,6 @@ impl Options {
         mut args: impl Iterator<Item = String>,
         declared: &[FlagContribution],
     ) -> Result<ParseOutcome, String> {
-        let mut rom = None;
         let mut model = None;
         let mut scale = 3u32;
         let mut mute = false;
@@ -208,6 +220,11 @@ impl Options {
         let mut plugins_dir = None;
         let mut ram_init = None;
         let mut plugin_flags = Vec::new();
+        let mut headless = None;
+        // Every bare argument, in order; what it means (a ROM path, or the
+        // headless script's argv) is decided once at the end, since
+        // `--headless` may appear before or after them.
+        let mut positional: Vec<String> = Vec::new();
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "-h" | "--help" => return Ok(ParseOutcome::Help),
@@ -230,6 +247,10 @@ impl Options {
                 "--plugins" => {
                     let v = args.next().ok_or("--plugins requires a directory")?;
                     plugins_dir = Some(PathBuf::from(v));
+                }
+                "--headless" => {
+                    let v = args.next().ok_or("--headless requires a script path")?;
+                    headless = Some(PathBuf::from(v));
                 }
                 "--model" => {
                     let v = args.next().ok_or("--model requires a value")?;
@@ -264,14 +285,23 @@ impl Options {
                         None => return Err(format!("unknown option '{s}'")),
                     }
                 }
-                _ => {
-                    if rom.is_some() {
-                        return Err(format!("unexpected extra argument '{arg}'"));
-                    }
-                    rom = Some(PathBuf::from(arg));
-                }
+                _ => positional.push(arg),
             }
         }
+        // A headless run: the script names its own ROM (via gb:load_rom), so
+        // every bare argument is the script's argv and there is no separate
+        // rom slot. Otherwise: unchanged from before --headless existed — the
+        // first bare argument is the ROM, a second is an error naming
+        // `positional[1]`, the second bare argument, exactly as the
+        // pre-`--headless` code named the second one it encountered.
+        let (rom, argv) = if headless.is_some() {
+            (None, positional)
+        } else {
+            if positional.len() > 1 {
+                return Err(format!("unexpected extra argument '{}'", positional[1]));
+            }
+            (positional.into_iter().next().map(PathBuf::from), Vec::new())
+        };
         // A missing ROM is no longer an error: slopgb boots to a blank LCD and
         // loads one later (bgb behaviour — the CLI execution dependency is gone).
         Ok(ParseOutcome::Run(Self {
@@ -285,6 +315,8 @@ impl Options {
             plugins_dir,
             ram_init,
             plugin_flags,
+            headless,
+            argv,
         }))
     }
 }
