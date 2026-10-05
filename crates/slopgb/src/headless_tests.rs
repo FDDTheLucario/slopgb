@@ -119,6 +119,33 @@ gb:save_battery(argv[2])
 }
 
 #[test]
+fn screenshot_writes_png_or_bmp_by_extension() {
+    let dir = scratch("shot");
+    let rom_path = dir.join("game.gb");
+    fs::write(&rom_path, rom_only()).unwrap();
+    let png = dir.join("s.png");
+    let bmp = dir.join("s.bmp");
+    let src =
+        "gb:load_rom(argv[1])\ngb:wait_frames(1)\ngb:screenshot(argv[2])\ngb:screenshot(argv[3])\n";
+    let argv = [&rom_path, &png, &bmp]
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    let registry = PluginRegistry::new();
+    let outcome = run_outcome(blank_machine(), src, argv, &registry);
+    assert_eq!(outcome, Outcome::Ok { checks: 0 });
+    assert!(fs::read(&png).unwrap().starts_with(b"\x89PNG"));
+    assert!(fs::read(&bmp).unwrap().starts_with(b"BM"));
+    let bad = format!(
+        "gb:load_rom(\"{}\")\ngb:screenshot(\"x.gif\")\n",
+        rom_path.display()
+    );
+    let outcome = run_outcome(blank_machine(), &bad, Vec::new(), &registry);
+    assert!(!matches!(outcome, Outcome::Ok { .. }));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn headless_does_not_auto_restore_the_rom_sav() {
     let dir = scratch("nosav");
     let rom_path = dir.join("game.gb");

@@ -2,13 +2,14 @@
 // Copyright (C) 2026 Richard Moch
 
 //! `gb:load_rom` / `gb:load_battery` / `gb:save_battery` / `gb:save_state` /
-//! `gb:load_state` / `gb:load_symbols` — every builtin that touches a file.
+//! `gb:load_state` / `gb:load_symbols` / `gb:screenshot` — every builtin that touches a file.
 
 use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
 use std::rc::Rc;
 
+use slopgb_core::{SCREEN_H, SCREEN_W};
 use slopgb_plugin_host::PluginRegistry;
 use slopscript::{Interp, Value};
 
@@ -36,6 +37,8 @@ pub(super) fn register<'a>(
     interp.register_builtin("gb:load_state", move |args| load_state(&m, args));
     let m = Rc::clone(mc);
     interp.register_builtin("gb:load_symbols", move |args| load_symbols(&m, args));
+    let m = Rc::clone(mc);
+    interp.register_builtin("gb:screenshot", move |args| screenshot(&m, args));
 }
 
 fn expect_path(args: &[Value]) -> Result<&str, String> {
@@ -119,5 +122,23 @@ fn load_symbols(mc: &Rc<RefCell<Machine>>, args: &[Value]) -> Result<Value, Stri
     let path = expect_path(args)?;
     let text = fs::read_to_string(path).map_err(|e| format!("cannot read '{path}': {e}"))?;
     mc.borrow_mut().syms = SymbolTable::parse(&text);
+    Ok(Value::Nil)
+}
+
+/// The bare 160×144 LCD (no SGB border), encoded by the path's extension:
+/// `.png` or `.bmp`, the same encoders as the interactive screenshot.
+fn screenshot(mc: &Rc<RefCell<Machine>>, args: &[Value]) -> Result<Value, String> {
+    let path = expect_path(args)?;
+    let data = {
+        let m = mc.borrow();
+        let frame = &m.session.gb.frame()[..];
+        match Path::new(path).extension().and_then(|e| e.to_str()) {
+            Some("png") => crate::mcp::png::encode(frame, SCREEN_W, SCREEN_H),
+            Some("bmp") => crate::screenshot::to_bmp(frame, SCREEN_W, SCREEN_H),
+            _ => return Err(format!("'{path}' must end in .png or .bmp")),
+        }
+    };
+    session::write_atomic(Path::new(path), &data)
+        .map_err(|e| format!("cannot write '{path}': {e}"))?;
     Ok(Value::Nil)
 }

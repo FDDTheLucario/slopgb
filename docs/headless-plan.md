@@ -136,7 +136,7 @@ better replaced by refusing to parse the program that forgot.
 | `gb:load_rom(p [, model])` | model is bound at construction, so it is an argument, not a setting |
 | `gb:load_battery(p)` `gb:load_state(p)` | explicit, never inferred |
 | `gb:set_rtc(epoch)` | sets **and pins** the clock; call it *after* `load_battery` |
-| `gb:save_battery(p)` `gb:save_state(p)` | the only ways a file is written |
+| `gb:save_battery(p)` `gb:save_state(p)` `gb:screenshot(p)` | the only ways a file is written; `screenshot` writes the bare LCD as `.png` or `.bmp` by extension |
 | `gb:load_symbols(p)` | bgb/rgbds `.sym` |
 | `gb:read(…)` | overloaded, see below |
 | `gb:press(b)` `gb:release(b)` `gb:tap(b, n)` | `b` is a constant: `BTN_A BTN_B BTN_START BTN_SELECT BTN_UP BTN_DOWN BTN_LEFT BTN_RIGHT` |

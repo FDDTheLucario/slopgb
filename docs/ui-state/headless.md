@@ -133,7 +133,7 @@ Registered by `crates/slopgb/src/headless.rs::build_interp`, one module each:
 | Module | Builtins | Notes |
 |---|---|---|
 | `consts.rs` | registers `BTN_A BTN_B BTN_START BTN_SELECT BTN_UP BTN_DOWN BTN_LEFT BTN_RIGHT` (tagged `0x100+n`), `A F B C D E H L AF BC DE HL SP PC` (tagged `0x200+n`), `AUTO DMG CGB SGB SGB2` (tagged `0x300+n`) | every constant is a tagged `Value::Int`, so a bare number can never be mistaken for one; a decode function names the expected set on a tag mismatch |
-| `io.rs` | `gb:load_rom(path [, MODEL])`, `gb:load_battery(path)`, `gb:save_battery(path)`, `gb:save_state(path)`, `gb:load_state(path)`, `gb:load_symbols(path)` | see below |
+| `io.rs` | `gb:load_rom(path [, MODEL])`, `gb:load_battery(path)`, `gb:save_battery(path)`, `gb:save_state(path)`, `gb:load_state(path)`, `gb:load_symbols(path)`, `gb:screenshot(path)` | see below |
 | `mem.rs` | `gb:read(...)`, `gb:poke(...)` | four overloaded shapes each, see below |
 | `input.rs` | `gb:press(BTN)`, `gb:release(BTN)`, `gb:tap(BTN, n)`, `gb:wait_frames(n)`, `gb:wait_cycles(n)` | `tap` presses, runs `n` frames, releases; the script supplies its own release gap after |
 | `regs.rs` | `gb:reg(R)`, `gb:set_reg(R, v)` | `R` an 8-bit half splices into its pair via `DebugReg::{Af,Bc,De,Hl}` (`DebugReg` only writes 16-bit pairs); `Sp`/`Pc` write directly |
@@ -169,6 +169,10 @@ never a panic. A wrong argument *type* (e.g. `gb:press("A")` instead of
   `Session::save_state_to`/`load_state_from` — the same on-disk savestate
   format as the game-window State submenu
   ([`save-states-and-link.md`](save-states-and-link.md)).
+- `gb:screenshot(path)` writes the bare 160×144 LCD (never the SGB border)
+  via `session::write_atomic`, encoded by extension: `.png`
+  (`mcp::png::encode`) or `.bmp` (`screenshot::to_bmp`); any other
+  extension is a runtime error. Read-only on the machine.
 - `gb:load_symbols(path)` parses a bgb/rgbds `.sym` via `SymbolTable::parse`
   into `Machine.syms`.
 
